@@ -1,26 +1,511 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/* ============================================================
+   MIDNIGHT SAPPHIRE & CHAMPAGNE GOLD — Design System
+   Tailwind v4 + shadcn/ui compatible
+   ============================================================ */
 
+/* ── Inline Tailwind Theme Mapping ────────────────────────── */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  /* Fonts */
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  /* Radius */
+  --radius-sm:   4px;
+  --radius-md:   6px;
+  --radius-lg:   8px;
+  --radius-xl:   12px;
+  --radius-2xl:  16px;
+
+  /* ── Semantic tokens wired to CSS custom properties ──── */
+  --color-background:           var(--background);
+  --color-foreground:           var(--foreground);
+  --color-card:                 var(--card);
+  --color-card-foreground:      var(--card-foreground);
+  --color-popover:              var(--popover);
+  --color-popover-foreground:   var(--popover-foreground);
+  --color-primary:              var(--primary);
+  --color-primary-foreground:   var(--primary-foreground);
+  --color-secondary:            var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted:                var(--muted);
+  --color-muted-foreground:     var(--muted-foreground);
+  --color-accent:               var(--accent);
+  --color-accent-foreground:    var(--accent-foreground);
+  --color-destructive:          var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border:               var(--border);
+  --color-border-strong:        var(--border-strong);
+  --color-input:                var(--input);
+  --color-ring:                 var(--ring);
+  --color-link:                 var(--link);
+  --color-link-hover:           var(--link-hover);
+
+  /* Gold tokens */
+  --color-gold:                 var(--gold);
+  --color-gold-text:            var(--gold-text);
+  --color-gold-hairline:        var(--gold-hairline);
+  --color-gold-glow:            var(--gold-glow);
+
+  /* Surface tokens */
+  --color-surface-0:            var(--surface-0);
+  --color-surface-1:            var(--surface-1);
+  --color-surface-2:            var(--surface-2);
+  --color-surface-3:            var(--surface-3);
+
+  /* Sidebar tokens */
+  --color-sidebar:                      var(--sidebar);
+  --color-sidebar-foreground:           var(--sidebar-foreground);
+  --color-sidebar-primary:              var(--sidebar-primary);
+  --color-sidebar-primary-foreground:   var(--sidebar-primary-foreground);
+  --color-sidebar-accent:               var(--sidebar-accent);
+  --color-sidebar-accent-foreground:    var(--sidebar-accent-foreground);
+  --color-sidebar-border:               var(--sidebar-border);
+  --color-sidebar-ring:                 var(--sidebar-ring);
+
+  /* Chart tokens */
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  /* Feedback */
+  --color-success:          var(--success);
+  --color-success-bg:       var(--success-bg);
+  --color-warning:          var(--warning);
+  --color-warning-bg:       var(--warning-bg);
+  --color-danger:           var(--danger);
+  --color-danger-bg:        var(--danger-bg);
+  --color-info:             var(--info);
+  --color-info-bg:          var(--info-bg);
+
+  /* Dashboard tokens */
+  --color-dashboard-bg:               var(--dashboard-bg);
+  --color-dashboard-sidebar-bg:       var(--dashboard-sidebar-bg);
+  --color-dashboard-table-header-bg:  var(--dashboard-table-header-bg);
+  --color-dashboard-row-hover:        var(--dashboard-row-hover);
+  --color-dashboard-row-selected:     var(--dashboard-row-selected);
+  --color-dashboard-elevated:         var(--dashboard-elevated);
+
+  /* Primitive palette exposed as Tailwind colors */
+  --color-midnight-950: #060B16;
+  --color-midnight-900: #0A1324;
+  --color-midnight-800: #101C33;
+  --color-midnight-700: #16294A;
+  --color-sapphire-600: #1F3B6B;
+  --color-sapphire-500: #2C5190;
+  --color-sapphire-400: #4A74B8;
+  --color-sapphire-300: #8FB0E8;
+  --color-sapphire-100: #DCE6F7;
+  --color-sapphire-50:  #EEF2F8;
+  --color-gold-700:     #7D5A22;
+  --color-gold-600:     #A07A38;
+  --color-gold-500:     #C09A4E;
+  --color-gold-400:     #D8B870;
+  --color-gold-300:     #E8D09A;
+  --color-gold-200:     #EBD6A4;
+  --color-gold-100:     #F6EDD6;
+  --color-pearl-50:     #FCFBF8;
+  --color-pearl-100:    #F8F6F1;
+  --color-pearl-200:    #F0ECE3;
+  --color-slate-900:    #141B2B;
+  --color-slate-700:    #3A4557;
+  --color-slate-600:    #566176;
+  --color-slate-400:    #98A2B3;
+  --color-slate-300:    #C5CCD9;
+  --color-slate-200:    #E1E6EE;
+  --color-slate-100:    #EDF0F5;
+  --color-slate-50:     #F4F6FA;
+  --color-navy-950:     #040A18;
+  --color-navy-900:     #070F24;
+  --color-navy-800:     #0E1F47;
+  --color-navy-600:     #1C3F85;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* ============================================================
+   LIGHT MODE — Midnight Sapphire & Champagne Gold
+   ============================================================ */
+:root {
+  color-scheme: light;
+
+  /* ── Core semantic tokens ───────────────────────────────── */
+  --background:             #F4F6FA;
+  --foreground:             #141B2B;
+  --card:                   #FFFFFF;
+  --card-foreground:        #141B2B;
+  --popover:                #FFFFFF;
+  --popover-foreground:     #141B2B;
+  --primary:                #101C33;
+  --primary-foreground:     #FFFFFF;
+  --secondary:              #EEF2F8;
+  --secondary-foreground:   #101C33;
+  --muted:                  #EDF0F5;
+  --muted-foreground:       #566176;
+  --accent:                 #F6EDD6;
+  --accent-foreground:      #0A1324;
+  --destructive:            #B42318;
+  --destructive-foreground: #FFFFFF;
+  --border:                 #E1E6EE;
+  --border-strong:          #C5CCD9;
+  --input:                  #C5CCD9;
+  --ring:                   #2C5190;
+  --link:                   #1F3B6B;
+  --link-hover:             #7D5A22;
+
+  /* ── Gold decorative tokens ────────────────────────────── */
+  --gold:                   #C09A4E;
+  --gold-text:              #7D5A22;
+  --gold-hairline:          linear-gradient(90deg, transparent, #D8B870, transparent);
+  --gold-glow:              rgba(216, 184, 112, 0.55);
+  --selection:              #E8D09A;
+  --disabled:               #EDF0F5;
+  --disabled-foreground:    #98A2B3;
+  --overlay:                rgba(6, 11, 22, 0.60);
+
+  /* ── Surfaces ───────────────────────────────────────────── */
+  --surface-0:              #F4F6FA;
+  --surface-1:              #FFFFFF;
+  --surface-2:              #FFFFFF;
+  --surface-3:              #F8F6F1;
+
+  /* ── Sidebar ────────────────────────────────────────────── */
+  --sidebar:                    #0A1324;
+  --sidebar-foreground:         #CFD8E8;
+  --sidebar-primary:            #C09A4E;
+  --sidebar-primary-foreground: #060B16;
+  --sidebar-accent:             #121F38;
+  --sidebar-accent-foreground:  #FFFFFF;
+  --sidebar-border:             #1C2C48;
+  --sidebar-ring:               #E8D09A;
+
+  /* ── Charts ─────────────────────────────────────────────── */
+  --chart-1: #2C5190;
+  --chart-2: #A07A38;
+  --chart-3: #0F5560;
+  --chart-4: #5B2D82;
+  --chart-5: #566176;
+
+  /* ── Feedback ───────────────────────────────────────────── */
+  --success:     #17623A;
+  --success-bg:  #E2F3E8;
+  --warning:     #6B4A0A;
+  --warning-bg:  #FBF1D9;
+  --danger:      #991B1B;
+  --danger-bg:   #FBE0E0;
+  --info:        #1B4B82;
+  --info-bg:     #E6EEF8;
+
+  /* ── Dashboard ──────────────────────────────────────────── */
+  --dashboard-bg:               #F4F6FA;
+  --dashboard-sidebar-bg:       #0A1324;
+  --dashboard-table-header-bg:  #EDF0F5;
+  --dashboard-row-hover:        #F6F8FB;
+  --dashboard-row-selected:     #EAF0FB;
+  --dashboard-elevated:         #FFFFFF;
+
+  /* ── Portfolio tokens ───────────────────────────────────── */
+  --portfolio-bg:               #F8F6F1;
+  --portfolio-section-alt:      #F0ECE3;
+  --portfolio-hero-fg:          #FFFFFF;
+  --portfolio-accent:           #D8B870;
+  --footer-bg:                  #070F24;
+
+  /* ── Gloss / elevation ──────────────────────────────────── */
+  --gloss-primary:    linear-gradient(180deg, #2A4A86 0%, #16294A 48%, #0F1C36 100%);
+  --gloss-gold:       linear-gradient(180deg, #EBD6A4 0%, #D8B870 40%, #B08A3E 100%);
+  --gloss-highlight:  rgba(255, 255, 255, 0.22);
+  --gloss-shine:      linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+  --card-sheen:       rgba(255, 255, 255, 0.95);
+  --nav-glass-bg:     rgba(248, 246, 241, 0.78);
+  --nav-glass-blur:   14px;
+  --shadow-color:     rgba(16, 28, 51, 0.13);
+  --shadow-sm:        0 1px 3px 0 rgba(16, 28, 51, 0.10);
+  --shadow-md:        0 4px 12px -2px rgba(16, 28, 51, 0.13);
+  --shadow-lg:        0 10px 24px -6px rgba(16, 28, 51, 0.15);
+  --glow-gold:        0 8px 20px -6px rgba(194, 154, 68, 0.55);
+  --glow-card-hover:  0 22px 44px -14px rgba(194, 154, 68, 0.4);
+
+  /* ── Radius (consumed by shadcn/ui) ─────────────────────── */
+  --radius: 0.5rem;
+}
+
+/* ============================================================
+   DARK MODE — Midnight Sapphire & Champagne Gold
+   ============================================================ */
+.dark {
+  color-scheme: dark;
+
+  /* ── Core semantic tokens ───────────────────────────────── */
+  --background:             #060C18;
+  --foreground:             #EAEEF5;
+  --card:                   #0E1829;
+  --card-foreground:        #EAEEF5;
+  --popover:                #0E1829;
+  --popover-foreground:     #EAEEF5;
+  --primary:                #E8D09A;
+  --primary-foreground:     #0A1324;
+  --secondary:              #16233A;
+  --secondary-foreground:   #EAEEF5;
+  --muted:                  #16233A;
+  --muted-foreground:       #9FAAC0;
+  --accent:                 #2B2618;
+  --accent-foreground:      #F6EDD6;
+  --destructive:            #F0877E;
+  --destructive-foreground: #0A1324;
+  --border:                 #1E2D47;
+  --border-strong:          #2F4263;
+  --input:                  #3D5176;
+  --ring:                   #D8B870;
+  --link:                   #8FB0E8;
+  --link-hover:             #E8D09A;
+
+  /* ── Gold decorative tokens ────────────────────────────── */
+  --gold:                   #D8B870;
+  --gold-text:              #E8D09A;
+  --gold-hairline:          linear-gradient(90deg, transparent, #D8B870, transparent);
+  --gold-glow:              rgba(216, 184, 112, 0.55);
+  --selection:              #5A4727;
+  --disabled:               #16233A;
+  --disabled-foreground:    #66738A;
+  --overlay:                rgba(2, 6, 14, 0.75);
+
+  /* ── Surfaces ───────────────────────────────────────────── */
+  --surface-0:              #060C18;
+  --surface-1:              #0E1829;
+  --surface-2:              #14213A;
+  --surface-3:              #1A2A47;
+
+  /* ── Sidebar ────────────────────────────────────────────── */
+  --sidebar:                    #050A14;
+  --sidebar-foreground:         #BCC8DC;
+  --sidebar-primary:            #E8D09A;
+  --sidebar-primary-foreground: #060B16;
+  --sidebar-accent:             #0F1A30;
+  --sidebar-accent-foreground:  #FFFFFF;
+  --sidebar-border:             #162540;
+  --sidebar-ring:               #E8D09A;
+
+  /* ── Charts ─────────────────────────────────────────────── */
+  --chart-1: #8FB0E8;
+  --chart-2: #E8D09A;
+  --chart-3: #7FD0DC;
+  --chart-4: #C9A5E6;
+  --chart-5: #9FAAC0;
+
+  /* ── Feedback ───────────────────────────────────────────── */
+  --success:     #6FCF97;
+  --success-bg:  #12301F;
+  --warning:     #F2C46D;
+  --warning-bg:  #3A2D0C;
+  --danger:      #F0877E;
+  --danger-bg:   #3D1717;
+  --info:        #8DB6EC;
+  --info-bg:     #13284A;
+
+  /* ── Dashboard ──────────────────────────────────────────── */
+  --dashboard-bg:               #060C18;
+  --dashboard-sidebar-bg:       #050A14;
+  --dashboard-table-header-bg:  #14213A;
+  --dashboard-row-hover:        #111D32;
+  --dashboard-row-selected:     #182C50;
+  --dashboard-elevated:         #14213A;
+
+  /* ── Portfolio tokens ───────────────────────────────────── */
+  --portfolio-bg:               #060C18;
+  --portfolio-section-alt:      #0A1424;
+  --portfolio-hero-fg:          #F4F1EA;
+  --portfolio-accent:           #E8D09A;
+  --footer-bg:                  #040A18;
+
+  /* ── Gloss / elevation ──────────────────────────────────── */
+  --gloss-primary:    linear-gradient(180deg, #EBD6A4 0%, #D8B870 45%, #B08A3E 100%);
+  --gloss-gold:       linear-gradient(180deg, #EBD6A4 0%, #D8B870 40%, #B08A3E 100%);
+  --gloss-highlight:  rgba(255, 255, 255, 0.35);
+  --gloss-shine:      linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+  --card-sheen:       rgba(255, 255, 255, 0.07);
+  --nav-glass-bg:     rgba(6, 12, 24, 0.72);
+  --nav-glass-blur:   14px;
+  --shadow-color:     rgba(0, 0, 0, 0.55);
+  --shadow-sm:        0 1px 3px 0 rgba(0, 0, 0, 0.35);
+  --shadow-md:        0 4px 12px -2px rgba(0, 0, 0, 0.45);
+  --shadow-lg:        0 10px 24px -6px rgba(0, 0, 0, 0.55);
+  --glow-gold:        0 8px 24px -6px rgba(230, 196, 119, 0.45);
+  --glow-card-hover:  0 22px 44px -14px rgba(230, 196, 119, 0.3);
+}
+
+/* ============================================================
+   BASE STYLES
+   ============================================================ */
+*,
+*::before,
+*::after {
+  border-color: var(--border);
+  outline-color: var(--ring);
+}
+
+::selection {
+  background-color: var(--selection);
+  color: var(--foreground);
+}
+
+html {
+  scroll-behavior: smooth;
+  text-size-adjust: 100%;
 }
 
 body {
-  background: var(--background);
+  background-color: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: "rlig" 1, "calt" 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100dvh;
+}
+
+/* ── Link defaults ──────────────────────────────────────────── */
+a {
+  color: var(--link);
+  transition: color 150ms ease;
+}
+a:hover {
+  color: var(--link-hover);
+}
+
+/* ── Focus ring (accessible) ────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-md);
+}
+
+/* ── Scrollbar (subtle, cross-browser) ──────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--surface-0);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+}
+
+/* ============================================================
+   UTILITY CLASSES — convenience helpers
+   ============================================================ */
+
+/* Nav glass blur (public header) */
+.glass-nav {
+  background: var(--nav-glass-bg);
+  backdrop-filter: blur(var(--nav-glass-blur));
+  -webkit-backdrop-filter: blur(var(--nav-glass-blur));
+}
+
+/* Gloss primary button surface */
+.gloss-primary {
+  background: var(--gloss-primary);
+  box-shadow: inset 0 1px 0 var(--gloss-highlight);
+}
+
+/* Gloss gold (CTA button) */
+.gloss-gold {
+  background: var(--gloss-gold);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), var(--glow-gold);
+}
+.gloss-gold:hover {
+  filter: brightness(1.06);
+}
+
+/* Gold hairline divider */
+.gold-hairline {
+  height: 1px;
+  background: var(--gold-hairline);
+  border: none;
+}
+
+/* Gold text */
+.gold-text {
+  color: var(--gold-text);
+}
+
+/* Glow effects */
+.shadow-glow-gold {
+  box-shadow: var(--glow-gold);
+}
+.shadow-glow-card {
+  box-shadow: var(--glow-card-hover);
+}
+
+/* Card sheen (inset top highlight) */
+.card-sheen {
+  box-shadow: inset 0 1px 0 var(--card-sheen);
+}
+
+/* Shine sweep on hover */
+.shine-sweep {
+  position: relative;
+  overflow: hidden;
+}
+.shine-sweep::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--gloss-shine);
+  transform: translateX(-100%);
+  transition: transform 400ms ease;
+  pointer-events: none;
+}
+.shine-sweep:hover::after {
+  transform: translateX(100%);
+}
+
+/* Dashboard table row selected gold marker */
+.row-selected-marker {
+  position: relative;
+}
+.row-selected-marker::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--gold);
+  border-radius: 0 2px 2px 0;
+}
+
+/* Portfolio hero background */
+.portfolio-hero-bg {
+  background:
+    radial-gradient(60% 90% at 88% 0%, rgba(192, 154, 78, 0.26), transparent 62%),
+    radial-gradient(50% 70% at 0% 100%, rgba(74, 116, 184, 0.22), transparent 60%),
+    linear-gradient(155deg, #16294A 0%, #0A1324 55%, #060B16 100%);
+}
+
+/* Portfolio bottom / CTA band */
+.bottom-hero-bg {
+  background:
+    radial-gradient(52rem 26rem at 88% -8%, rgba(230, 196, 119, 0.2), transparent 62%),
+    linear-gradient(160deg, #060D20, #0E1F47 55%, #1C3F85);
+}
+
+/* Bottom gold CTA */
+.bottom-gold-gloss {
+  background: linear-gradient(180deg, #F6E3AE, #E0BC6A 45%, #B98E3A);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75), var(--glow-gold);
+}
+.bottom-gold-gloss:hover {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75), 0 8px 20px -6px rgba(194, 154, 68, 0.65);
+}
+
+/* Footer background */
+.footer-bg {
+  background-color: var(--footer-bg);
 }
