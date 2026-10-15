@@ -3,19 +3,26 @@
 import { motion } from "framer-motion";
 import { ReactNode } from "react";
 
-interface MotionWrapperProps {
+export interface MotionWrapperProps {
   children?: ReactNode;
   className?: string;
   delay?: number;
   duration?: number;
+  viewport?: { once?: boolean; margin?: string; amount?: number | "some" | "all" };
 }
 
-export function FadeIn({ children, className, delay = 0, duration = 0.5 }: MotionWrapperProps) {
+export function FadeIn({
+  children,
+  className,
+  delay = 0,
+  duration = 0.5,
+  viewport = { once: true, margin: "-50px" },
+}: MotionWrapperProps) {
   return (
     <motion.div
       initial={{ opacity: 0 }}
       whileInView={{ opacity: 1 }}
-      viewport={{ once: true, margin: "-50px" }}
+      viewport={viewport}
       transition={{ duration, delay, ease: "easeOut" }}
       className={className}
     >
@@ -24,12 +31,18 @@ export function FadeIn({ children, className, delay = 0, duration = 0.5 }: Motio
   );
 }
 
-export function FadeInUp({ children, className, delay = 0, duration = 0.5 }: MotionWrapperProps) {
+export function FadeInUp({
+  children,
+  className,
+  delay = 0,
+  duration = 0.5,
+  viewport = { once: true, margin: "-50px" },
+}: MotionWrapperProps) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 30 }}
       whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, margin: "-50px" }}
+      viewport={viewport}
       transition={{ duration, delay, ease: "easeOut" }}
       className={className}
     >
@@ -38,12 +51,18 @@ export function FadeInUp({ children, className, delay = 0, duration = 0.5 }: Mot
   );
 }
 
-export function FadeInRight({ children, className, delay = 0, duration = 0.5 }: MotionWrapperProps) {
+export function FadeInRight({
+  children,
+  className,
+  delay = 0,
+  duration = 0.5,
+  viewport = { once: true, margin: "-50px" },
+}: MotionWrapperProps) {
   return (
     <motion.div
       initial={{ opacity: 0, x: -30 }}
       whileInView={{ opacity: 1, x: 0 }}
-      viewport={{ once: true, margin: "-50px" }}
+      viewport={viewport}
       transition={{ duration, delay, ease: "easeOut" }}
       className={className}
     >
@@ -52,12 +71,18 @@ export function FadeInRight({ children, className, delay = 0, duration = 0.5 }: 
   );
 }
 
-export function FadeInLeft({ children, className, delay = 0, duration = 0.5 }: MotionWrapperProps) {
+export function FadeInLeft({
+  children,
+  className,
+  delay = 0,
+  duration = 0.5,
+  viewport = { once: true, margin: "-50px" },
+}: MotionWrapperProps) {
   return (
     <motion.div
       initial={{ opacity: 0, x: 30 }}
       whileInView={{ opacity: 1, x: 0 }}
-      viewport={{ once: true, margin: "-50px" }}
+      viewport={viewport}
       transition={{ duration, delay, ease: "easeOut" }}
       className={className}
     >
@@ -66,12 +91,18 @@ export function FadeInLeft({ children, className, delay = 0, duration = 0.5 }: M
   );
 }
 
-export function ScaleIn({ children, className, delay = 0, duration = 0.5 }: MotionWrapperProps) {
+export function ScaleIn({
+  children,
+  className,
+  delay = 0,
+  duration = 0.5,
+  viewport = { once: true, margin: "-50px" },
+}: MotionWrapperProps) {
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.9 }}
       whileInView={{ opacity: 1, scale: 1 }}
-      viewport={{ once: true, margin: "-50px" }}
+      viewport={viewport}
       transition={{ duration, delay, ease: "easeOut" }}
       className={className}
     >
@@ -81,17 +112,22 @@ export function ScaleIn({ children, className, delay = 0, duration = 0.5 }: Moti
 }
 
 // Container for staggered children animations
-export function StaggerContainer({ children, className, delay = 0 }: MotionWrapperProps) {
+export function StaggerContainer({
+  children,
+  className,
+  delay = 0,
+  viewport = { once: true, margin: "-50px" },
+}: MotionWrapperProps) {
   return (
     <motion.div
       initial="hidden"
       whileInView="visible"
-      viewport={{ once: true, margin: "-50px" }}
+      viewport={viewport}
       variants={{
         hidden: {},
         visible: {
           transition: {
-            staggerChildren: 0.15,
+            staggerChildren: 0.1,
             delayChildren: delay,
           },
         },
@@ -108,8 +144,8 @@ export function StaggerItem({ children, className }: { children?: ReactNode; cla
   return (
     <motion.div
       variants={{
-        hidden: { opacity: 0, y: 20 },
-        visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: "easeOut" } },
+        hidden: { opacity: 0, y: 12 },
+        visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: "easeOut" } },
       }}
       className={className}
     >
@@ -117,4 +153,3 @@ export function StaggerItem({ children, className }: { children?: ReactNode; cla
     </motion.div>
   );
 }
-
