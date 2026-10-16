@@ -1,7 +1,7 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { COLLECTIONS, MODELS } from "@/const/collection.const";
 import { HEARING_STATUS_LIST, HEARING_STATUSES } from "@/const/hearing.const";
-import { IHearingDocument } from "@/db/types/hearing.type";
+import { IHearingDocument } from "@/types/db/hearing.type";
 
 const hearingSchema = new Schema<IHearingDocument>(
   {

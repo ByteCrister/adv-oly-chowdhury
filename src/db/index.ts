@@ -12,7 +12,7 @@ export default ConnectDB;
 export * from "./models";
 
 // Export all TypeScript Types & Document Interfaces
-export * from "./types";
+export * from "../types/db";
 
 // Re-export Collections and Models metadata
 export { COLLECTIONS, MODELS } from "@/const/collection.const";

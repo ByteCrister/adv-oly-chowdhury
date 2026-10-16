@@ -4,7 +4,7 @@ import {
   CASE_DOCUMENT_TYPE_LIST,
   CASE_DOCUMENT_TYPES,
 } from "@/const/case-document.const";
-import { ICaseDocumentRecord } from "@/db/types/case-document.type";
+import { ICaseDocumentRecord } from "@/types/db/case-document.type";
 
 const caseDocumentSchema = new Schema<ICaseDocumentRecord>(
   {
@@ -14,9 +14,9 @@ const caseDocumentSchema = new Schema<ICaseDocumentRecord>(
       required: [true, "Case ID is required"],
       index: true,
     },
-    assetId: {
+    assetReferenceId: {
       type: Schema.Types.ObjectId,
-      ref: MODELS.ASSET,
+      ref: MODELS.ASSET_REFERENCE,
       required: [true, "Asset ID is required"],
       index: true,
     },

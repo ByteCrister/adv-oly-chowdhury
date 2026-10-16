@@ -6,7 +6,7 @@ import {
   CLIENT_STATUS_LIST,
   CLIENT_STATUSES,
 } from "@/const/client.const";
-import { IClientDocument } from "@/db/types/client.type";
+import { IClientDocument } from "@/types/db/client.type";
 
 const clientSchema = new Schema<IClientDocument>(
   {

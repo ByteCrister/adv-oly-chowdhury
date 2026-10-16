@@ -6,7 +6,7 @@ import {
   TASK_STATUS_LIST,
   TASK_STATUSES,
 } from "@/const/task.const";
-import { ITaskDocument } from "@/db/types/task.type";
+import { ITaskDocument } from "@/types/db/task.type";
 
 const taskSchema = new Schema<ITaskDocument>(
   {

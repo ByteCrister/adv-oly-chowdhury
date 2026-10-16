@@ -5,11 +5,50 @@ import {
   ASSET_RESOURCE_TYPES,
   ASSET_DELIVERY_TYPE_LIST,
   ASSET_DELIVERY_TYPES,
+  ASSET_TYPE_LIST,
+  ASSET_TYPES,
+  ASSET_STATUS_LIST,
+  ASSET_STATUSES,
 } from "@/const/asset.const";
-import { IAssetDocument } from "@/db/types/asset.type";
+import { IAssetDocument } from "@/types/db/asset.type";
 
 const assetSchema = new Schema<IAssetDocument>(
   {
+    // Zero-byte Deduplication & Classification
+    fileHash: {
+      type: String,
+      required: [true, "File hash (SHA-256) is required for deduplication"],
+      trim: true,
+      index: true,
+    },
+    assetType: {
+      type: String,
+      enum: {
+        values: ASSET_TYPE_LIST,
+        message: "{VALUE} is not a valid asset type",
+      },
+      default: ASSET_TYPES.OTHER,
+      required: true,
+      index: true,
+    },
+    mimeType: {
+      type: String,
+      required: [true, "MIME type is required"],
+      trim: true,
+      default: "application/octet-stream",
+    },
+    status: {
+      type: String,
+      enum: {
+        values: ASSET_STATUS_LIST,
+        message: "{VALUE} is not a valid asset status",
+      },
+      default: ASSET_STATUSES.READY,
+      required: true,
+      index: true,
+    },
+
+    // Cloudinary Resource Metadata
     cloudinaryAssetId: {
       type: String,
       required: [true, "Cloudinary asset ID is required"],
@@ -106,16 +145,39 @@ const assetSchema = new Schema<IAssetDocument>(
   {
     timestamps: true,
     collection: COLLECTIONS.ASSETS,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
   }
 );
 
+// Virtual Compatibility Aliases
+assetSchema.virtual("sizeBytes").get(function () {
+  return this.bytes;
+});
+assetSchema.virtual("cloudinaryPublicId").get(function () {
+  return this.publicId;
+});
+assetSchema.virtual("cloudinaryUrl").get(function () {
+  return this.secureUrl;
+});
+assetSchema.virtual("cloudinaryResourceType").get(function () {
+  return this.resourceType;
+});
+assetSchema.virtual("cloudinaryFormat").get(function () {
+  return this.format;
+});
+
 // Indexes
+// COMPOUND UNIQUE INDEX: Enforces that (fileHash + assetType) can only exist once
+assetSchema.index({ fileHash: 1, assetType: 1 }, { unique: true });
 assetSchema.index({ cloudinaryAssetId: 1 }, { unique: true });
 assetSchema.index({ publicId: 1 });
 assetSchema.index({ uploadedBy: 1, createdAt: -1 });
+assetSchema.index({ status: 1, createdAt: -1 });
 
 export const Asset: Model<IAssetDocument> =
   (mongoose.models[MODELS.ASSET] as Model<IAssetDocument>) ||
   mongoose.model<IAssetDocument>(MODELS.ASSET, assetSchema, COLLECTIONS.ASSETS);
 
 export default Asset;
+

@@ -8,7 +8,7 @@ import {
   CASE_PRIORITY_LIST,
   CASE_PRIORITIES,
 } from "@/const/case.const";
-import { ICaseDocument } from "@/db/types/case.type";
+import { ICaseDocument } from "@/types/db/case.type";
 
 const caseSchema = new Schema<ICaseDocument>(
   {

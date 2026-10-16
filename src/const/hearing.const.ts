@@ -13,6 +13,14 @@ export const HEARING_STATUSES = {
 export const HEARING_STATUS_LIST = Object.values(HEARING_STATUSES);
 export type HearingStatus = (typeof HEARING_STATUSES)[keyof typeof HEARING_STATUSES];
 
+export const HEARING_STATUS_LABELS: Record<HearingStatus, string> = {
+  [HEARING_STATUSES.SCHEDULED]: "Scheduled",
+  [HEARING_STATUSES.IN_PROGRESS]: "In Progress",
+  [HEARING_STATUSES.COMPLETED]: "Completed",
+  [HEARING_STATUSES.ADJOURNED]: "Adjourned",
+  [HEARING_STATUSES.CANCELLED]: "Cancelled",
+};
+
 export const COMMON_HEARING_TYPES = {
   SUMMONS_RETURN: "Summons / Notice Return",
   WRITTEN_STATEMENT: "Filing of Written Statement",

@@ -5,7 +5,7 @@ import {
   CASE_EXPENSE_CATEGORIES,
   DEFAULT_CURRENCY,
 } from "@/const/case-expense.const";
-import { ICaseExpenseDocument } from "@/db/types/case-expense.type";
+import { ICaseExpenseDocument } from "@/types/db/case-expense.type";
 
 const caseExpenseSchema = new Schema<ICaseExpenseDocument>(
   {
@@ -45,9 +45,9 @@ const caseExpenseSchema = new Schema<ICaseExpenseDocument>(
       trim: true,
       uppercase: true,
     },
-    receiptAssetId: {
+    receiptAssetReferenceId: {
       type: Schema.Types.ObjectId,
-      ref: MODELS.ASSET,
+      ref: MODELS.ASSET_REFERENCE,
       default: null,
       index: true,
     },

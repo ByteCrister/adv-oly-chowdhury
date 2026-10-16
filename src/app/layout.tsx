@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Toaster } from "@/components/shared/toaster";
 import { fontVariables } from "@/utils/fonts";
+import { QueryProvider } from "@/components/providers/QueryProvider";
+import { AuthProvider } from "@/components/providers/AuthProvider";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://advocateaico.com"),
@@ -69,9 +71,14 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-full flex flex-col font-sans">
-        {children}
-        <Toaster position="top-right" />
+        <QueryProvider>
+          <AuthProvider>
+            {children}
+            <Toaster position="top-right" />
+          </AuthProvider>
+        </QueryProvider>
       </body>
     </html>
   );
 }
+

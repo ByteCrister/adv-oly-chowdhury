@@ -5,7 +5,7 @@ import {
   AUDIT_ACTIONS,
   AUDIT_ENTITY_TYPE_LIST,
 } from "@/const/audit-log.const";
-import { IAuditLogDocument } from "@/db/types/audit-log.type";
+import { IAuditLogDocument } from "@/types/db/audit-log.type";
 
 const auditLogSchema = new Schema<IAuditLogDocument>(
   {

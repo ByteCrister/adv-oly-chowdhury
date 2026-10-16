@@ -1,7 +1,7 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { COLLECTIONS, MODELS } from "@/const/collection.const";
 import { COURT_TYPE_LIST, COURT_TYPES } from "@/const/court.const";
-import { ICourtDocument } from "@/db/types/court.type";
+import { ICourtDocument } from "@/types/db/court.type";
 
 const courtSchema = new Schema<ICourtDocument>(
   {

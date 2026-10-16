@@ -4,7 +4,7 @@ import {
   CLIENT_DOCUMENT_TYPE_LIST,
   CLIENT_DOCUMENT_TYPES,
 } from "@/const/client-document.const";
-import { IClientDocumentRecord } from "@/db/types/client-document.type";
+import { IClientDocumentRecord } from "@/types/db/client-document.type";
 
 const clientDocumentSchema = new Schema<IClientDocumentRecord>(
   {
@@ -14,9 +14,9 @@ const clientDocumentSchema = new Schema<IClientDocumentRecord>(
       required: [true, "Client ID is required"],
       index: true,
     },
-    assetId: {
+    assetReferenceId: {
       type: Schema.Types.ObjectId,
-      ref: MODELS.ASSET,
+      ref: MODELS.ASSET_REFERENCE,
       required: [true, "Asset ID is required"],
       index: true,
     },

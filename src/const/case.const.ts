@@ -44,3 +44,37 @@ export const CASE_PRIORITIES = {
 
 export const CASE_PRIORITY_LIST = Object.values(CASE_PRIORITIES);
 export type CasePriority = (typeof CASE_PRIORITIES)[keyof typeof CASE_PRIORITIES];
+
+export const CASE_TYPE_LABELS: Record<CaseType, string> = {
+  [CASE_TYPES.CIVIL]: "Civil",
+  [CASE_TYPES.CRIMINAL]: "Criminal",
+  [CASE_TYPES.FAMILY]: "Family",
+  [CASE_TYPES.LAND_PROPERTY]: "Land & Property",
+  [CASE_TYPES.CONSTITUTIONAL_WRIT]: "Constitutional Writ",
+  [CASE_TYPES.TAXATION_REVENUE]: "Taxation & Revenue",
+  [CASE_TYPES.CUSTOMS_VAT]: "Customs & VAT",
+  [CASE_TYPES.LABOUR_EMPLOYMENT]: "Labour & Employment",
+  [CASE_TYPES.COMMERCIAL_CORPORATE]: "Commercial & Corporate",
+  [CASE_TYPES.ARBITRATION_ADR]: "Arbitration & ADR",
+  [CASE_TYPES.BANKING_ARTHA_RIN]: "Banking & Artha Rin",
+  [CASE_TYPES.CHEQUE_DISHONOUR_NI_ACT]: "Cheque Dishonour (NI Act)",
+  [CASE_TYPES.OTHER]: "Other Matter",
+};
+
+export const CASE_STATUS_LABELS: Record<CaseStatus, string> = {
+  [CASE_STATUSES.DRAFT]: "Draft",
+  [CASE_STATUSES.ACTIVE]: "Active",
+  [CASE_STATUSES.HEARING_STAGED]: "Hearing Staged",
+  [CASE_STATUSES.ARGUMENTS_PENDING]: "Arguments Pending",
+  [CASE_STATUSES.JUDGMENT_RESERVED]: "Judgment Reserved",
+  [CASE_STATUSES.ON_HOLD]: "On Hold",
+  [CASE_STATUSES.DISPOSED]: "Disposed",
+  [CASE_STATUSES.CLOSED]: "Closed",
+};
+
+export const CASE_PRIORITY_LABELS: Record<CasePriority, string> = {
+  [CASE_PRIORITIES.LOW]: "Low",
+  [CASE_PRIORITIES.NORMAL]: "Normal",
+  [CASE_PRIORITIES.HIGH]: "High",
+  [CASE_PRIORITIES.URGENT]: "Urgent",
+};

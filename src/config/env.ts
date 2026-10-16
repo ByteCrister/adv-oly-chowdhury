@@ -5,11 +5,6 @@ import { z } from "zod";
  * for active application environment variables.
  */
 export const envSchema = z.object({
-  // Runtime environment & Server
-  NODE_ENV: z
-    .enum(["development", "test", "production"])
-    .default("development"),
-  PORT: z.coerce.number().default(3000),
   APP_URL: z
     .string()
     .url("APP_URL must be a valid URL")
@@ -19,7 +14,6 @@ export const envSchema = z.object({
   MONGODB_URI: z
     .string({ message: "MONGODB_URI is required" })
     .min(1, "MONGODB_URI cannot be empty"),
-  DATABASE_URL: z.string().optional(),
 
   // Authentication (Auth.js / NextAuth)
   AUTH_SECRET: z
@@ -28,11 +22,6 @@ export const envSchema = z.object({
   AUTH_URL: z
     .string()
     .url("AUTH_URL must be a valid URL")
-    .optional(),
-  NEXTAUTH_SECRET: z.string().optional(),
-  NEXTAUTH_URL: z
-    .string()
-    .url("NEXTAUTH_URL must be a valid URL")
     .optional(),
 
   // OAuth Providers (Google)
@@ -74,19 +63,14 @@ export const envSchema = z.object({
  * Normalizes process.env with fallbacks for seamless backward compatibility.
  */
 const rawEnv = {
-  NODE_ENV: process.env.NODE_ENV,
-  PORT: process.env.PORT,
-  APP_URL: process.env.APP_URL || process.env.AUTH_URL || process.env.NEXTAUTH_URL,
+  APP_URL: process.env.APP_URL,
 
   // Database: primary is MONGODB_URI, with DATABASE_URL fallback
-  MONGODB_URI: process.env.MONGODB_URI || process.env.DATABASE_URL,
-  DATABASE_URL: process.env.DATABASE_URL || process.env.MONGODB_URI,
+  MONGODB_URI: process.env.MONGODB_URI,
 
   // Authentication: primary is AUTH_SECRET / AUTH_URL, with NEXTAUTH_* fallbacks
-  AUTH_SECRET: process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET,
-  AUTH_URL: process.env.AUTH_URL || process.env.NEXTAUTH_URL,
-  NEXTAUTH_SECRET: process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET,
-  NEXTAUTH_URL: process.env.NEXTAUTH_URL || process.env.AUTH_URL,
+  AUTH_SECRET: process.env.AUTH_SECRET,
+  AUTH_URL: process.env.AUTH_URL,
 
   // OAuth Credentials (Google)
   GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,

@@ -7,7 +7,7 @@ import {
   PAYMENT_TYPES,
 } from "@/const/client-payment.const";
 import { DEFAULT_CURRENCY } from "@/const/case-expense.const";
-import { IClientPaymentDocument } from "@/db/types/client-payment.type";
+import { IClientPaymentDocument } from "@/types/db/client-payment.type";
 
 const clientPaymentSchema = new Schema<IClientPaymentDocument>(
   {
@@ -64,9 +64,9 @@ const clientPaymentSchema = new Schema<IClientPaymentDocument>(
       trim: true,
       default: null,
     },
-    receiptAssetId: {
+    receiptAssetreferenceId: {
       type: Schema.Types.ObjectId,
-      ref: MODELS.ASSET,
+      ref: MODELS.ASSET_REFERENCE,
       default: null,
       index: true,
     },

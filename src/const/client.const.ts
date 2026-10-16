@@ -18,3 +18,14 @@ export const CLIENT_STATUSES = {
 
 export const CLIENT_STATUS_LIST = Object.values(CLIENT_STATUSES);
 export type ClientStatus = (typeof CLIENT_STATUSES)[keyof typeof CLIENT_STATUSES];
+
+export const CLIENT_TYPE_LABELS: Record<ClientType, string> = {
+  [CLIENT_TYPES.INDIVIDUAL]: "Individual",
+  [CLIENT_TYPES.ORGANIZATION]: "Corporate / Organization",
+};
+
+export const CLIENT_STATUS_LABELS: Record<ClientStatus, string> = {
+  [CLIENT_STATUSES.ACTIVE]: "Active",
+  [CLIENT_STATUSES.INACTIVE]: "Inactive",
+  [CLIENT_STATUSES.ARCHIVED]: "Archived",
+};

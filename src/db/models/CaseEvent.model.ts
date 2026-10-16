@@ -1,7 +1,7 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { COLLECTIONS, MODELS } from "@/const/collection.const";
 import { CASE_EVENT_TYPE_LIST, CASE_EVENT_TYPES } from "@/const/case-event.const";
-import { ICaseEventDocument } from "@/db/types/case-event.type";
+import { ICaseEventDocument } from "@/types/db/case-event.type";
 
 const caseEventSchema = new Schema<ICaseEventDocument>(
   {
@@ -36,9 +36,9 @@ const caseEventSchema = new Schema<ICaseEventDocument>(
       required: [true, "Event date is required"],
       index: true,
     },
-    assetId: {
+    assetReferenceId: {
       type: Schema.Types.ObjectId,
-      ref: MODELS.ASSET,
+      ref: MODELS.ASSET_REFERENCE,
       default: null,
       index: true,
     },

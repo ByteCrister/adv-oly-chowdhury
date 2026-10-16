@@ -1,16 +1,9 @@
 /**
  * User & Authentication Domain Constants
+ * 
+ * Note: Single-user portfolio and dashboard architecture.
+ * No user roles are used since the system is dedicated exclusively to the advocate.
  */
-
-export const USER_ROLES = {
-  SUPER_ADMIN: "SUPER_ADMIN",
-  ADVOCATE: "ADVOCATE",
-  ASSOCIATE: "ASSOCIATE",
-  STAFF: "STAFF",
-} as const;
-
-export const USER_ROLE_LIST = Object.values(USER_ROLES);
-export type UserRole = (typeof USER_ROLES)[keyof typeof USER_ROLES];
 
 export const USER_STATUSES = {
   ACTIVE: "ACTIVE",

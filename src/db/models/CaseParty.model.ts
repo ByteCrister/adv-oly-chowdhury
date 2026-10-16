@@ -6,7 +6,7 @@ import {
   PARTY_ROLE_LIST,
   PARTY_ROLES,
 } from "@/const/case-party.const";
-import { ICasePartyDocument } from "@/db/types/case-party.type";
+import { ICasePartyDocument } from "@/types/db/case-party.type";
 
 const casePartySchema = new Schema<ICasePartyDocument>(
   {
