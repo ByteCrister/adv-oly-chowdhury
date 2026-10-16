@@ -1,0 +1,30 @@
+/**
+ * Client Payments & Financial Receipts Domain Constants
+ */
+
+export const PAYMENT_METHODS = {
+  CASH: "CASH",
+  BANK_TRANSFER: "BANK_TRANSFER",
+  CHEQUE: "CHEQUE",
+  BKASH: "BKASH",
+  NAGAD: "NAGAD",
+  ROCKET: "ROCKET",
+  ONLINE_GATEWAY: "ONLINE_GATEWAY",
+  OTHER: "OTHER",
+} as const;
+
+export const PAYMENT_METHOD_LIST = Object.values(PAYMENT_METHODS);
+export type PaymentMethod = (typeof PAYMENT_METHODS)[keyof typeof PAYMENT_METHODS];
+
+export const PAYMENT_TYPES = {
+  RETAINER_FEE: "RETAINER_FEE",
+  CONSULTATION_FEE: "CONSULTATION_FEE",
+  CASE_PROFESSIONAL_FEE: "CASE_PROFESSIONAL_FEE",
+  HEARING_APPEARANCE_FEE: "HEARING_APPEARANCE_FEE",
+  EXPENSE_REIMBURSEMENT: "EXPENSE_REIMBURSEMENT",
+  FINAL_SETTLEMENT: "FINAL_SETTLEMENT",
+  OTHER: "OTHER",
+} as const;
+
+export const PAYMENT_TYPE_LIST = Object.values(PAYMENT_TYPES);
+export type PaymentType = (typeof PAYMENT_TYPES)[keyof typeof PAYMENT_TYPES];

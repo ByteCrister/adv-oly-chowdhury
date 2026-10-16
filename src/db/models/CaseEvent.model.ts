@@ -1,0 +1,58 @@
+import mongoose, { Schema, Model } from "mongoose";
+import { COLLECTIONS, MODELS } from "@/const/collection.const";
+import { CASE_EVENT_TYPE_LIST, CASE_EVENT_TYPES } from "@/const/case-event.const";
+import { ICaseEventDocument } from "@/db/types/case-event.type";
+
+const caseEventSchema = new Schema<ICaseEventDocument>(
+  {
+    caseId: {
+      type: Schema.Types.ObjectId,
+      ref: MODELS.CASE,
+      required: [true, "Case ID is required"],
+      index: true,
+    },
+    eventType: {
+      type: String,
+      enum: {
+        values: CASE_EVENT_TYPE_LIST,
+        message: "{VALUE} is not a valid event type",
+      },
+      default: CASE_EVENT_TYPES.OTHER,
+      required: true,
+      index: true,
+    },
+    title: {
+      type: String,
+      required: [true, "Event title is required"],
+      trim: true,
+      maxlength: [200, "Event title cannot exceed 200 characters"],
+    },
+    description: {
+      type: String,
+      default: null,
+    },
+    eventDate: {
+      type: Date,
+      required: [true, "Event date is required"],
+      index: true,
+    },
+    assetId: {
+      type: Schema.Types.ObjectId,
+      ref: MODELS.ASSET,
+      default: null,
+      index: true,
+    },
+  },
+  {
+    timestamps: true,
+    collection: COLLECTIONS.CASE_EVENTS,
+  }
+);
+
+caseEventSchema.index({ caseId: 1, eventDate: -1 });
+
+export const CaseEvent: Model<ICaseEventDocument> =
+  (mongoose.models[MODELS.CASE_EVENT] as Model<ICaseEventDocument>) ||
+  mongoose.model<ICaseEventDocument>(MODELS.CASE_EVENT, caseEventSchema, COLLECTIONS.CASE_EVENTS);
+
+export default CaseEvent;
