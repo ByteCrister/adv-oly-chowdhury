@@ -1,30 +1,74 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/shared/toaster";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+import { fontVariables } from "@/utils/fonts";
 
 export const metadata: Metadata = {
-  title: "Advocate Oly Chowdhury | Supreme Court of Bangladesh",
-  description: "Senior Legal Practitioner & Case Management Platform",
+  metadataBase: new URL("https://advocateaico.com"),
+  title:
+    "Advocate Aminul Islam Chowdhury Oly | Judge's Court, Sylhet",
+  description:
+    "Advocate Aminul Islam Chowdhury Oly (LL.M, LL.B, M.S.S, B.S.S). Enrolled Advocate at Judge's Court, Sylhet. Member of Sylhet District Bar Association, Sylhet District Taxes Bar Association, and International Bar Association.",
+  keywords: [
+    "Advocate Aminul Islam Chowdhury Oly",
+    "Advocate Oly Chowdhury",
+    "Lawyer Sylhet",
+    "Advocate Judge's Court Sylhet",
+    "Sylhet District Bar Association",
+    "Sylhet Taxes Bar Association",
+    "Taxation Lawyer Sylhet",
+    "Civil Litigation Sylhet",
+    "Criminal Lawyer Sylhet",
+  ],
+  authors: [{ name: "Advocate Aminul Islam Chowdhury Oly" }],
+  openGraph: {
+    title: "Advocate Aminul Islam Chowdhury Oly | Legal Counsel & Advocate",
+    description:
+      "Advocate (LL.M, LL.B, M.S.S, B.S.S) practicing at Judge's Court, Sylhet. Specialist in civil litigation, criminal defense, and taxation law.",
+    images: [
+      {
+        url: "/images/profile/Polished Corporate Headshot.png",
+        width: 800,
+        height: 800,
+        alt: "Advocate Aminul Islam Chowdhury Oly",
+      },
+    ],
+  },
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      suppressHydrationWarning
+      className={`${fontVariables} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                try {
+                  function updateTheme() {
+                    if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                      document.documentElement.classList.add('dark');
+                    } else {
+                      document.documentElement.classList.remove('dark');
+                    }
+                  }
+                  updateTheme();
+                  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', updateTheme);
+                } catch(e) {}
+              })();
+            `,
+          }}
+        />
+      </head>
+      <body className="min-h-full flex flex-col font-sans">
         {children}
         <Toaster position="top-right" />
       </body>

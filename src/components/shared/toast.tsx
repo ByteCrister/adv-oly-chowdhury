@@ -1,9 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { motion, AnimatePresence, type HTMLMotionProps } from "framer-motion";
+import { motion, type HTMLMotionProps } from "framer-motion";
 import {
-  ShieldCheck,
   Award,
   CheckCircle2,
   AlertTriangle,
@@ -17,7 +16,6 @@ import {
 import { cn } from "@/lib/utils";
 import {
   FadeIn,
-  FadeInUp,
   ScaleIn,
   StaggerContainer,
   StaggerItem,
@@ -200,8 +198,6 @@ export const Toast = React.forwardRef<HTMLLIElement, ToastProps>(
     React.useEffect(() => {
       if (!duration || duration <= 0) return;
 
-      const startTime = Date.now();
-      const endTime = startTime + duration;
       let remaining = duration;
 
       const interval = setInterval(() => {

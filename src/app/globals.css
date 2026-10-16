@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* ============================================================
    MIDNIGHT SAPPHIRE & CHAMPAGNE GOLD — Design System
    Tailwind v4 + shadcn/ui compatible
@@ -8,8 +10,10 @@
 /* ── Inline Tailwind Theme Mapping ────────────────────────── */
 @theme inline {
   /* Fonts */
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-sans), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-serif: var(--font-serif), "Cormorant Garamond", Georgia, Cambria, serif;
+  --font-cinzel: var(--font-cinzel), Cinzel, Georgia, serif;
+  --font-mono: var(--font-mono), "JetBrains Mono", ui-monospace, monospace;
 
   /* Radius */
   --radius-sm:   4px;
@@ -496,16 +500,152 @@ a:hover {
     linear-gradient(160deg, #060D20, #0E1F47 55%, #1C3F85);
 }
 
-/* Bottom gold CTA */
-.bottom-gold-gloss {
-  background: linear-gradient(180deg, #F6E3AE, #E0BC6A 45%, #B98E3A);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75), var(--glow-gold);
+/* ============================================================
+   PREMIUM GLOSSY GOLD BUTTON & GOLDEN SHADING EFFECT
+   ============================================================ */
+.btn-gold-gloss {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(180deg, #FFF0C2 0%, #E7BE69 28%, #C99632 68%, #9E7019 100%);
+  color: #060B16 !important;
+  font-weight: 800;
+  border: 1px solid rgba(255, 224, 138, 0.65);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.85),
+    inset 0 -1.5px 2px 0 rgba(110, 72, 8, 0.45),
+    0 2px 4px 0 rgba(0, 0, 0, 0.15),
+    0 6px 20px -2px rgba(218, 165, 50, 0.55),
+    0 12px 28px -4px rgba(186, 137, 35, 0.35);
+  text-shadow: 0 1px 0 rgba(255, 245, 215, 0.4);
+  transition: all 250ms cubic-bezier(0.16, 1, 0.3, 1);
 }
-.bottom-gold-gloss:hover {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75), 0 8px 20px -6px rgba(194, 154, 68, 0.65);
+
+.btn-gold-gloss::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 48%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.45) 0%, rgba(255, 255, 255, 0.05) 100%);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.btn-gold-gloss::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 20%, rgba(255, 255, 255, 0.6) 50%, transparent 80%);
+  transform: translateX(-150%);
+  transition: transform 600ms ease;
+  pointer-events: none;
+}
+
+.btn-gold-gloss:hover {
+  transform: translateY(-1.5px) scale(1.02);
+  filter: brightness(1.04);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.95),
+    inset 0 -1.5px 2px 0 rgba(110, 72, 8, 0.45),
+    0 4px 8px 0 rgba(0, 0, 0, 0.2),
+    0 8px 26px -2px rgba(240, 185, 60, 0.75),
+    0 16px 36px -4px rgba(210, 155, 40, 0.5);
+}
+
+.btn-gold-gloss:hover::after {
+  transform: translateX(150%);
+}
+
+.btn-gold-gloss:active {
+  transform: translateY(0.5px) scale(0.99);
+  box-shadow:
+    inset 0 1.5px 3px 0 rgba(80, 50, 5, 0.5),
+    0 2px 8px -1px rgba(218, 165, 50, 0.4);
+}
+
+/* In dark mode: enhanced golden shading and deep high-contrast text */
+.dark .btn-gold-gloss {
+  background: linear-gradient(180deg, #FFF3D1 0%, #F5CE7A 26%, #DDA43B 65%, #A8761E 100%);
+  border: 1px solid rgba(255, 230, 160, 0.7);
+  color: #050912 !important;
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.9),
+    inset 0 -1.5px 2px 0 rgba(90, 55, 6, 0.5),
+    0 3px 6px 0 rgba(0, 0, 0, 0.4),
+    0 6px 24px -2px rgba(245, 195, 75, 0.65),
+    0 14px 34px -4px rgba(215, 155, 40, 0.45);
+}
+
+.dark .btn-gold-gloss:hover {
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 1),
+    inset 0 -1.5px 2px 0 rgba(90, 55, 6, 0.5),
+    0 4px 10px 0 rgba(0, 0, 0, 0.45),
+    0 10px 32px -2px rgba(250, 205, 85, 0.85),
+    0 18px 42px -4px rgba(230, 170, 50, 0.6);
 }
 
 /* Footer background */
 .footer-bg {
   background-color: var(--footer-bg);
+}
+
+/* ============================================================
+   GRADIENT TEXT — dual light/dark mode adaptive
+   ============================================================ */
+
+/* Hero name gradient — light: rich gold, dark: bright champagne-to-gold */
+.hero-name-gradient {
+  display: inline;
+  background-image: linear-gradient(135deg, #A07A38 0%, #C9953A 40%, #D8B870 70%, #C09A4E 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.dark .hero-name-gradient {
+  background-image: linear-gradient(135deg, #EBD09A 0%, #F6E2B0 40%, #D8B870 75%, #C09A4E 100%);
+}
+
+/* About heading gradient — light: sapphire-to-gold, dark: bright gold */
+.about-heading-gradient {
+  display: inline;
+  background-image: linear-gradient(135deg, #1F3B6B 0%, #2C5190 45%, #C09A4E 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.dark .about-heading-gradient {
+  background-image: linear-gradient(135deg, #8FB0E8 0%, #B0CAEE 40%, #E8D09A 100%);
+}
+
+/* ============================================================
+   SECTION SEPARATOR — premium gold hairline
+   ============================================================ */
+.section-sep {
+  width: 60px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+  margin: 0 auto;
+  border-radius: 999px;
+}
+
+/* ============================================================
+   PREMIUM CARD HOVER GLOW (light mode warm, dark mode deep)
+   ============================================================ */
+.card-hover-premium {
+  transition: box-shadow 300ms ease, border-color 300ms ease, transform 300ms ease;
+}
+.card-hover-premium:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 32px -8px var(--shadow-color), 0 4px 12px -4px var(--gold-glow);
+}
+
+/* ============================================================
+   SMOOTH ANCHOR OFFSET (for sticky header)
+   ============================================================ */
+[id] {
+  scroll-margin-top: 88px;
 }
