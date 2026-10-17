@@ -13,7 +13,6 @@ import {
   Building2,
   Receipt,
   UserCheck,
-  Settings,
   ExternalLink,
 } from "lucide-react";
 import type { NavSection, NavItem } from "../../types/sidebar.types";
@@ -93,12 +92,6 @@ export const DASHBOARD_NAV_SECTIONS: NavSection[] = [
         href: "/dashboard/profile",
         icon: UserCheck,
         description: "Bar council numbers, credentials & chamber details",
-      },
-      {
-        title: "Settings",
-        href: "/dashboard/settings",
-        icon: Settings,
-        description: "Security credentials, sessions & chamber preferences",
       },
     ],
   },

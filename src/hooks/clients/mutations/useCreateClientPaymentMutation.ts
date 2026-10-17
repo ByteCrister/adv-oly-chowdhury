@@ -4,6 +4,7 @@ import { useMutation, useQueryClient, UseMutationOptions } from "@tanstack/react
 import axios from "axios";
 import { CLIENT_PAYMENT_QUERY_KEYS } from "@/const/client-payment.const";
 import { CLIENT_QUERY_KEYS } from "@/const/client.const";
+import { FINANCIAL_QUERY_KEYS } from "@/const/financial.const";
 import type {
   CreateClientPaymentInput,
   ClientPaymentActionResponse,
@@ -30,7 +31,7 @@ export async function createClientPayment({
 
 /**
  * TanStack Query mutation hook for recording a client payment.
- * Automatically invalidates payment list, client details, client lists, and overall stats.
+ * Automatically invalidates payment list, client details, client lists, overall stats, and financials.
  */
 export function useCreateClientPaymentMutation(
   options?: UseMutationOptions<
@@ -57,6 +58,9 @@ export function useCreateClientPaymentMutation(
         }),
         queryClient.invalidateQueries({
           queryKey: CLIENT_QUERY_KEYS.stats(),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: FINANCIAL_QUERY_KEYS.all,
         }),
       ]);
       await options?.onSuccess?.(data, variables, context, mutation);

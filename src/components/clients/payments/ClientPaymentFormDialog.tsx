@@ -49,7 +49,7 @@ import { DROPDOWN_TYPES } from "@/const/dropdown.const";
 export interface ClientPaymentFormDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  clientId: string;
+  clientId?: string;
   payment?: ClientPaymentItemDto | null;
   cases?: ClientCaseSummaryDto[];
   onSuccess?: () => void;
@@ -79,6 +79,9 @@ export function ClientPaymentFormDialog({
   const [prevIsOpen, setPrevIsOpen] = React.useState(isOpen);
 
   // Form State
+  const [selectedClientId, setSelectedClientId] = React.useState(
+    clientId || payment?.clientId || ""
+  );
   const [amount, setAmount] = React.useState(payment ? String(payment.amount) : "");
   const [paymentDate, setPaymentDate] = React.useState(
     payment?.paymentDate
@@ -111,6 +114,7 @@ export function ClientPaymentFormDialog({
   if (payment !== prevPayment || isOpen !== prevIsOpen) {
     setPrevPayment(payment);
     setPrevIsOpen(isOpen);
+    setSelectedClientId(clientId || payment?.clientId || "");
     if (payment) {
       setAmount(String(payment.amount));
       setPaymentDate(payment.paymentDate ? payment.paymentDate.slice(0, 10) : "");
@@ -132,6 +136,8 @@ export function ClientPaymentFormDialog({
     }
     setErrors({});
   }
+
+  const effectiveClientId = clientId || selectedClientId;
 
   const validate = (): boolean => {
     const rawAmount = amount.trim();
@@ -172,6 +178,10 @@ export function ClientPaymentFormDialog({
       errs.amount = "Please enter a valid, non-negative payment amount";
     }
 
+    if (!effectiveClientId) {
+      errs.clientId = "Client selection is required";
+    }
+
     if (!paymentDate.trim()) {
       errs.paymentDate = "Payment date is required";
     } else if (!isDateValid) {
@@ -185,6 +195,7 @@ export function ClientPaymentFormDialog({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validate()) return;
+    if (!effectiveClientId) return;
 
     try {
       const parsedDate = new Date(paymentDate);
@@ -205,7 +216,7 @@ export function ClientPaymentFormDialog({
         };
 
         await updateMutation.mutateAsync({
-          clientId,
+          clientId: effectiveClientId,
           paymentId: payment.id,
           data: payload,
         });
@@ -230,7 +241,7 @@ export function ClientPaymentFormDialog({
         };
 
         await createMutation.mutateAsync({
-          clientId,
+          clientId: effectiveClientId,
           data: payload,
         });
 
@@ -267,6 +278,27 @@ export function ClientPaymentFormDialog({
 
         <form onSubmit={handleSubmit}>
           <div className="p-6 space-y-4 max-h-[65vh] overflow-y-auto">
+            {/* Client Selector (when opened without a pre-bound client) */}
+            {!clientId && (
+              <ItemSelect
+                id="pay-client"
+                label="Client"
+                required
+                type={DROPDOWN_TYPES.CLIENT}
+                value={selectedClientId}
+                onChange={(val) => {
+                  setSelectedClientId(val);
+                  setCaseId("");
+                  if (errors.clientId) setErrors((prev) => ({ ...prev, clientId: "" }));
+                }}
+                placeholder="Select client for this payment..."
+                searchPlaceholder="Search clients by name, number, or phone..."
+                emptyMessage="No matching clients found."
+                disabled={isSubmitting}
+                error={errors.clientId}
+              />
+            )}
+
             {/* Amount & Date */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
@@ -356,7 +388,7 @@ export function ClientPaymentFormDialog({
               id="pay-case"
               label="Linked Legal Matter (Optional)"
               type={DROPDOWN_TYPES.CASE}
-              filterParams={{ clientId }}
+              filterParams={effectiveClientId ? { clientId: effectiveClientId } : undefined}
               options={fallbackCaseOptions}
               value={caseId}
               onChange={(val) => {
@@ -365,7 +397,7 @@ export function ClientPaymentFormDialog({
               }}
               placeholder="General Chamber Retainer (No specific case)"
               searchPlaceholder="Search client matters by title, case #, or reference..."
-              emptyMessage="No legal cases found for this client"
+              emptyMessage={effectiveClientId ? "No legal cases found for this client" : "Please select a client first"}
               disabled={isSubmitting}
               clearable
               error={errors.caseId}

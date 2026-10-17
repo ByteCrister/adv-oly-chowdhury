@@ -1,5 +1,4 @@
 import { z } from "zod";
-import mongoose from "mongoose";
 import {
   CLIENT_DOCUMENT_TYPE_LIST,
   CLIENT_DOCUMENT_TYPES,
@@ -12,7 +11,7 @@ import {
 
 const objectIdValidator = z
   .string()
-  .refine((val) => mongoose.Types.ObjectId.isValid(val), {
+  .refine((val) => /^[0-9a-fA-F]{24}$/.test(val), {
     message: "Invalid ObjectId format",
   });
 

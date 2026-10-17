@@ -6,7 +6,7 @@ import ConnectDB from "@/config/db";
 import User from "@/db/models/User.model";
 // Ensure models are registered in Mongoose schema cache for nested populate
 import "@/db/models/Asset.model";
-import "@/db/models/AssetReference.model";
+import { AssetReference } from "@/db/models/AssetReference.model";
 import { profileUpdateSchema } from "@/utils/zod";
 import type { ProfileAvatarDto, ProfileSignatureDto } from "@/types/profile.ui.type";
 
@@ -30,7 +30,7 @@ interface PopulatedAssetReference {
   assetId?: PopulatedAsset | null;
 }
 
-interface RawUserRecord {
+export interface RawUserRecord {
   [key: string]: unknown;
   profileAssetReferenceId?: PopulatedAssetReference | null;
   signatureAssetReferenceId?: PopulatedAssetReference | null;
@@ -42,7 +42,7 @@ interface RawUserRecord {
  * and avatar/signature metadata so the UI can consume them directly without
  * traversing multi-level collection relationships.
  */
-function formatUserResponse(user: RawUserRecord) {
+export function formatUserResponse(user: RawUserRecord) {
   // 1. Resolve Avatar from two-tier AssetReference -> Asset relationship
   const profileRef = user.profileAssetReferenceId;
   const profileAsset =
@@ -168,18 +168,50 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
     homeAddress: updateData.homeAddress,
   };
 
+  await ConnectDB();
+
   if (profileAssetRefId !== undefined) {
-    updateSet.profileAssetReferenceId =
+    const targetProfileRef =
       profileAssetRefId && mongoose.Types.ObjectId.isValid(profileAssetRefId)
         ? new mongoose.Types.ObjectId(profileAssetRefId)
         : null;
+
+    // Check if user currently has an existing profileAssetReferenceId
+    const existingUser = await User.findById(session.user.id).select("profileAssetReferenceId");
+    const prevProfileRefId = existingUser?.profileAssetReferenceId;
+
+    // If changing or removing the avatar, soft-delete the previous AssetReference
+    if (
+      prevProfileRefId &&
+      (!targetProfileRef || String(prevProfileRefId) !== String(targetProfileRef))
+    ) {
+      await AssetReference.findByIdAndUpdate(prevProfileRefId, {
+        deletedAt: new Date(),
+      });
+    }
+
+    updateSet.profileAssetReferenceId = targetProfileRef;
   }
 
   if (signatureAssetRefId !== undefined) {
-    updateSet.signatureAssetReferenceId =
+    const targetSigRef =
       signatureAssetRefId && mongoose.Types.ObjectId.isValid(signatureAssetRefId)
         ? new mongoose.Types.ObjectId(signatureAssetRefId)
         : null;
+
+    const existingUser = await User.findById(session.user.id).select("signatureAssetReferenceId");
+    const prevSigRefId = existingUser?.signatureAssetReferenceId;
+
+    if (
+      prevSigRefId &&
+      (!targetSigRef || String(prevSigRefId) !== String(targetSigRef))
+    ) {
+      await AssetReference.findByIdAndUpdate(prevSigRefId, {
+        deletedAt: new Date(),
+      });
+    }
+
+    updateSet.signatureAssetReferenceId = targetSigRef;
   }
 
   if (signatureDirectId !== undefined) {
@@ -188,8 +220,6 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
         ? new mongoose.Types.ObjectId(signatureDirectId)
         : null;
   }
-
-  await ConnectDB();
 
   const updatedUser = (await User.findByIdAndUpdate(
     session.user.id,
