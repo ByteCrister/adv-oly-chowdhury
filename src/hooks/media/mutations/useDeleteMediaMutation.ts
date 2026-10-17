@@ -12,7 +12,7 @@ export interface DeleteMediaResponse {
 }
 
 export async function deleteMediaReference(id: string): Promise<DeleteMediaResponse> {
-  const response = await axios.delete<DeleteMediaResponse>(`/api/media/${id}`);
+  const response = await axios.delete<DeleteMediaResponse>(`/api/v1/media/${id}`);
   return response.data;
 }
 

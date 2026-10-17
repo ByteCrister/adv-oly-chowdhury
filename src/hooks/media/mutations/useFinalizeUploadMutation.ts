@@ -12,7 +12,7 @@ export async function finalizeMediaUpload(
   payload: FinalizeBatchRequest
 ): Promise<FinalizeApiResponse> {
   const response = await axios.post<FinalizeApiResponse>(
-    "/api/media/finalize",
+    "/api/v1/media/finalize",
     payload
   );
   return response.data;

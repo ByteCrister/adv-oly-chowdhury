@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { withErrorHandler } from "@/lib/helpers/withErrorHandler";
+import { sanitizeSearchParam, buildSearchRegex } from "@/lib/helpers/search.helper";
 import { AssetReference } from "@/db/models/AssetReference.model";
 import { Asset } from "@/db/models/Asset.model";
 import { MediaItemDto, MediaPaginationResponse } from "@/types/media.types";
@@ -11,7 +12,7 @@ import { AssetPurpose } from "@/const/asset-reference.const";
 export const GET = withErrorHandler(async (req: NextRequest) => {
   const { searchParams } = new URL(req.url);
 
-  const search = searchParams.get("search") || "";
+  const search = sanitizeSearchParam(searchParams.get("search"));
   const assetType = searchParams.get("assetType");
   const ownerType = searchParams.get("ownerType");
   const ownerId = searchParams.get("ownerId");
@@ -41,11 +42,14 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   }
 
   if (search) {
-    filter.$or = [
-      { originalFileName: { $regex: search, $options: "i" } },
-      { description: { $regex: search, $options: "i" } },
-      { caption: { $regex: search, $options: "i" } },
-    ];
+    const searchRegex = buildSearchRegex(search);
+    if (searchRegex) {
+      filter.$or = [
+        { originalFileName: searchRegex },
+        { description: searchRegex },
+        { caption: searchRegex },
+      ];
+    }
   }
 
   // Determine Sorting

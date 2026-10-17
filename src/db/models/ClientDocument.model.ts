@@ -58,7 +58,7 @@ const clientDocumentSchema = new Schema<IClientDocumentRecord>(
 
 clientDocumentSchema.index({ clientId: 1, createdAt: -1 });
 clientDocumentSchema.index({ clientId: 1, documentType: 1 });
-clientDocumentSchema.index({ clientId: 1, assetId: 1 });
+clientDocumentSchema.index({ clientId: 1, assetReferenceId: 1 });
 
 export const ClientDocument: Model<IClientDocumentRecord> =
   (mongoose.models[MODELS.CLIENT_DOCUMENT] as Model<IClientDocumentRecord>) ||

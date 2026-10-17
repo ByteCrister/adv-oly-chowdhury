@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { getAuthSession } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
+import { sanitizeSearchParam, buildSearchRegex, escapeRegex } from "@/lib/helpers/search.helper";
 import { Court } from "@/db/models/Court.model";
 import { Case } from "@/db/models/Case.model";
 import { Hearing } from "@/db/models/Hearing.model";
@@ -86,7 +87,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
 
   // Parse and validate query parameters
   const rawParams = {
-    search: searchParams.get("search") || undefined,
+    search: sanitizeSearchParam(searchParams.get("search")),
     courtType: searchParams.get("courtType") || undefined,
     district: searchParams.get("district") || undefined,
     division: searchParams.get("division") || undefined,
@@ -115,11 +116,11 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   }
 
   if (district && district !== "ALL") {
-    filter.district = { $regex: new RegExp(`^${district.trim()}$`, "i") };
+    filter.district = { $regex: new RegExp(`^${escapeRegex(district.trim())}$`, "i") };
   }
 
   if (division && division !== "ALL") {
-    filter.division = { $regex: new RegExp(`^${division.trim()}$`, "i") };
+    filter.division = { $regex: new RegExp(`^${escapeRegex(division.trim())}$`, "i") };
   }
 
   if (isActive !== undefined) {
@@ -143,15 +144,17 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
 
   // Search across multiple fields
   if (search) {
-    const searchRegex = { $regex: search.trim(), $options: "i" };
-    filter.$or = [
-      { name: searchRegex },
-      { district: searchRegex },
-      { division: searchRegex },
-      { roomOrHall: searchRegex },
-      { address: searchRegex },
-      { presidingJudgeTitle: searchRegex },
-    ];
+    const searchRegex = buildSearchRegex(search);
+    if (searchRegex) {
+      filter.$or = [
+        { name: searchRegex },
+        { district: searchRegex },
+        { division: searchRegex },
+        { roomOrHall: searchRegex },
+        { address: searchRegex },
+        { presidingJudgeTitle: searchRegex },
+      ];
+    }
   }
 
   // Determine sorting

@@ -6,7 +6,7 @@ import { CleanupApiResponse } from "@/types/media.types";
 import { mediaKeys } from "../queries/useMediaList";
 
 export async function triggerMediaCleanup(): Promise<CleanupApiResponse> {
-  const response = await axios.post<CleanupApiResponse>("/api/media/cleanup");
+  const response = await axios.post<CleanupApiResponse>("/api/v1/media/cleanup");
   return response.data;
 }
 

@@ -11,7 +11,7 @@ export async function prepareMediaUpload(
   payload: PrepareBatchRequest
 ): Promise<PrepareApiResponse> {
   const response = await axios.post<PrepareApiResponse>(
-    "/api/media/prepare",
+    "/api/v1/media/prepare",
     payload
   );
   return response.data;
