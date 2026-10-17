@@ -10,6 +10,7 @@ import TodayCauseList from "./TodayCauseList";
 import ChamberTasks from "./ChamberTasks";
 import QuickActionsPanel from "./QuickActionsPanel";
 import RecentCasesTable from "./RecentCasesTable";
+import { FadeIn, FadeInUp } from "@/components/wrappers/Motion";
 import { DashboardOverviewSkeleton } from "./DashboardSkeleton";
 
 export function DashboardOverview() {
@@ -46,34 +47,44 @@ export function DashboardOverview() {
   const { advocate, stats, todayHearings, recentCases, chamberTasks } = response.data;
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-300">
+    <div className="space-y-8">
       {/* 0. Top Dashboard Breadcrumb */}
-      <DashboardBreadcrumb />
+      <FadeIn duration={0.35} delay={0}>
+        <DashboardBreadcrumb />
+      </FadeIn>
 
       {/* 1. Chamber Status & Welcome Banner */}
-      <ChamberBanner
-        advocateName={advocate.preferredName || advocate.name}
-        hearingCount={stats.todayHearingsCount}
-        urgentTaskCount={stats.urgentTasksCount}
-        chamberLocation={advocate.chamberLocation}
-      />
+      <FadeInUp duration={0.45} delay={0.05} yOffset={16}>
+        <ChamberBanner
+          advocateName={advocate.preferredName || advocate.name}
+          hearingCount={stats.todayHearingsCount}
+          urgentTaskCount={stats.urgentTasksCount}
+          chamberLocation={advocate.chamberLocation}
+        />
+      </FadeInUp>
 
       {/* 2. Key Metrics Grid with NumberCounter Animation */}
-      <DashboardStats stats={stats} />
+      <FadeInUp duration={0.45} delay={0.15} yOffset={16}>
+        <DashboardStats stats={stats} />
+      </FadeInUp>
 
       {/* 3. Cause List & Chamber Action Center */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8">
-        <div className="lg:col-span-2">
-          <TodayCauseList hearings={todayHearings} />
+      <FadeInUp duration={0.45} delay={0.25} yOffset={16}>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8">
+          <div className="lg:col-span-2">
+            <TodayCauseList hearings={todayHearings} />
+          </div>
+          <div className="space-y-6">
+            <ChamberTasks tasks={chamberTasks} />
+            <QuickActionsPanel />
+          </div>
         </div>
-        <div className="space-y-6">
-          <ChamberTasks tasks={chamberTasks} />
-          <QuickActionsPanel />
-        </div>
-      </div>
+      </FadeInUp>
 
       {/* 4. Recent Case Matters Table */}
-      <RecentCasesTable cases={recentCases} />
+      <FadeInUp duration={0.45} delay={0.35} yOffset={16}>
+        <RecentCasesTable cases={recentCases} />
+      </FadeInUp>
     </div>
   );
 }

@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { AuthWrapper } from "@/components/wrappers/AuthWrapper";
 import { DashboardLayoutWrapper } from "@/components/wrappers/DashboardLayoutWrapper";
 
+export const instant = false;
+
 export const metadata: Metadata = {
   title: "Chamber Dashboard | Advocate Aminul Islam Chowdhury Oly",
   description:

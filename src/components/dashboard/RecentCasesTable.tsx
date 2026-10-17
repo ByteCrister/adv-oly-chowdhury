@@ -3,6 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { Briefcase, ArrowUpRight, FolderPlus } from "lucide-react";
+import { NumberCounter } from "@/components/shared";
 import {
   CASE_STATUSES,
   CASE_STATUS_LABELS,
@@ -25,6 +26,12 @@ export function RecentCasesTable({ cases = [] }: RecentCasesTableProps) {
           <h3 className="font-serif text-lg font-bold text-foreground">
             Recent Case Matters
           </h3>
+          {cases.length > 0 && (
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-gold-500/10 text-gold-600 dark:text-gold-400 font-semibold text-[11px] border border-gold-500/20">
+              <NumberCounter value={cases.length} delay={0.3} />
+              <span>Matters</span>
+            </span>
+          )}
         </div>
         <Link
           href="/dashboard/cases"

@@ -2,7 +2,8 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Plus, CalendarDays, ShieldCheck } from "lucide-react";
+import { Plus, CalendarDays, ShieldCheck, Gavel, Clock } from "lucide-react";
+import { NumberCounter } from "@/components/shared";
 
 export interface ChamberBannerProps {
   advocateName?: string;
@@ -26,7 +27,7 @@ export function ChamberBanner({
       />
 
       <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-6 z-10">
-        <div className="space-y-2">
+        <div className="space-y-3">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gold-500/15 border border-gold-500/30 text-gold-600 dark:text-gold-300 text-xs font-semibold">
             <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
             <span className="truncate max-w-md sm:max-w-xl">{chamberLocation}</span>
@@ -39,14 +40,43 @@ export function ChamberBanner({
           <p className="text-xs sm:text-sm text-muted-foreground max-w-2xl leading-relaxed">
             Court session is active. You have{" "}
             <span className="font-semibold text-gold-600 dark:text-gold-400">
-              {hearingCount} court {hearingCount === 1 ? "appearance" : "appearances"}
+              <NumberCounter value={hearingCount} delay={0.2} stiffness={90} damping={32} /> court{" "}
+              {hearingCount === 1 ? "appearance" : "appearances"}
             </span>{" "}
             on today&apos;s cause list and{" "}
             <span className="font-semibold text-foreground">
-              {urgentTaskCount} urgent {urgentTaskCount === 1 ? "deadline" : "deadlines"}
+              <NumberCounter value={urgentTaskCount} delay={0.3} stiffness={90} damping={32} /> urgent{" "}
+              {urgentTaskCount === 1 ? "deadline" : "deadlines"}
             </span>
             .
           </p>
+
+          {/* Prominent Visual Metric Badges */}
+          <div className="flex flex-wrap items-center gap-3 pt-1">
+            <div className="inline-flex items-center gap-2.5 px-3.5 py-1.5 rounded-xl bg-gold-500/10 border border-gold-500/25 shadow-sm">
+              <Gavel className="w-4 h-4 text-gold-500 shrink-0" />
+              <div className="flex items-baseline gap-1.5 text-xs">
+                <span className="font-serif font-bold text-foreground text-sm">
+                  <NumberCounter value={hearingCount} delay={0.2} stiffness={90} damping={32} />
+                </span>
+                <span className="text-muted-foreground font-medium">
+                  {hearingCount === 1 ? "Court Appearance" : "Court Appearances"} Today
+                </span>
+              </div>
+            </div>
+
+            <div className="inline-flex items-center gap-2.5 px-3.5 py-1.5 rounded-xl bg-muted/60 dark:bg-card/80 border border-border/80 shadow-sm">
+              <Clock className="w-4 h-4 text-amber-500 shrink-0" />
+              <div className="flex items-baseline gap-1.5 text-xs">
+                <span className="font-serif font-bold text-foreground text-sm">
+                  <NumberCounter value={urgentTaskCount} delay={0.3} stiffness={90} damping={32} />
+                </span>
+                <span className="text-muted-foreground font-medium">
+                  {urgentTaskCount === 1 ? "Urgent Filing" : "Urgent Filings"} Pending
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Quick Action Buttons */}

@@ -3,6 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { AlertCircle, Users, FileText, Receipt, Building2 } from "lucide-react";
+import { StaggerContainer, StaggerItem } from "@/components/wrappers/Motion";
 
 export function QuickActionsPanel() {
   const actions = [
@@ -34,21 +35,22 @@ export function QuickActionsPanel() {
         <AlertCircle className="w-4 h-4 text-gold-500" />
         <span>Chamber Quick Actions</span>
       </h4>
-      <div className="grid grid-cols-2 gap-2 text-xs">
+      <StaggerContainer delay={0.15} staggerDelay={0.05} className="grid grid-cols-2 gap-2 text-xs">
         {actions.map((act) => {
           const Icon = act.icon;
           return (
-            <Link
-              key={act.title}
-              href={act.href}
-              className="p-2.5 rounded-xl bg-muted/60 hover:bg-gold-500/10 hover:text-gold-600 dark:hover:text-gold-400 border border-border/50 transition-colors flex items-center gap-2 font-medium"
-            >
-              <Icon className="w-3.5 h-3.5 shrink-0" />
-              <span className="truncate">{act.title}</span>
-            </Link>
+            <StaggerItem key={act.title} yOffset={8}>
+              <Link
+                href={act.href}
+                className="p-2.5 rounded-xl bg-muted/60 hover:bg-gold-500/10 hover:text-gold-600 dark:hover:text-gold-400 border border-border/50 transition-colors flex items-center gap-2 font-medium"
+              >
+                <Icon className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">{act.title}</span>
+              </Link>
+            </StaggerItem>
           );
         })}
-      </div>
+      </StaggerContainer>
     </div>
   );
 }

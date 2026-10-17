@@ -18,6 +18,7 @@
     "bcryptjs": "^3.0.3",
     "cloudinary": "^2.11.0",
     "clsx": "^2.1.1",
+    "debounce": "^3.0.0",
     "framer-motion": "^14.3.0",
     "lucide-react": "^1.57.0",
     "mongoose": "^9.11.2",
