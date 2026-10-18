@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
-import { getAuthSession } from "@/lib/auth/auth.helper";
+import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
 import { ClientDocument } from "@/db/models/ClientDocument.model";
@@ -68,10 +68,7 @@ function formatClientDocumentItem(
  */
 export const GET = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    const session = await getAuthSession();
-    if (!session?.user?.id) {
-      throw ApiError.unauthorized("Authentication required");
-    }
+    await getUserId();
 
     const { id, docId } = await params;
     if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(docId)) {
@@ -120,10 +117,7 @@ export const GET = withErrorHandler(
  */
 export const PATCH = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    const session = await getAuthSession();
-    if (!session?.user?.id) {
-      throw ApiError.unauthorized("Authentication required");
-    }
+    await getUserId();
 
     const { id, docId } = await params;
     if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(docId)) {
@@ -239,10 +233,7 @@ export const PUT = PATCH;
  */
 export const DELETE = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    const session = await getAuthSession();
-    if (!session?.user?.id) {
-      throw ApiError.unauthorized("Authentication required");
-    }
+    await getUserId();
 
     const { id, docId } = await params;
     if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(docId)) {

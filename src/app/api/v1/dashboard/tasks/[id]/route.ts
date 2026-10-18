@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthSession } from "@/lib/auth/auth.helper";
+import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import Task from "@/db/models/Task.model";
 import { TASK_STATUSES, TASK_STATUS_LIST } from "@/const/task.const";
@@ -11,10 +11,7 @@ interface RouteParams {
 
 export const PATCH = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    const session = await getAuthSession();
-    if (!session?.user?.id) {
-      throw ApiError.unauthorized("Unauthorized");
-    }
+    await getUserId();
 
     const { id: taskId } = await params;
     if (!taskId) {

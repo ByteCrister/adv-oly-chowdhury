@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import mongoose from "mongoose";
-import { getAuthSession } from "@/lib/auth/auth.helper";
+import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import ConnectDB from "@/config/db";
 import User from "@/db/models/User.model";
@@ -184,20 +184,17 @@ function formatDue(date?: Date | null): string {
 }
 
 export const GET = withErrorHandler(async () => {
-  const session = await getAuthSession();
-  if (!session?.user?.id) {
-    throw ApiError.unauthorized("Unauthorized");
-  }
+  const userId = await getUserId();
 
   await ConnectDB();
 
   // 1. Fetch User Profile for Welcome Banner
-  const user = await User.findById(session.user.id)
+  const user = await User.findById(userId)
     .select("name preferredName title subtitle chamber")
     .lean();
 
   const advocateName =
-    user?.preferredName || user?.name || session.user.name || "Advocate Oly Chowdhury";
+    user?.preferredName || user?.name || "Advocate Oly Chowdhury";
   const chamberLocation =
     user?.chamber?.fullAddress ||
     "Chamber No. 323 • Bar Hall 02 • Judge's Court, Sylhet, Bangladesh";

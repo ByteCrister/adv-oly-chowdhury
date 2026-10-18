@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
-import { getAuthSession } from "@/lib/auth/auth.helper";
+import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { Client } from "@/db/models/Client.model";
 import { Court } from "@/db/models/Court.model";
@@ -18,10 +18,7 @@ import { sanitizeSearchParam, escapeRegex } from "@/lib/helpers/search.helper";
  * datasets for Client, Court, Case, and User entities.
  */
 export const GET = withErrorHandler(async (req: NextRequest) => {
-  const session = await getAuthSession();
-  if (!session?.user?.id) {
-    throw ApiError.unauthorized("Authentication required");
-  }
+  await getUserId();
 
   const { searchParams } = new URL(req.url);
 

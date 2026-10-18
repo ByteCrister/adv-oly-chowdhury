@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
-import { getAuthSession } from "@/lib/auth/auth.helper";
+import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import ConnectDB from "@/config/db";
 import User from "@/db/models/User.model";
@@ -103,14 +103,11 @@ export function formatUserResponse(user: RawUserRecord) {
 }
 
 export const GET = withErrorHandler(async () => {
-  const session = await getAuthSession();
-  if (!session?.user?.id) {
-    throw ApiError.unauthorized("Unauthorized");
-  }
+  const userId = await getUserId();
 
   await ConnectDB();
 
-  const user = (await User.findById(session.user.id)
+  const user = (await User.findById(userId)
     .populate({
       path: "profileAssetReferenceId",
       populate: {
@@ -135,10 +132,7 @@ export const GET = withErrorHandler(async () => {
 });
 
 export const PATCH = withErrorHandler(async (req: NextRequest) => {
-  const session = await getAuthSession();
-  if (!session?.user?.id) {
-    throw ApiError.unauthorized("Unauthorized");
-  }
+  const userId = await getUserId();
 
   const body = await req.json();
   const updateData = profileUpdateSchema.parse(body);
@@ -177,7 +171,7 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
         : null;
 
     // Check if user currently has an existing profileAssetReferenceId
-    const existingUser = await User.findById(session.user.id).select("profileAssetReferenceId");
+    const existingUser = await User.findById(userId).select("profileAssetReferenceId");
     const prevProfileRefId = existingUser?.profileAssetReferenceId;
 
     // If changing or removing the avatar, soft-delete the previous AssetReference
@@ -199,7 +193,7 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
         ? new mongoose.Types.ObjectId(signatureAssetRefId)
         : null;
 
-    const existingUser = await User.findById(session.user.id).select("signatureAssetReferenceId");
+    const existingUser = await User.findById(userId).select("signatureAssetReferenceId");
     const prevSigRefId = existingUser?.signatureAssetReferenceId;
 
     if (
@@ -222,7 +216,7 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
   }
 
   const updatedUser = (await User.findByIdAndUpdate(
-    session.user.id,
+    userId,
     { $set: updateSet },
     { new: true, runValidators: true }
   )

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
-import { getAuthSession } from "@/lib/auth/auth.helper";
+import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import Task from "@/db/models/Task.model";
 import Case from "@/db/models/Case.model";
@@ -72,10 +72,7 @@ function formatTaskItem(doc: Record<string, unknown>): TaskItemDto {
  */
 export const PATCH = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    const session = await getAuthSession();
-    if (!session?.user?.id) {
-      throw ApiError.unauthorized("Authentication required");
-    }
+    await getUserId();
 
     const { id } = await params;
     const parsedId = objectIdValidator.safeParse(id);
@@ -223,10 +220,7 @@ export const PATCH = withErrorHandler(
  */
 export const DELETE = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    const session = await getAuthSession();
-    if (!session?.user?.id) {
-      throw ApiError.unauthorized("Authentication required");
-    }
+    await getUserId();
 
     const { id } = await params;
     const parsedId = objectIdValidator.safeParse(id);

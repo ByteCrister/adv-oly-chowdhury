@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
-import { getAuthSession } from "@/lib/auth/auth.helper";
+import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
 import { sanitizeSearchParam, buildSearchRegex } from "@/lib/helpers/search.helper";
@@ -114,10 +114,7 @@ function formatClientListItem(
  * Paginated list of clients with search, sorting, filtering, and relation counts.
  */
 export const GET = withErrorHandler(async (req: NextRequest) => {
-  const session = await getAuthSession();
-  if (!session?.user?.id) {
-    throw ApiError.unauthorized("Authentication required");
-  }
+  await getUserId();
 
   const { searchParams } = new URL(req.url);
 
@@ -400,10 +397,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
  * and deterministic clientNumber generation if omitted.
  */
 export const POST = withErrorHandler(async (req: NextRequest) => {
-  const session = await getAuthSession();
-  if (!session?.user?.id) {
-    throw ApiError.unauthorized("Authentication required");
-  }
+  await getUserId();
 
   const body = await req.json();
   const validated = createClientSchema.parse(body);

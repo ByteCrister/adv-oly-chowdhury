@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
-import { getAuthSession } from "@/lib/auth/auth.helper";
+import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { sanitizeSearchParam, escapeRegex } from "@/lib/helpers/search.helper";
 import Task from "@/db/models/Task.model";
@@ -80,10 +80,7 @@ function formatTaskItem(doc: Record<string, unknown>): TaskItemDto {
  * sorting, server-side pagination, and filter-aware aggregate statistics.
  */
 export const GET = withErrorHandler(async (req: NextRequest) => {
-  const session = await getAuthSession();
-  if (!session?.user?.id) {
-    throw ApiError.unauthorized("Authentication required");
-  }
+  await getUserId();
 
   await ConnectDB();
 
@@ -421,10 +418,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
  * Create a new task with relationship validation and auto-linking
  */
 export const POST = withErrorHandler(async (req: NextRequest) => {
-  const session = await getAuthSession();
-  if (!session?.user?.id) {
-    throw ApiError.unauthorized("Authentication required");
-  }
+  await getUserId();
 
   await ConnectDB();
 

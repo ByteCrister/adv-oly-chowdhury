@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
-import { getAuthSession } from "@/lib/auth/auth.helper";
+import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
 import { sanitizeSearchParam, buildSearchRegex } from "@/lib/helpers/search.helper";
@@ -112,10 +112,7 @@ function formatCaseExpenseItem(
  * List case expenses with pagination, search, filters, and summary aggregates.
  */
 export const GET = withErrorHandler(async (req: NextRequest) => {
-  const session = await getAuthSession();
-  if (!session?.user?.id) {
-    throw ApiError.unauthorized("Authentication required");
-  }
+  await getUserId();
 
   await ConnectDB();
 
@@ -327,10 +324,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
  * Record a new case expense.
  */
 export const POST = withErrorHandler(async (req: NextRequest) => {
-  const session = await getAuthSession();
-  if (!session?.user?.id) {
-    throw ApiError.unauthorized("Authentication required");
-  }
+  const currentUserId = await getUserId();
 
   await ConnectDB();
 
@@ -355,7 +349,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     }
   }
 
-  const userId = new mongoose.Types.ObjectId(session.user.id);
+  const userId = new mongoose.Types.ObjectId(currentUserId);
 
   // Create expense inside transaction
   const createdExpense = await withTransaction(async (dbSession) => {

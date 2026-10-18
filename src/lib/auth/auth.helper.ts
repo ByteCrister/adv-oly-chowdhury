@@ -1,5 +1,6 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "./auth";
+import { ApiError } from "@/lib/helpers/withErrorHandler";
 
 /**
  * Server-side helper to get the active NextAuth session in server components or route handlers.
@@ -27,7 +28,8 @@ export async function getAuthSession() {
 export async function getUserId(): Promise<string> {
   const session = await getAuthSession();
   if (!session?.user?.id) {
-    throw new Error("Unauthorized: Active session required");
+    throw ApiError.unauthorized("Authentication required");
   }
   return session.user.id;
 }
+

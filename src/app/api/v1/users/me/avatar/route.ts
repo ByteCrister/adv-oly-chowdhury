@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { UploadApiResponse } from "cloudinary";
-import { getAuthSession } from "@/lib/auth/auth.helper";
+import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import ConnectDB from "@/config/db";
 import User from "@/db/models/User.model";
@@ -36,10 +36,7 @@ const ALLOWED_MIME_TYPES = [
  * creates Asset & AssetReference, and binds to User.profileAssetReferenceId.
  */
 export const POST = withErrorHandler(async (req: NextRequest) => {
-  const session = await getAuthSession();
-  if (!session?.user?.id) {
-    throw ApiError.unauthorized("Unauthorized: Active session required.");
-  }
+  const userId = await getUserId();
 
   const formData = await req.formData();
   const file = (formData.get("file") || formData.get("avatar")) as File | null;
@@ -120,7 +117,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
       bytes: uploadResult.bytes || file.size,
       width: uploadResult.width || null,
       height: uploadResult.height || null,
-      uploadedBy: session.user.id,
+      uploadedBy: userId,
     });
 
     targetAssetId = createdAsset._id;
@@ -129,16 +126,16 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   // 7. Create logical AssetReference document
   const assetReference = await AssetReference.create({
     assetId: targetAssetId,
-    uploadedBy: session.user.id,
+    uploadedBy: userId,
     originalFileName: file.name,
     ownerType: ASSET_OWNER_TYPES.USER,
-    ownerId: session.user.id,
+    ownerId: userId,
     purpose: ASSET_PURPOSES.PROFILE_IMAGE,
     caption: "Advocate Profile Headshot",
   });
 
   // 8. Soft-delete previous AssetReference if replacing an existing avatar
-  const existingUser = await User.findById(session.user.id).select("profileAssetReferenceId");
+  const existingUser = await User.findById(userId).select("profileAssetReferenceId");
   if (
     existingUser?.profileAssetReferenceId &&
     String(existingUser.profileAssetReferenceId) !== String(assetReference._id)
@@ -150,7 +147,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
 
   // 9. Bind AssetReference ID to User profile
   const updatedUser = (await User.findByIdAndUpdate(
-    session.user.id,
+    userId,
     { $set: { profileAssetReferenceId: assetReference._id } },
     { new: true }
   )
@@ -191,22 +188,19 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
  * and soft-deletes the previous AssetReference.
  */
 export const DELETE = withErrorHandler(async () => {
-  const session = await getAuthSession();
-  if (!session?.user?.id) {
-    throw ApiError.unauthorized("Unauthorized: Active session required.");
-  }
+  const userId = await getUserId();
 
   await ConnectDB();
 
   // Find existing profile asset reference and soft-delete it
-  const existingUser = await User.findById(session.user.id).select("profileAssetReferenceId");
+  const existingUser = await User.findById(userId).select("profileAssetReferenceId");
   if (existingUser?.profileAssetReferenceId) {
     await AssetReference.findByIdAndUpdate(existingUser.profileAssetReferenceId, {
       deletedAt: new Date(),
     });
   }
 
-  await User.findByIdAndUpdate(session.user.id, {
+  await User.findByIdAndUpdate(userId, {
     $set: { profileAssetReferenceId: null },
   });
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
-import { getAuthSession } from "@/lib/auth/auth.helper";
+import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
 import { sanitizeSearchParam, buildSearchRegex } from "@/lib/helpers/search.helper";
@@ -78,10 +78,7 @@ function formatClientDocumentItem(
  */
 export const GET = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    const session = await getAuthSession();
-    if (!session?.user?.id) {
-      throw ApiError.unauthorized("Authentication required");
-    }
+    await getUserId();
 
     const { id } = await params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -209,10 +206,7 @@ export const GET = withErrorHandler(
  */
 export const POST = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    const session = await getAuthSession();
-    if (!session?.user?.id) {
-      throw ApiError.unauthorized("Authentication required");
-    }
+    await getUserId();
 
     const { id } = await params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
