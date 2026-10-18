@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import Script from "next/script";
 import "./globals.css";
 import { Toaster } from "@/components/shared/toaster";
 import { fontVariables } from "@/utils/fonts";
@@ -62,8 +63,10 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`${fontVariables} h-full antialiased`}
     >
-      <head>
-        <script
+      <body className="min-h-full flex flex-col font-sans">
+        <Script
+          id="theme-initializer"
+          strategy="beforeInteractive"
           dangerouslySetInnerHTML={{
             __html: `
               (function() {
@@ -82,8 +85,6 @@ export default function RootLayout({
             `,
           }}
         />
-      </head>
-      <body className="min-h-full flex flex-col font-sans">
         <QueryProvider>
           <AuthProvider>
             {children}
