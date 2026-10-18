@@ -10,7 +10,6 @@ export interface ICase {
   caseCategory?: string | null; // e.g. "Title Suit", "Bail Application", "Income Tax Appeal"
   courtId: Types.ObjectId;
   clientId: Types.ObjectId; // Primary client
-  assignedUserId?: Types.ObjectId | null;
   filingDate?: Date | null;
   caseStatus: CaseStatus;
   priority: CasePriority;

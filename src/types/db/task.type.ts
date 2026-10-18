@@ -6,11 +6,11 @@ export interface ITask {
   description?: string | null;
   caseId?: Types.ObjectId | null;
   clientId?: Types.ObjectId | null;
-  assignedUserId?: Types.ObjectId | null;
   dueAt?: Date | null;
   priority: TaskPriority;
   status: TaskStatus;
   completedAt?: Date | null;
+  deletedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }

@@ -14,8 +14,8 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/shared/use-toast";
 import {
   CLIENT_DOCUMENT_MAX_SIZE_BYTES,
-  CLIENT_DOCUMENT_ALLOWED_MIME_TYPES,
 } from "@/const/client-document.const";
+import { validateDocumentFile } from "@/utils/document-compression";
 import { useUploadClientDocument } from "@/hooks/clients";
 import type { ClientDocumentItemDto } from "@/types/client-document.types";
 import {
@@ -72,16 +72,14 @@ export function ClientDocumentReplaceDialog({
     const selectedFile = e.target.files?.[0];
     if (!selectedFile) return;
 
-    if (selectedFile.size > CLIENT_DOCUMENT_MAX_SIZE_BYTES) {
-      setValidationError("Selected replacement file exceeds the maximum 2MB limit.");
-      return;
-    }
-
-    const isAllowed = (CLIENT_DOCUMENT_ALLOWED_MIME_TYPES as readonly string[]).includes(
-      selectedFile.type
-    );
-    if (!isAllowed && selectedFile.type) {
-      setValidationError("Unsupported file format. Please upload PDF, Word, or image formats.");
+    try {
+      validateDocumentFile(selectedFile, CLIENT_DOCUMENT_MAX_SIZE_BYTES);
+    } catch (err) {
+      setValidationError(
+        err instanceof Error
+          ? err.message
+          : "Invalid file. Max size 2MB (PDF, Word, Images)."
+      );
       return;
     }
 

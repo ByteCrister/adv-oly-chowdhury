@@ -49,6 +49,11 @@ const clientDocumentSchema = new Schema<IClientDocumentRecord>(
       type: String,
       default: null,
     },
+    deletedAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
   },
   {
     timestamps: true,
@@ -59,6 +64,8 @@ const clientDocumentSchema = new Schema<IClientDocumentRecord>(
 clientDocumentSchema.index({ clientId: 1, createdAt: -1 });
 clientDocumentSchema.index({ clientId: 1, documentType: 1 });
 clientDocumentSchema.index({ clientId: 1, assetReferenceId: 1 });
+clientDocumentSchema.index({ clientId: 1, deletedAt: 1 });
+clientDocumentSchema.index({ deletedAt: 1, createdAt: -1 });
 
 export const ClientDocument: Model<IClientDocumentRecord> =
   (mongoose.models[MODELS.CLIENT_DOCUMENT] as Model<IClientDocumentRecord>) ||

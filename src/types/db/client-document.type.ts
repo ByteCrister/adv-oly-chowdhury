@@ -9,6 +9,7 @@ export interface IClientDocumentEntity {
   documentDate?: Date | null;
   expiryDate?: Date | null;
   notes?: string | null;
+  deletedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }

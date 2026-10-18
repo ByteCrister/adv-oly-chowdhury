@@ -72,7 +72,13 @@ export function ClientsOverviewPage() {
     <div className="space-y-6 pb-12">
       {/* 1. Header with Live Stats & New Client Button */}
       <FadeInUp delay={0.05}>
-        <ClientsStatsHeader onAddNew={handleAddNew} />
+        <ClientsStatsHeader
+          stats={data?.stats}
+          isLoading={isLoading}
+          isFetching={isFetching}
+          onRefetch={() => refetch()}
+          onAddNew={handleAddNew}
+        />
       </FadeInUp>
 
       {/* 2. Search, Filter & Sort Toolbar */}

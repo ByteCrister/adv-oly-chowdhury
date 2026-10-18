@@ -33,12 +33,6 @@ const taskSchema = new Schema<ITaskDocument>(
       default: null,
       index: true,
     },
-    assignedUserId: {
-      type: Schema.Types.ObjectId,
-      ref: MODELS.USER,
-      default: null,
-      index: true,
-    },
     dueAt: {
       type: Date,
       default: null,
@@ -66,6 +60,11 @@ const taskSchema = new Schema<ITaskDocument>(
       type: Date,
       default: null,
     },
+    deletedAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
   },
   {
     timestamps: true,
@@ -73,8 +72,12 @@ const taskSchema = new Schema<ITaskDocument>(
   }
 );
 
-taskSchema.index({ status: 1, dueAt: 1 });
-taskSchema.index({ caseId: 1, status: 1 });
+// High-frequency query & soft-delete indexes
+taskSchema.index({ deletedAt: 1, status: 1, dueAt: 1 });
+taskSchema.index({ deletedAt: 1, caseId: 1, status: 1 });
+taskSchema.index({ deletedAt: 1, clientId: 1, status: 1 });
+taskSchema.index({ deletedAt: 1, priority: 1 });
+taskSchema.index({ title: "text", description: "text" });
 
 export const Task: Model<ITaskDocument> =
   (mongoose.models[MODELS.TASK] as Model<ITaskDocument>) ||

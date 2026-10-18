@@ -14,6 +14,8 @@ import {
   CLIENT_SORT_OPTIONS,
   CLIENT_TYPE_LABELS,
   CLIENT_STATUS_LABELS,
+  CLIENT_STATUSES,
+  CLIENT_TYPES,
   ClientPageLimit,
   ClientSortOption,
   ClientType,
@@ -26,6 +28,7 @@ import type {
   ClientPaginationResponse,
   ClientActionResponse,
   ClientDetailDto,
+  ClientOverallStatsDto,
 } from "@/types/client.types";
 import type { IClientDocument } from "@/types/db/client.type";
 import ConnectDB from "@/db";
@@ -206,52 +209,132 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
 
   await ConnectDB();
 
-  // Execute count and find queries in parallel
-  const [total, clients] = await Promise.all([
-    Client.countDocuments(filter),
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
+
+  // Execute client aggregation (for counts and stats) and paginated find queries in parallel
+  const [statsAggResult, clients] = await Promise.all([
+    Client.aggregate<{
+      total: number;
+      active: number;
+      inactive: number;
+      archived: number;
+      individual: number;
+      corporate: number;
+      newThisMonth: number;
+      matchedIds: mongoose.Types.ObjectId[];
+    }>([
+      { $match: filter },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: 1 },
+          active: {
+            $sum: { $cond: [{ $eq: ["$status", CLIENT_STATUSES.ACTIVE] }, 1, 0] },
+          },
+          inactive: {
+            $sum: { $cond: [{ $eq: ["$status", CLIENT_STATUSES.INACTIVE] }, 1, 0] },
+          },
+          archived: {
+            $sum: { $cond: [{ $eq: ["$status", CLIENT_STATUSES.ARCHIVED] }, 1, 0] },
+          },
+          individual: {
+            $sum: { $cond: [{ $eq: ["$clientType", CLIENT_TYPES.INDIVIDUAL] }, 1, 0] },
+          },
+          corporate: {
+            $sum: { $cond: [{ $eq: ["$clientType", CLIENT_TYPES.ORGANIZATION] }, 1, 0] },
+          },
+          newThisMonth: {
+            $sum: { $cond: [{ $gte: ["$createdAt", startOfMonth] }, 1, 0] },
+          },
+          matchedIds: { $push: "$_id" },
+        },
+      },
+    ]),
     Client.find(filter).sort(sortOption).skip(skip).limit(limit).lean(),
   ]);
 
+  const rawStats = statsAggResult[0];
+  const total = rawStats?.total ?? 0;
+  const matchedClientIds = rawStats?.matchedIds ?? [];
+
   const clientIds = clients.map((c) => c._id as mongoose.Types.ObjectId);
 
-  // Compute relation counts for clients in the current page
-  const [caseAggregations, documentCounts, paymentAggregations] = await Promise.all([
-    Case.aggregate<{
-      _id: mongoose.Types.ObjectId;
-      totalCases: number;
-      activeCases: number;
-    }>([
-      { $match: { clientId: { $in: clientIds }, deletedAt: null } },
-      {
-        $group: {
-          _id: "$clientId",
-          totalCases: { $sum: 1 },
-          activeCases: {
-            $sum: {
-              $cond: [{ $eq: ["$caseStatus", CASE_STATUSES.ACTIVE] }, 1, 0],
+  // In parallel: fetch page item relations AND cross-client aggregate metrics
+  const [
+    caseAggregations,
+    documentCounts,
+    paymentAggregations,
+    activeCaseClientIds,
+    revenueAgg,
+    thisMonthRevenueAgg,
+  ] = await Promise.all([
+    clientIds.length > 0
+      ? Case.aggregate<{
+          _id: mongoose.Types.ObjectId;
+          totalCases: number;
+          activeCases: number;
+        }>([
+          { $match: { clientId: { $in: clientIds }, deletedAt: null } },
+          {
+            $group: {
+              _id: "$clientId",
+              totalCases: { $sum: 1 },
+              activeCases: {
+                $sum: {
+                  $cond: [{ $eq: ["$caseStatus", CASE_STATUSES.ACTIVE] }, 1, 0],
+                },
+              },
             },
           },
-        },
-      },
-    ]),
-    ClientDocument.aggregate<{ _id: mongoose.Types.ObjectId; count: number }>([
-      { $match: { clientId: { $in: clientIds } } },
-      { $group: { _id: "$clientId", count: { $sum: 1 } } },
-    ]),
-    ClientPayment.aggregate<{
-      _id: mongoose.Types.ObjectId;
-      totalPayments: number;
-      totalPaidAmount: number;
-    }>([
-      { $match: { clientId: { $in: clientIds } } },
-      {
-        $group: {
-          _id: "$clientId",
-          totalPayments: { $sum: 1 },
-          totalPaidAmount: { $sum: "$amount" },
-        },
-      },
-    ]),
+        ])
+      : [],
+    clientIds.length > 0
+      ? ClientDocument.aggregate<{ _id: mongoose.Types.ObjectId; count: number }>([
+          { $match: { clientId: { $in: clientIds } } },
+          { $group: { _id: "$clientId", count: { $sum: 1 } } },
+        ])
+      : [],
+    clientIds.length > 0
+      ? ClientPayment.aggregate<{
+          _id: mongoose.Types.ObjectId;
+          totalPayments: number;
+          totalPaidAmount: number;
+        }>([
+          { $match: { clientId: { $in: clientIds } } },
+          {
+            $group: {
+              _id: "$clientId",
+              totalPayments: { $sum: 1 },
+              totalPaidAmount: { $sum: "$amount" },
+            },
+          },
+        ])
+      : [],
+    matchedClientIds.length > 0
+      ? Case.distinct("clientId", {
+          clientId: { $in: matchedClientIds },
+          caseStatus: CASE_STATUSES.ACTIVE,
+          deletedAt: null,
+        })
+      : [],
+    matchedClientIds.length > 0
+      ? ClientPayment.aggregate<{ total: number }>([
+          { $match: { clientId: { $in: matchedClientIds } } },
+          { $group: { _id: null, total: { $sum: "$amount" } } },
+        ])
+      : [],
+    matchedClientIds.length > 0
+      ? ClientPayment.aggregate<{ total: number }>([
+          {
+            $match: {
+              clientId: { $in: matchedClientIds },
+              paymentDate: { $gte: startOfMonth },
+            },
+          },
+          { $group: { _id: null, total: { $sum: "$amount" } } },
+        ])
+      : [],
   ]);
 
   const caseMap = new Map(
@@ -284,6 +367,19 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     });
   });
 
+  const stats: ClientOverallStatsDto = {
+    totalClients: total,
+    activeClients: rawStats?.active ?? 0,
+    inactiveClients: rawStats?.inactive ?? 0,
+    archivedClients: rawStats?.archived ?? 0,
+    individualClients: rawStats?.individual ?? 0,
+    corporateClients: rawStats?.corporate ?? 0,
+    clientsWithActiveCases: activeCaseClientIds.length,
+    totalRevenueCollected: revenueAgg[0]?.total ?? 0,
+    thisMonthRevenue: thisMonthRevenueAgg[0]?.total ?? 0,
+    newClientsThisMonth: rawStats?.newThisMonth ?? 0,
+  };
+
   const response: ClientPaginationResponse = {
     items,
     total,
@@ -291,6 +387,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     limit: limit as ClientPageLimit,
     totalPages: Math.ceil(total / limit) || 1,
     hasMore: page * limit < total,
+    stats,
   };
 
   return NextResponse.json(response);

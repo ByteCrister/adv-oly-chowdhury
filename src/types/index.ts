@@ -8,4 +8,8 @@ export * from "./dropdown.types";
 export * from "./case-expense.types";
 export * from "./financial.types";
 export * from "./client-payment.types";
+export * from "./client-document.types";
+export * from "./case-document.types";
+export * from "./document.types";
+export * from "./task.types";
 

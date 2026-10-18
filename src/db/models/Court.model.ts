@@ -54,6 +54,11 @@ const courtSchema = new Schema<ICourtDocument>(
       default: true,
       index: true,
     },
+    deletedAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
   },
   {
     timestamps: true,
@@ -61,8 +66,8 @@ const courtSchema = new Schema<ICourtDocument>(
   }
 );
 
-courtSchema.index({ district: 1, courtType: 1 });
-courtSchema.index({ name: 1, district: 1 });
+courtSchema.index({ deletedAt: 1, district: 1, courtType: 1 });
+courtSchema.index({ deletedAt: 1, name: 1, district: 1 });
 
 export const Court: Model<ICourtDocument> =
   (mongoose.models[MODELS.COURT] as Model<ICourtDocument>) ||

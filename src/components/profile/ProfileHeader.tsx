@@ -18,6 +18,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/shared/use-toast";
+import {
+  FadeIn,
+  FadeInUp,
+  ScaleIn,
+  StaggerContainer,
+  StaggerItem,
+} from "@/components/wrappers/Motion";
 import type { ProfileApiResponse } from "@/types/profile.ui.type";
 
 export interface ProfileHeaderProps {
@@ -70,49 +77,51 @@ export function ProfileHeader({
           {/* Left: Avatar & Identity Details */}
           <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5 text-center sm:text-left">
             {/* Avatar with Camera Trigger Overlay */}
-            <div className="relative group shrink-0">
-              <div className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-2xl overflow-hidden border-2 border-gold-500/40 dark:border-gold-500/50 bg-background/80 shadow-md transition-transform duration-300 group-hover:scale-[1.02]">
-                {avatarUrl ? (
-                  <Image
-                    src={avatarUrl}
-                    alt={user.preferredName || user.name}
-                    fill
-                    sizes="(max-width: 640px) 96px, 112px"
-                    className="object-cover transition-transform duration-500 group-hover:scale-105"
-                    priority
-                  />
-                ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-gold-500/20 via-gold-500/10 to-transparent text-gold-600 dark:text-gold-400 font-serif font-bold text-2xl sm:text-3xl">
-                    <span>OC</span>
-                    <span className="text-[10px] font-sans font-medium uppercase tracking-widest text-muted-foreground mt-0.5">
-                      Advocate
+            <ScaleIn duration={0.4} delay={0.05} viewport={{ once: true, margin: "0px" }} className="shrink-0">
+              <div className="relative group shrink-0">
+                <div className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-2xl overflow-hidden border-2 border-gold-500/40 dark:border-gold-500/50 bg-background/80 shadow-md transition-transform duration-300 group-hover:scale-[1.02]">
+                  {avatarUrl ? (
+                    <Image
+                      src={avatarUrl}
+                      alt={user.preferredName || user.name}
+                      fill
+                      sizes="(max-width: 640px) 96px, 112px"
+                      className="object-cover transition-transform duration-500 group-hover:scale-105"
+                      priority
+                    />
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-gold-500/20 via-gold-500/10 to-transparent text-gold-600 dark:text-gold-400 font-serif font-bold text-2xl sm:text-3xl">
+                      <span>OC</span>
+                      <span className="text-[10px] font-sans font-medium uppercase tracking-widest text-muted-foreground mt-0.5">
+                        Advocate
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Hover overlay with button */}
+                  <button
+                    type="button"
+                    onClick={onOpenAvatarDialog}
+                    aria-label="Change profile avatar"
+                    className="absolute inset-0 bg-midnight-950/70 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex flex-col items-center justify-center text-white gap-1 cursor-pointer"
+                  >
+                    <Camera className="w-5 h-5 text-gold-400" />
+                    <span className="text-[10px] font-semibold tracking-wide">
+                      {avatarUrl ? "Change Photo" : "Upload Photo"}
                     </span>
-                  </div>
-                )}
+                  </button>
+                </div>
 
-                {/* Hover overlay with button */}
-                <button
-                  type="button"
-                  onClick={onOpenAvatarDialog}
-                  aria-label="Change profile avatar"
-                  className="absolute inset-0 bg-midnight-950/70 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex flex-col items-center justify-center text-white gap-1 cursor-pointer"
-                >
-                  <Camera className="w-5 h-5 text-gold-400" />
-                  <span className="text-[10px] font-semibold tracking-wide">
-                    {avatarUrl ? "Change Photo" : "Upload Photo"}
-                  </span>
-                </button>
+                {/* Online / Active Verification Pill */}
+                <div className="absolute -bottom-2 -right-2 px-2 py-0.5 rounded-full bg-background border border-gold-500/30 shadow-sm flex items-center gap-1.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="hidden sm:inline">Active</span>
+                </div>
               </div>
-
-              {/* Online / Active Verification Pill */}
-              <div className="absolute -bottom-2 -right-2 px-2 py-0.5 rounded-full bg-background border border-gold-500/30 shadow-sm flex items-center gap-1.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="hidden sm:inline">Active</span>
-              </div>
-            </div>
+            </ScaleIn>
 
             {/* Advocate Credentials & Names */}
-            <div className="space-y-2 min-w-0">
+            <FadeInUp duration={0.4} delay={0.08} yOffset={10} viewport={{ once: true, margin: "0px" }} className="space-y-2 min-w-0">
               <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
                 <Badge variant="gold" className="text-[10px] uppercase tracking-wider font-semibold gap-1">
                   <ShieldCheck className="w-3 h-3 text-gold-500" />
@@ -160,7 +169,7 @@ export function ProfileHeader({
                     {copiedField === "Bar Council Sanad" ? (
                       <Check className="w-3 h-3 text-emerald-500 ml-1" />
                     ) : (
-                      <Copy className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity ml-1" />
+                      <Copy className="w-3.5 h-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity ml-1" />
                     )}
                   </button>
                 )}
@@ -177,11 +186,11 @@ export function ProfileHeader({
                   </span>
                 )}
               </div>
-            </div>
+            </FadeInUp>
           </div>
 
           {/* Right: Primary Action Buttons */}
-          <div className="flex flex-wrap items-center justify-center sm:justify-end gap-3 self-center lg:self-start">
+          <FadeIn duration={0.4} delay={0.12} viewport={{ once: true, margin: "0px" }} className="flex flex-wrap items-center justify-center sm:justify-end gap-3 self-center lg:self-start">
             <Button
               type="button"
               variant="outline"
@@ -203,97 +212,108 @@ export function ProfileHeader({
               <Edit2 className="w-3.5 h-3.5" />
               <span>{isEditing ? "Cancel Editing" : "Edit Profile"}</span>
             </Button>
-          </div>
+          </FadeIn>
         </div>
 
         {/* Quick Contact & Chamber Highlights Bar */}
-        <div className="pt-4 border-t border-border/60 grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <StaggerContainer
+          delay={0.15}
+          staggerDelay={0.07}
+          viewport={{ once: true, margin: "0px" }}
+          className="pt-4 border-t border-border/60 grid grid-cols-1 sm:grid-cols-3 gap-3"
+        >
           {/* Phone */}
-          <div className="flex items-center justify-between p-3 rounded-xl bg-muted/30 dark:bg-card/40 border border-border/60">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-lg bg-sapphire-500/10 border border-sapphire-500/20 flex items-center justify-center text-sapphire-600 dark:text-sapphire-400 shrink-0">
-                <Phone className="w-4 h-4" />
+          <StaggerItem yOffset={8}>
+            <div className="flex items-center justify-between p-3 rounded-xl bg-muted/30 dark:bg-card/40 border border-border/60 h-full">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-sapphire-500/10 border border-sapphire-500/20 flex items-center justify-center text-sapphire-600 dark:text-sapphire-400 shrink-0">
+                  <Phone className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">
+                    Direct Line
+                  </p>
+                  <p className="text-xs font-mono font-medium text-foreground truncate">
+                    {user.phone || "01712-459840"}
+                  </p>
+                </div>
               </div>
-              <div className="min-w-0">
-                <p className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">
-                  Direct Line
-                </p>
-                <p className="text-xs font-mono font-medium text-foreground truncate">
-                  {user.phone || "01712-459840"}
-                </p>
-              </div>
+              <button
+                type="button"
+                onClick={() => copyToClipboard(user.phone || "01712-459840", "Phone")}
+                className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                title="Copy phone number"
+              >
+                {copiedField === "Phone" ? (
+                  <Check className="w-3.5 h-3.5 text-emerald-500" />
+                ) : (
+                  <Copy className="w-3.5 h-3.5" />
+                )}
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => copyToClipboard(user.phone || "01712-459840", "Phone")}
-              className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-              title="Copy phone number"
-            >
-              {copiedField === "Phone" ? (
-                <Check className="w-3.5 h-3.5 text-emerald-500" />
-              ) : (
-                <Copy className="w-3.5 h-3.5" />
-              )}
-            </button>
-          </div>
+          </StaggerItem>
 
           {/* WhatsApp */}
-          <div className="flex items-center justify-between p-3 rounded-xl bg-muted/30 dark:bg-card/40 border border-border/60">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
-                <MessageSquare className="w-4 h-4" />
+          <StaggerItem yOffset={8}>
+            <div className="flex items-center justify-between p-3 rounded-xl bg-muted/30 dark:bg-card/40 border border-border/60 h-full">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+                  <MessageSquare className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">
+                    WhatsApp Contact
+                  </p>
+                  <p className="text-xs font-mono font-medium text-foreground truncate">
+                    {user.whatsappNumber || "+8801712459840"}
+                  </p>
+                </div>
               </div>
-              <div className="min-w-0">
-                <p className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">
-                  WhatsApp Contact
-                </p>
-                <p className="text-xs font-mono font-medium text-foreground truncate">
-                  {user.whatsappNumber || "+8801712459840"}
-                </p>
-              </div>
+              {user.whatsappNumber && (
+                <a
+                  href={`https://wa.me/${user.whatsappNumber.replace(/[^0-9]/g, "")}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
+                  title="Open WhatsApp chat"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              )}
             </div>
-            {user.whatsappNumber && (
-              <a
-                href={`https://wa.me/${user.whatsappNumber.replace(/[^0-9]/g, "")}`}
-                target="_blank"
-                rel="noreferrer"
-                className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
-                title="Open WhatsApp chat"
-              >
-                <ExternalLink className="w-3.5 h-3.5" />
-              </a>
-            )}
-          </div>
+          </StaggerItem>
 
           {/* Email */}
-          <div className="flex items-center justify-between p-3 rounded-xl bg-muted/30 dark:bg-card/40 border border-border/60">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-lg bg-gold-500/10 border border-gold-500/20 flex items-center justify-center text-gold-600 dark:text-gold-400 shrink-0">
-                <Mail className="w-4 h-4" />
+          <StaggerItem yOffset={8}>
+            <div className="flex items-center justify-between p-3 rounded-xl bg-muted/30 dark:bg-card/40 border border-border/60 h-full">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-gold-500/10 border border-gold-500/20 flex items-center justify-center text-gold-600 dark:text-gold-400 shrink-0">
+                  <Mail className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">
+                    Chamber Email
+                  </p>
+                  <p className="text-xs font-mono font-medium text-foreground truncate">
+                    {user.email}
+                  </p>
+                </div>
               </div>
-              <div className="min-w-0">
-                <p className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">
-                  Chamber Email
-                </p>
-                <p className="text-xs font-mono font-medium text-foreground truncate">
-                  {user.email}
-                </p>
-              </div>
+              <button
+                type="button"
+                onClick={() => copyToClipboard(user.email, "Email")}
+                className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                title="Copy email address"
+              >
+                {copiedField === "Email" ? (
+                  <Check className="w-3.5 h-3.5 text-emerald-500" />
+                ) : (
+                  <Copy className="w-3.5 h-3.5" />
+                )}
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => copyToClipboard(user.email, "Email")}
-              className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-              title="Copy email address"
-            >
-              {copiedField === "Email" ? (
-                <Check className="w-3.5 h-3.5 text-emerald-500" />
-              ) : (
-                <Copy className="w-3.5 h-3.5" />
-              )}
-            </button>
-          </div>
-        </div>
+          </StaggerItem>
+        </StaggerContainer>
       </div>
     </div>
   );

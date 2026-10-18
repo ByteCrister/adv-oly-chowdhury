@@ -15,6 +15,11 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/shared/use-toast";
+import {
+  FadeIn,
+  StaggerContainer,
+  StaggerItem,
+} from "@/components/wrappers/Motion";
 import { useUpdateProfileMutation } from "@/hooks/profile/mutations/useUpdateProfileMutation";
 import { useUpdatePasswordMutation } from "@/hooks/profile/mutations/useUpdatePasswordMutation";
 import {
@@ -254,7 +259,7 @@ export function ProfileEditForm({
   return (
     <div className="p-6 sm:p-8 rounded-2xl bg-card/85 dark:bg-card/50 backdrop-blur-2xl border border-border/80 dark:border-white/10 shadow-xl space-y-8">
       {/* Top Header & Discard Warning */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-border/60">
+      <FadeIn duration={0.3} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-border/60">
         <div>
           <div className="flex items-center gap-2">
             <Badge variant="gold" className="text-[10px] uppercase font-semibold">
@@ -305,514 +310,601 @@ export function ProfileEditForm({
             </Button>
           )}
         </div>
-      </div>
+      </FadeIn>
 
       {/* Error alert banner */}
       {formError && (
-        <div className="p-4 rounded-xl bg-destructive/10 border border-destructive/30 flex items-start gap-3 text-destructive animate-in fade-in duration-200">
+        <FadeIn duration={0.2} className="p-4 rounded-xl bg-destructive/10 border border-destructive/30 flex items-start gap-3 text-destructive">
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
           <div className="text-xs space-y-0.5">
             <p className="font-semibold">Unable to Save Profile</p>
             <p className="opacity-90">{formError}</p>
           </div>
-        </div>
+        </FadeIn>
       )}
 
       {/* ── Active Tab Form Fields ──────────────────────────── */}
       {activeTab === "general" && (
-        <form onSubmit={handleSaveProfile} className="space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-            {/* Legal Name */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground flex items-center gap-1">
-                <span>Full Legal Name</span>
-                <span className="text-destructive">*</span>
-              </label>
-              <Input
-                type="text"
-                value={formData.name}
-                onChange={(e) => handleTextChange("name", e.target.value)}
-                placeholder="Aminul Islam Chowdhury Oly"
-                required
-                disabled={isSaving}
-              />
-              <p className="text-[11px] text-muted-foreground">
-                As registered with the Bangladesh Bar Council and court records.
-              </p>
-            </div>
+        <FadeIn duration={0.3} key="general">
+          <form onSubmit={handleSaveProfile} className="space-y-6">
+            <StaggerContainer
+              delay={0.05}
+              staggerDelay={0.03}
+              viewport={{ once: true, margin: "0px" }}
+              className="grid grid-cols-1 sm:grid-cols-2 gap-5"
+            >
+              {/* Legal Name */}
+              <StaggerItem yOffset={8}>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground flex items-center gap-1">
+                    <span>Full Legal Name</span>
+                    <span className="text-destructive">*</span>
+                  </label>
+                  <Input
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => handleTextChange("name", e.target.value)}
+                    placeholder="Aminul Islam Chowdhury Oly"
+                    required
+                    disabled={isSaving}
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    As registered with the Bangladesh Bar Council and court records.
+                  </p>
+                </div>
+              </StaggerItem>
 
-            {/* Preferred Name */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                Preferred Honorific / Display Name
-              </label>
-              <Input
-                type="text"
-                value={formData.preferredName || ""}
-                onChange={(e) => handleTextChange("preferredName", e.target.value)}
-                placeholder="Advocate Oly Chowdhury"
-                disabled={isSaving}
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Commonly known title displayed in headers and client communications.
-              </p>
-            </div>
+              {/* Preferred Name */}
+              <StaggerItem yOffset={8}>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground">
+                    Preferred Honorific / Display Name
+                  </label>
+                  <Input
+                    type="text"
+                    value={formData.preferredName || ""}
+                    onChange={(e) => handleTextChange("preferredName", e.target.value)}
+                    placeholder="Advocate Oly Chowdhury"
+                    disabled={isSaving}
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    Commonly known title displayed in headers and client communications.
+                  </p>
+                </div>
+              </StaggerItem>
 
-            {/* Title */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                Professional Title
-              </label>
-              <Input
-                type="text"
-                value={formData.title || ""}
-                onChange={(e) => handleTextChange("title", e.target.value)}
-                placeholder="Advocate"
-                disabled={isSaving}
-              />
-            </div>
+              {/* Title */}
+              <StaggerItem yOffset={8}>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground">
+                    Professional Title
+                  </label>
+                  <Input
+                    type="text"
+                    value={formData.title || ""}
+                    onChange={(e) => handleTextChange("title", e.target.value)}
+                    placeholder="Advocate"
+                    disabled={isSaving}
+                  />
+                </div>
+              </StaggerItem>
 
-            {/* Subtitle */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                Jurisdiction Subtitle
-              </label>
-              <Input
-                type="text"
-                value={formData.subtitle || ""}
-                onChange={(e) => handleTextChange("subtitle", e.target.value)}
-                placeholder="Advocate • Judge's Court, Sylhet"
-                disabled={isSaving}
-              />
-            </div>
+              {/* Subtitle */}
+              <StaggerItem yOffset={8}>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground">
+                    Jurisdiction Subtitle
+                  </label>
+                  <Input
+                    type="text"
+                    value={formData.subtitle || ""}
+                    onChange={(e) => handleTextChange("subtitle", e.target.value)}
+                    placeholder="Advocate • Judge's Court, Sylhet"
+                    disabled={isSaving}
+                  />
+                </div>
+              </StaggerItem>
 
-            {/* Tagline */}
-            <div className="sm:col-span-2 space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                Chamber Tagline / Philosophy
-              </label>
-              <Input
-                type="text"
-                value={formData.tagline || ""}
-                onChange={(e) => handleTextChange("tagline", e.target.value)}
-                placeholder="Dedicated Legal Advocacy with Integrity & Precision"
-                disabled={isSaving}
-              />
-            </div>
+              {/* Tagline */}
+              <StaggerItem yOffset={8} className="sm:col-span-2">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground">
+                    Chamber Tagline / Philosophy
+                  </label>
+                  <Input
+                    type="text"
+                    value={formData.tagline || ""}
+                    onChange={(e) => handleTextChange("tagline", e.target.value)}
+                    placeholder="Dedicated Legal Advocacy with Integrity & Precision"
+                    disabled={isSaving}
+                  />
+                </div>
+              </StaggerItem>
 
-            {/* Phone */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                Primary Phone Number
-              </label>
-              <Input
-                type="text"
-                value={formData.phone || ""}
-                onChange={(e) => handleTextChange("phone", e.target.value)}
-                placeholder="01712-459840"
-                disabled={isSaving}
-              />
-            </div>
+              {/* Phone */}
+              <StaggerItem yOffset={8}>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground">
+                    Primary Phone Number
+                  </label>
+                  <Input
+                    type="text"
+                    value={formData.phone || ""}
+                    onChange={(e) => handleTextChange("phone", e.target.value)}
+                    placeholder="01712-459840"
+                    disabled={isSaving}
+                  />
+                </div>
+              </StaggerItem>
 
-            {/* Alternate Phone */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                Alternate Mobile Number
-              </label>
-              <Input
-                type="text"
-                value={formData.alternatePhone || ""}
-                onChange={(e) => handleTextChange("alternatePhone", e.target.value)}
-                placeholder="01812-XXXXXX (Optional)"
-                disabled={isSaving}
-              />
-            </div>
+              {/* Alternate Phone */}
+              <StaggerItem yOffset={8}>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground">
+                    Alternate Mobile Number
+                  </label>
+                  <Input
+                    type="text"
+                    value={formData.alternatePhone || ""}
+                    onChange={(e) => handleTextChange("alternatePhone", e.target.value)}
+                    placeholder="01812-XXXXXX (Optional)"
+                    disabled={isSaving}
+                  />
+                </div>
+              </StaggerItem>
 
-            {/* WhatsApp */}
-            <div className="sm:col-span-2 space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                WhatsApp Direct Number
-              </label>
-              <Input
-                type="text"
-                value={formData.whatsappNumber || ""}
-                onChange={(e) => handleTextChange("whatsappNumber", e.target.value)}
-                placeholder="+8801712459840"
-                disabled={isSaving}
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Include country code for direct WhatsApp click-to-chat links.
-              </p>
-            </div>
-          </div>
-        </form>
+              {/* WhatsApp */}
+              <StaggerItem yOffset={8} className="sm:col-span-2">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground">
+                    WhatsApp Direct Number
+                  </label>
+                  <Input
+                    type="text"
+                    value={formData.whatsappNumber || ""}
+                    onChange={(e) => handleTextChange("whatsappNumber", e.target.value)}
+                    placeholder="+8801712459840"
+                    disabled={isSaving}
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    Include country code for direct WhatsApp click-to-chat links.
+                  </p>
+                </div>
+              </StaggerItem>
+            </StaggerContainer>
+          </form>
+        </FadeIn>
       )}
 
       {/* ── Tab 2: Credentials (Bar Registrations) ────────────── */}
       {activeTab === "credentials" && (
-        <form onSubmit={handleSaveProfile} className="space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-            {/* Bar Council ID */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                Bangladesh Bar Council Sanad / ID
-              </label>
-              <Input
-                type="text"
-                value={formData.barCouncilId || ""}
-                onChange={(e) => handleTextChange("barCouncilId", e.target.value)}
-                placeholder="e.g. 10423/2012"
-                disabled={isSaving}
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Official Sanad enrollment certificate identifier.
-              </p>
-            </div>
+        <FadeIn duration={0.3} key="credentials">
+          <form onSubmit={handleSaveProfile} className="space-y-6">
+            <StaggerContainer
+              delay={0.05}
+              staggerDelay={0.04}
+              viewport={{ once: true, margin: "0px" }}
+              className="grid grid-cols-1 sm:grid-cols-2 gap-5"
+            >
+              {/* Bar Council ID */}
+              <StaggerItem yOffset={8}>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground">
+                    Bangladesh Bar Council Sanad / ID
+                  </label>
+                  <Input
+                    type="text"
+                    value={formData.barCouncilId || ""}
+                    onChange={(e) => handleTextChange("barCouncilId", e.target.value)}
+                    placeholder="e.g. 10423/2012"
+                    disabled={isSaving}
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    Official Sanad enrollment certificate identifier.
+                  </p>
+                </div>
+              </StaggerItem>
 
-            {/* Sylhet District Bar Association No */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                Sylhet District Bar Association Member No
-              </label>
-              <Input
-                type="text"
-                value={formData.barAssociationMemberNo || ""}
-                onChange={(e) =>
-                  handleTextChange("barAssociationMemberNo", e.target.value)
-                }
-                placeholder="e.g. SYL-452"
-                disabled={isSaving}
-              />
-            </div>
+              {/* Sylhet District Bar Association No */}
+              <StaggerItem yOffset={8}>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground">
+                    Sylhet District Bar Association Member No
+                  </label>
+                  <Input
+                    type="text"
+                    value={formData.barAssociationMemberNo || ""}
+                    onChange={(e) =>
+                      handleTextChange("barAssociationMemberNo", e.target.value)
+                    }
+                    placeholder="e.g. SYL-452"
+                    disabled={isSaving}
+                  />
+                </div>
+              </StaggerItem>
 
-            {/* Taxes Bar Association No */}
-            <div className="sm:col-span-2 space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                Sylhet Taxes Bar Association Member No
-              </label>
-              <Input
-                type="text"
-                value={formData.taxesBarMemberNo || ""}
-                onChange={(e) => handleTextChange("taxesBarMemberNo", e.target.value)}
-                placeholder="e.g. TAX-188"
-                disabled={isSaving}
-              />
-            </div>
-          </div>
-        </form>
+              {/* Taxes Bar Association No */}
+              <StaggerItem yOffset={8} className="sm:col-span-2">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground">
+                    Sylhet Taxes Bar Association Member No
+                  </label>
+                  <Input
+                    type="text"
+                    value={formData.taxesBarMemberNo || ""}
+                    onChange={(e) => handleTextChange("taxesBarMemberNo", e.target.value)}
+                    placeholder="e.g. TAX-188"
+                    disabled={isSaving}
+                  />
+                </div>
+              </StaggerItem>
+            </StaggerContainer>
+          </form>
+        </FadeIn>
       )}
 
       {/* ── Tab 3: Chamber (Chamber & Court) ────────────────── */}
       {activeTab === "chamber" && (
-        <form onSubmit={handleSaveProfile} className="space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-            {/* Room */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                Chamber Room & Floor
-              </label>
-              <Input
-                type="text"
-                value={formData.chamber.room || ""}
-                onChange={(e) => handleChamberChange("room", e.target.value)}
-                placeholder="Chamber No. 323 (3rd Floor)"
-                disabled={isSaving}
-              />
-            </div>
+        <FadeIn duration={0.3} key="chamber">
+          <form onSubmit={handleSaveProfile} className="space-y-6">
+            <StaggerContainer
+              delay={0.05}
+              staggerDelay={0.03}
+              viewport={{ once: true, margin: "0px" }}
+              className="grid grid-cols-1 sm:grid-cols-2 gap-5"
+            >
+              {/* Room */}
+              <StaggerItem yOffset={8}>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground">
+                    Chamber Room & Floor
+                  </label>
+                  <Input
+                    type="text"
+                    value={formData.chamber.room || ""}
+                    onChange={(e) => handleChamberChange("room", e.target.value)}
+                    placeholder="Chamber No. 323 (3rd Floor)"
+                    disabled={isSaving}
+                  />
+                </div>
+              </StaggerItem>
 
-            {/* Bar Hall */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                Bar Hall Assignment
-              </label>
-              <Input
-                type="text"
-                value={formData.chamber.barHall || ""}
-                onChange={(e) => handleChamberChange("barHall", e.target.value)}
-                placeholder="Bar Hall No: 02"
-                disabled={isSaving}
-              />
-            </div>
+              {/* Bar Hall */}
+              <StaggerItem yOffset={8}>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground">
+                    Bar Hall Assignment
+                  </label>
+                  <Input
+                    type="text"
+                    value={formData.chamber.barHall || ""}
+                    onChange={(e) => handleChamberChange("barHall", e.target.value)}
+                    placeholder="Bar Hall No: 02"
+                    disabled={isSaving}
+                  />
+                </div>
+              </StaggerItem>
 
-            {/* Court */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                Court Title
-              </label>
-              <Input
-                type="text"
-                value={formData.chamber.court || ""}
-                onChange={(e) => handleChamberChange("court", e.target.value)}
-                placeholder="Judge's Court"
-                disabled={isSaving}
-              />
-            </div>
+              {/* Court */}
+              <StaggerItem yOffset={8}>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground">
+                    Court Title
+                  </label>
+                  <Input
+                    type="text"
+                    value={formData.chamber.court || ""}
+                    onChange={(e) => handleChamberChange("court", e.target.value)}
+                    placeholder="Judge's Court"
+                    disabled={isSaving}
+                  />
+                </div>
+              </StaggerItem>
 
-            {/* City & District */}
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-foreground">City</label>
-                <Input
-                  type="text"
-                  value={formData.chamber.city || ""}
-                  onChange={(e) => handleChamberChange("city", e.target.value)}
-                  placeholder="Sylhet"
-                  disabled={isSaving}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-foreground">District</label>
-                <Input
-                  type="text"
-                  value={formData.chamber.district || ""}
-                  onChange={(e) => handleChamberChange("district", e.target.value)}
-                  placeholder="Sylhet"
-                  disabled={isSaving}
-                />
-              </div>
-            </div>
+              {/* City & District */}
+              <StaggerItem yOffset={8}>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-foreground">City</label>
+                    <Input
+                      type="text"
+                      value={formData.chamber.city || ""}
+                      onChange={(e) => handleChamberChange("city", e.target.value)}
+                      placeholder="Sylhet"
+                      disabled={isSaving}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-foreground">District</label>
+                    <Input
+                      type="text"
+                      value={formData.chamber.district || ""}
+                      onChange={(e) => handleChamberChange("district", e.target.value)}
+                      placeholder="Sylhet"
+                      disabled={isSaving}
+                    />
+                  </div>
+                </div>
+              </StaggerItem>
 
-            {/* Full Address */}
-            <div className="sm:col-span-2 space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                Full Physical Chamber Address
-              </label>
-              <Input
-                type="text"
-                value={formData.chamber.fullAddress || ""}
-                onChange={(e) => handleChamberChange("fullAddress", e.target.value)}
-                placeholder="Chamber No. 323 (3rd Floor), Bar Hall No: 02, Judge's Court, Sylhet, Bangladesh"
-                disabled={isSaving}
-              />
-            </div>
+              {/* Full Address */}
+              <StaggerItem yOffset={8} className="sm:col-span-2">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground">
+                    Full Physical Chamber Address
+                  </label>
+                  <Input
+                    type="text"
+                    value={formData.chamber.fullAddress || ""}
+                    onChange={(e) => handleChamberChange("fullAddress", e.target.value)}
+                    placeholder="Chamber No. 323 (3rd Floor), Bar Hall No: 02, Judge's Court, Sylhet, Bangladesh"
+                    disabled={isSaving}
+                  />
+                </div>
+              </StaggerItem>
 
-            {/* Consultation Hours */}
-            <div className="sm:col-span-2 space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                Client Consultation Hours
-              </label>
-              <Input
-                type="text"
-                value={formData.chamber.consultationHours || ""}
-                onChange={(e) =>
-                  handleChamberChange("consultationHours", e.target.value)
-                }
-                placeholder="Saturday – Thursday (Court & Chamber Hours)"
-                disabled={isSaving}
-              />
-            </div>
-          </div>
-        </form>
+              {/* Consultation Hours */}
+              <StaggerItem yOffset={8} className="sm:col-span-2">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground">
+                    Client Consultation Hours
+                  </label>
+                  <Input
+                    type="text"
+                    value={formData.chamber.consultationHours || ""}
+                    onChange={(e) =>
+                      handleChamberChange("consultationHours", e.target.value)
+                    }
+                    placeholder="Saturday – Thursday (Court & Chamber Hours)"
+                    disabled={isSaving}
+                  />
+                </div>
+              </StaggerItem>
+            </StaggerContainer>
+          </form>
+        </FadeIn>
       )}
 
       {/* ── Tab 4: Address (Residential Address) ─────────────── */}
       {activeTab === "address" && (
-        <form onSubmit={handleSaveProfile} className="space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-            {/* Present Address */}
-            <div className="sm:col-span-2 space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                Present Residence Address
-              </label>
-              <Input
-                type="text"
-                value={formData.homeAddress?.presentAddress || ""}
-                onChange={(e) => handleAddressChange("presentAddress", e.target.value)}
-                placeholder="Present address in Sylhet"
-                disabled={isSaving}
-              />
-            </div>
+        <FadeIn duration={0.3} key="address">
+          <form onSubmit={handleSaveProfile} className="space-y-6">
+            <StaggerContainer
+              delay={0.05}
+              staggerDelay={0.04}
+              viewport={{ once: true, margin: "0px" }}
+              className="grid grid-cols-1 sm:grid-cols-2 gap-5"
+            >
+              {/* Present Address */}
+              <StaggerItem yOffset={8} className="sm:col-span-2">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground">
+                    Present Residence Address
+                  </label>
+                  <Input
+                    type="text"
+                    value={formData.homeAddress?.presentAddress || ""}
+                    onChange={(e) => handleAddressChange("presentAddress", e.target.value)}
+                    placeholder="Present address in Sylhet"
+                    disabled={isSaving}
+                  />
+                </div>
+              </StaggerItem>
 
-            {/* Permanent Address */}
-            <div className="sm:col-span-2 space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                Permanent Residence Address
-              </label>
-              <Input
-                type="text"
-                value={formData.homeAddress?.permanentAddress || ""}
-                onChange={(e) =>
-                  handleAddressChange("permanentAddress", e.target.value)
-                }
-                placeholder="Permanent residence address"
-                disabled={isSaving}
-              />
-            </div>
+              {/* Permanent Address */}
+              <StaggerItem yOffset={8} className="sm:col-span-2">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground">
+                    Permanent Residence Address
+                  </label>
+                  <Input
+                    type="text"
+                    value={formData.homeAddress?.permanentAddress || ""}
+                    onChange={(e) =>
+                      handleAddressChange("permanentAddress", e.target.value)
+                    }
+                    placeholder="Permanent residence address"
+                    disabled={isSaving}
+                  />
+                </div>
+              </StaggerItem>
 
-            {/* City */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">City</label>
-              <Input
-                type="text"
-                value={formData.homeAddress?.city || ""}
-                onChange={(e) => handleAddressChange("city", e.target.value)}
-                placeholder="Sylhet"
-                disabled={isSaving}
-              />
-            </div>
+              {/* City */}
+              <StaggerItem yOffset={8}>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground">City</label>
+                  <Input
+                    type="text"
+                    value={formData.homeAddress?.city || ""}
+                    onChange={(e) => handleAddressChange("city", e.target.value)}
+                    placeholder="Sylhet"
+                    disabled={isSaving}
+                  />
+                </div>
+              </StaggerItem>
 
-            {/* Postal Code */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">Postal Code</label>
-              <Input
-                type="text"
-                value={formData.homeAddress?.postalCode || ""}
-                onChange={(e) => handleAddressChange("postalCode", e.target.value)}
-                placeholder="3100"
-                disabled={isSaving}
-              />
-            </div>
-          </div>
-        </form>
+              {/* Postal Code */}
+              <StaggerItem yOffset={8}>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground">Postal Code</label>
+                  <Input
+                    type="text"
+                    value={formData.homeAddress?.postalCode || ""}
+                    onChange={(e) => handleAddressChange("postalCode", e.target.value)}
+                    placeholder="3100"
+                    disabled={isSaving}
+                  />
+                </div>
+              </StaggerItem>
+            </StaggerContainer>
+          </form>
+        </FadeIn>
       )}
 
       {/* ── Tab 5: Security (Security & Access - Change Password) ── */}
       {activeTab === "security" && (
-        <div className="space-y-6">
-          <div className="p-4 rounded-xl bg-gold-500/10 border border-gold-500/25 flex items-start gap-3">
-            <Lock className="w-4 h-4 text-gold-500 mt-0.5 shrink-0" />
-            <div className="text-xs space-y-1">
-              <p className="font-semibold text-foreground">Update Admin Password</p>
-              <p className="text-muted-foreground">
-                Protect your chamber records. Changing your password requires your current password and will update your single-user authentication credentials.
-              </p>
-            </div>
-          </div>
-
-          {passwordError && (
-            <div className="p-3.5 rounded-xl bg-destructive/10 border border-destructive/30 flex items-start gap-2.5 text-destructive animate-in fade-in duration-200">
-              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-              <p className="text-xs font-medium">{passwordError}</p>
-            </div>
-          )}
-
-          <form onSubmit={handleSavePassword} className="space-y-5 max-w-lg">
-            {/* Current Password */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                Current Account Password
-              </label>
-              <div className="relative">
-                <Input
-                  type={showCurrentPassword ? "text" : "password"}
-                  value={passwordData.currentPassword}
-                  onChange={(e) =>
-                    setPasswordData((prev) => ({
-                      ...prev,
-                      currentPassword: e.target.value,
-                    }))
-                  }
-                  placeholder="Enter current password"
-                  required
-                  disabled={isSaving}
-                  className="pr-10"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowCurrentPassword((prev) => !prev)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
-                >
-                  {showCurrentPassword ? (
-                    <EyeOff className="w-4 h-4" />
-                  ) : (
-                    <Eye className="w-4 h-4" />
-                  )}
-                </button>
+        <FadeIn duration={0.3} key="security">
+          <div className="space-y-6">
+            <div className="p-4 rounded-xl bg-gold-500/10 border border-gold-500/25 flex items-start gap-3">
+              <Lock className="w-4 h-4 text-gold-500 mt-0.5 shrink-0" />
+              <div className="text-xs space-y-1">
+                <p className="font-semibold text-foreground">Update Admin Password</p>
+                <p className="text-muted-foreground">
+                  Protect your chamber records. Changing your password requires your current password and will update your single-user authentication credentials.
+                </p>
               </div>
             </div>
 
-            {/* New Password */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                New Password (minimum 8 characters)
-              </label>
-              <div className="relative">
-                <Input
-                  type={showNewPassword ? "text" : "password"}
-                  value={passwordData.newPassword}
-                  onChange={(e) =>
-                    setPasswordData((prev) => ({
-                      ...prev,
-                      newPassword: e.target.value,
-                    }))
-                  }
-                  placeholder="Enter strong new password"
-                  required
-                  minLength={8}
-                  disabled={isSaving}
-                  className="pr-10"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowNewPassword((prev) => !prev)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
-                >
-                  {showNewPassword ? (
-                    <EyeOff className="w-4 h-4" />
-                  ) : (
-                    <Eye className="w-4 h-4" />
-                  )}
-                </button>
+            {passwordError && (
+              <div className="p-3.5 rounded-xl bg-destructive/10 border border-destructive/30 flex items-start gap-2.5 text-destructive animate-in fade-in duration-200">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                <p className="text-xs font-medium">{passwordError}</p>
               </div>
-            </div>
+            )}
 
-            {/* Confirm Password */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                Confirm New Password
-              </label>
-              <div className="relative">
-                <Input
-                  type={showConfirmPassword ? "text" : "password"}
-                  value={passwordData.confirmPassword}
-                  onChange={(e) =>
-                    setPasswordData((prev) => ({
-                      ...prev,
-                      confirmPassword: e.target.value,
-                    }))
-                  }
-                  placeholder="Re-enter new password"
-                  required
-                  minLength={8}
-                  disabled={isSaving}
-                  className="pr-10"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmPassword((prev) => !prev)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
-                >
-                  {showConfirmPassword ? (
-                    <EyeOff className="w-4 h-4" />
-                  ) : (
-                    <Eye className="w-4 h-4" />
-                  )}
-                </button>
-              </div>
-            </div>
-
-            <div className="pt-2">
-              <Button
-                type="submit"
-                variant="gold"
-                disabled={isSaving}
-                className="w-full text-xs font-semibold gap-1.5 shadow-sm"
+            <form onSubmit={handleSavePassword} className="space-y-5 max-w-lg">
+              <StaggerContainer
+                delay={0.05}
+                staggerDelay={0.04}
+                viewport={{ once: true, margin: "0px" }}
+                className="space-y-5"
               >
-                {isSaving ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Updating Password...</span>
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Update Account Password</span>
-                  </>
-                )}
-              </Button>
-            </div>
-          </form>
-        </div>
+                {/* Current Password */}
+                <StaggerItem yOffset={8}>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-foreground">
+                      Current Account Password
+                    </label>
+                    <div className="relative">
+                      <Input
+                        type={showCurrentPassword ? "text" : "password"}
+                        value={passwordData.currentPassword}
+                        onChange={(e) =>
+                          setPasswordData((prev) => ({
+                            ...prev,
+                            currentPassword: e.target.value,
+                          }))
+                        }
+                        placeholder="Enter current password"
+                        required
+                        disabled={isSaving}
+                        className="pr-10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowCurrentPassword((prev) => !prev)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                      >
+                        {showCurrentPassword ? (
+                          <EyeOff className="w-4 h-4" />
+                        ) : (
+                          <Eye className="w-4 h-4" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </StaggerItem>
+
+                {/* New Password */}
+                <StaggerItem yOffset={8}>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-foreground">
+                      New Password (minimum 8 characters)
+                    </label>
+                    <div className="relative">
+                      <Input
+                        type={showNewPassword ? "text" : "password"}
+                        value={passwordData.newPassword}
+                        onChange={(e) =>
+                          setPasswordData((prev) => ({
+                            ...prev,
+                            newPassword: e.target.value,
+                          }))
+                        }
+                        placeholder="Enter strong new password"
+                        required
+                        minLength={8}
+                        disabled={isSaving}
+                        className="pr-10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewPassword((prev) => !prev)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                      >
+                        {showNewPassword ? (
+                          <EyeOff className="w-4 h-4" />
+                        ) : (
+                          <Eye className="w-4 h-4" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </StaggerItem>
+
+                {/* Confirm Password */}
+                <StaggerItem yOffset={8}>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-foreground">
+                      Confirm New Password
+                    </label>
+                    <div className="relative">
+                      <Input
+                        type={showConfirmPassword ? "text" : "password"}
+                        value={passwordData.confirmPassword}
+                        onChange={(e) =>
+                          setPasswordData((prev) => ({
+                            ...prev,
+                            confirmPassword: e.target.value,
+                          }))
+                        }
+                        placeholder="Re-enter new password"
+                        required
+                        minLength={8}
+                        disabled={isSaving}
+                        className="pr-10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword((prev) => !prev)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                      >
+                        {showConfirmPassword ? (
+                          <EyeOff className="w-4 h-4" />
+                        ) : (
+                          <Eye className="w-4 h-4" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </StaggerItem>
+
+                <StaggerItem yOffset={8}>
+                  <div className="pt-2">
+                    <Button
+                      type="submit"
+                      variant="gold"
+                      disabled={isSaving}
+                      className="w-full text-xs font-semibold gap-1.5 shadow-sm"
+                    >
+                      {isSaving ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Updating Password...</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Update Account Password</span>
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </StaggerItem>
+              </StaggerContainer>
+            </form>
+          </div>
+        </FadeIn>
       )}
 
       {/* Bottom Action Footer for non-security tabs */}

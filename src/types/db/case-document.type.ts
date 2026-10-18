@@ -10,6 +10,7 @@ export interface ICaseDocumentEntity {
   description?: string | null;
   exhibitNumber?: string | null; // e.g. "Ext. 1", "Mark A" in court evidence
   isConfidential: boolean;
+  deletedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }

@@ -12,16 +12,24 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NumberCounter } from "@/components/shared/number-counter";
-import { useClientStats } from "@/hooks/clients";
 import { Skeleton } from "@/components/ui/skeleton";
+import type { ClientOverallStatsDto } from "@/types/client.types";
 
 export interface ClientsStatsHeaderProps {
+  stats?: ClientOverallStatsDto;
+  isLoading?: boolean;
+  isFetching?: boolean;
+  onRefetch?: () => void;
   onAddNew: () => void;
 }
 
-export function ClientsStatsHeader({ onAddNew }: ClientsStatsHeaderProps) {
-  const { data: stats, isLoading, isFetching, refetch } = useClientStats();
-
+export function ClientsStatsHeader({
+  stats,
+  isLoading = false,
+  isFetching = false,
+  onRefetch,
+  onAddNew,
+}: ClientsStatsHeaderProps) {
   return (
     <div className="space-y-4">
       {/* Top Action & Subtitle Banner */}
@@ -40,7 +48,7 @@ export function ClientsStatsHeader({ onAddNew }: ClientsStatsHeaderProps) {
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => refetch()}
+            onClick={() => onRefetch?.()}
             disabled={isFetching}
             className="rounded-xl text-xs gap-1.5 border-border/70 text-muted-foreground hover:text-foreground"
             title="Refresh client statistics"

@@ -156,7 +156,7 @@ export function FinancialsAccordionList({
             className="group"
           >
             {/* Collapsed Trigger Bar */}
-            <AccordionTrigger className="hover:no-underline py-3.5 px-4 sm:px-5">
+            <AccordionTrigger as="div" className="hover:no-underline py-3.5 px-4 sm:px-5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 w-full">
                 {/* Left: Indicator Icon + Type Badge + Date + Client/Case */}
                 <div className="flex items-start sm:items-center gap-3 min-w-0">

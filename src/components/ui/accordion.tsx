@@ -135,55 +135,104 @@ export const AccordionItem = React.forwardRef<HTMLDivElement, AccordionItemProps
 AccordionItem.displayName = "AccordionItem";
 
 export interface AccordionTriggerProps
-  extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  extends React.HTMLAttributes<HTMLElement> {
   showChevron?: boolean;
+  as?: "button" | "div";
+  type?: "button" | "submit" | "reset";
+  disabled?: boolean;
 }
 
 export const AccordionTrigger = React.forwardRef<
-  HTMLButtonElement,
+  HTMLElement,
   AccordionTriggerProps
->(({ className, children, showChevron = true, onClick, ...props }, ref) => {
-  const { toggleItem } = useAccordionContext();
-  const itemContext = React.useContext(AccordionItemContext);
-  if (!itemContext) {
-    throw new Error("AccordionTrigger must be used within an AccordionItem");
-  }
+>(
+  (
+    {
+      className,
+      children,
+      showChevron = true,
+      as = "button",
+      type = "button",
+      onClick,
+      onKeyDown,
+      ...props
+    },
+    ref
+  ) => {
+    const { toggleItem } = useAccordionContext();
+    const itemContext = React.useContext(AccordionItemContext);
+    if (!itemContext) {
+      throw new Error("AccordionTrigger must be used within an AccordionItem");
+    }
 
-  const { value, isOpen, id } = itemContext;
+    const { value, isOpen, id } = itemContext;
 
-  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
-    toggleItem(value);
-    onClick?.(e);
-  };
+    const handleClick = (e: React.MouseEvent<HTMLElement>) => {
+      toggleItem(value);
+      onClick?.(e);
+    };
 
-  return (
-    <button
-      ref={ref}
-      type="button"
-      id={`accordion-trigger-${id}`}
-      aria-controls={`accordion-content-${id}`}
-      aria-expanded={isOpen}
-      onClick={handleClick}
-      className={cn(
-        "flex w-full items-center justify-between p-4 sm:p-5 text-left text-sm font-medium transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold-500/40 cursor-pointer",
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
+      if (as === "div" && (e.key === "Enter" || e.key === " ")) {
+        e.preventDefault();
+        toggleItem(value);
+      }
+      onKeyDown?.(e);
+    };
+
+    const commonProps = {
+      id: `accordion-trigger-${id}`,
+      "aria-controls": `accordion-content-${id}`,
+      "aria-expanded": isOpen,
+      onClick: handleClick,
+      onKeyDown: handleKeyDown,
+      className: cn(
+        "flex w-full items-center justify-between p-4 sm:p-5 text-left text-sm font-medium transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold-500/40 cursor-pointer select-none",
         className
-      )}
-      {...props}
-    >
-      <div className="flex-1 min-w-0 pr-3">{children}</div>
-      {showChevron && (
+      ),
+      ...props,
+    };
+
+    const content = (
+      <>
+        <div className="flex-1 min-w-0 pr-3">{children}</div>
+        {showChevron && (
+          <div
+            className={cn(
+              "w-7 h-7 rounded-xl flex items-center justify-center shrink-0 border border-border/60 bg-background/50 text-muted-foreground transition-transform duration-200",
+              isOpen && "rotate-180 text-gold-500 border-gold-500/30 bg-gold-500/10"
+            )}
+          >
+            <ChevronDown className="h-4 w-4" />
+          </div>
+        )}
+      </>
+    );
+
+    if (as === "div") {
+      return (
         <div
-          className={cn(
-            "w-7 h-7 rounded-xl flex items-center justify-center shrink-0 border border-border/60 bg-background/50 text-muted-foreground transition-transform duration-200",
-            isOpen && "rotate-180 text-gold-500 border-gold-500/30 bg-gold-500/10"
-          )}
+          ref={ref as React.Ref<HTMLDivElement>}
+          role="button"
+          tabIndex={0}
+          {...commonProps}
         >
-          <ChevronDown className="h-4 w-4" />
+          {content}
         </div>
-      )}
-    </button>
-  );
-});
+      );
+    }
+
+    return (
+      <button
+        ref={ref as React.Ref<HTMLButtonElement>}
+        type={type}
+        {...(commonProps as React.ButtonHTMLAttributes<HTMLButtonElement>)}
+      >
+        {content}
+      </button>
+    );
+  }
+);
 AccordionTrigger.displayName = "AccordionTrigger";
 
 export type AccordionContentProps = React.HTMLAttributes<HTMLDivElement>;

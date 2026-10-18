@@ -7,10 +7,14 @@ import { useUpdateClientDocumentMutation } from "./mutations/useUpdateClientDocu
 import { ASSET_OWNER_TYPES, ASSET_PURPOSES, AssetPurpose } from "@/const/asset-reference.const";
 import {
   CLIENT_DOCUMENT_MAX_SIZE_BYTES,
-  CLIENT_DOCUMENT_ALLOWED_MIME_TYPES,
   ClientDocumentType,
   CLIENT_DOCUMENT_TYPES,
 } from "@/const/client-document.const";
+import {
+  validateDocumentFile,
+  compressDocumentFile,
+  DocumentCompressionResult,
+} from "@/utils/document-compression";
 import type {
   ClientDocumentActionResponse,
 } from "@/types/client-document.types";
@@ -68,31 +72,23 @@ export function useUploadClientDocument() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [lastCompressionResult, setLastCompressionResult] =
+    useState<DocumentCompressionResult | null>(null);
+
   const { uploadFiles, overallProgress, queue } = useMediaUpload();
   const createDocMutation = useCreateClientDocumentMutation();
   const updateDocMutation = useUpdateClientDocumentMutation();
 
   /**
-   * Validate file size and MIME type according to client document domain rules.
+   * Validate file size and format according to client document domain rules.
    */
   const validateFile = useCallback((file: File) => {
-    if (file.size > CLIENT_DOCUMENT_MAX_SIZE_BYTES) {
-      const maxMb = CLIENT_DOCUMENT_MAX_SIZE_BYTES / (1024 * 1024);
-      throw new Error(`File exceeds the maximum permitted limit of ${maxMb}MB.`);
-    }
-
-    const isAllowedMime = (CLIENT_DOCUMENT_ALLOWED_MIME_TYPES as readonly string[]).includes(
-      file.type
-    );
-    if (!isAllowedMime && file.type) {
-      throw new Error(
-        `File format "${file.type}" is not supported. Allowed formats: PDF, Word (doc/docx), and images (JPEG, PNG, WebP).`
-      );
-    }
+    validateDocumentFile(file, CLIENT_DOCUMENT_MAX_SIZE_BYTES);
   }, []);
 
   /**
    * Upload file to Cloudinary / reuse existing via hash deduplication, then create a ClientDocument.
+   * Compresses raster images to lightweight KB sizes before hashing and uploading.
    */
   const uploadAndCreateDocument = useCallback(
     async ({
@@ -110,10 +106,15 @@ export function useUploadClientDocument() {
       try {
         validateFile(file);
 
+        // 1. Client-side document compression (scales & compresses raster scans to lightweight KB size)
+        const compResult = await compressDocumentFile(file);
+        setLastCompressionResult(compResult);
+        const fileToUpload = compResult.file;
+
         const purpose = mapDocumentTypeToPurpose(documentType);
 
-        // 1. Upload or deduplicate via Cloudinary media workflow
-        const [uploadResult] = await uploadFiles([file], {
+        // 2. Upload or deduplicate via Cloudinary media workflow
+        const [uploadResult] = await uploadFiles([fileToUpload], {
           ownerType: ASSET_OWNER_TYPES.CLIENT,
           ownerId: clientId,
           purpose,
@@ -124,7 +125,7 @@ export function useUploadClientDocument() {
           throw new Error("Failed to secure an asset reference for the uploaded file.");
         }
 
-        // 2. Persist ClientDocument record linked to the asset reference
+        // 3. Persist ClientDocument record linked to the asset reference
         const docResponse = await createDocMutation.mutateAsync({
           clientId,
           data: {
@@ -169,12 +170,17 @@ export function useUploadClientDocument() {
       try {
         validateFile(file);
 
+        // 1. Client-side document compression
+        const compResult = await compressDocumentFile(file);
+        setLastCompressionResult(compResult);
+        const fileToUpload = compResult.file;
+
         const purpose = documentType
           ? mapDocumentTypeToPurpose(documentType)
           : ASSET_PURPOSES.OTHER;
 
-        // 1. Upload or deduplicate replacement file
-        const [uploadResult] = await uploadFiles([file], {
+        // 2. Upload or deduplicate replacement file
+        const [uploadResult] = await uploadFiles([fileToUpload], {
           ownerType: ASSET_OWNER_TYPES.CLIENT,
           ownerId: clientId,
           purpose,
@@ -185,7 +191,7 @@ export function useUploadClientDocument() {
           throw new Error("Failed to secure an asset reference for the replacement file.");
         }
 
-        // 2. Update ClientDocument pointing to new assetReferenceId
+        // 3. Update ClientDocument pointing to new assetReferenceId (server soft-deletes previous reference)
         const docResponse = await updateDocMutation.mutateAsync({
           clientId,
           docId,
@@ -214,6 +220,7 @@ export function useUploadClientDocument() {
   return {
     uploadAndCreateDocument,
     uploadAndReplaceDocument,
+    lastCompressionResult,
     isProcessing,
     overallProgress,
     queue,

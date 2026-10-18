@@ -7,4 +7,6 @@ export * from "./ui";
 export * from "./dropdowns";
 export * from "./case-expenses";
 export * from "./financials";
+export * from "./documents";
+export * from "./tasks";
 

@@ -10,6 +10,7 @@ export interface ICourt {
   address?: string | null;
   presidingJudgeTitle?: string | null;
   isActive: boolean;
+  deletedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }

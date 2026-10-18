@@ -64,12 +64,6 @@ const caseSchema = new Schema<ICaseDocument>(
       required: [true, "Primary Client ID is required"],
       index: true,
     },
-    assignedUserId: {
-      type: Schema.Types.ObjectId,
-      ref: MODELS.USER,
-      default: null,
-      index: true,
-    },
     filingDate: {
       type: Date,
       default: null,

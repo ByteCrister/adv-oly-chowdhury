@@ -14,12 +14,12 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/shared/use-toast";
 import {
   CLIENT_DOCUMENT_MAX_SIZE_BYTES,
-  CLIENT_DOCUMENT_ALLOWED_MIME_TYPES,
   CLIENT_DOCUMENT_TYPES,
   CLIENT_DOCUMENT_TYPE_LIST,
   CLIENT_DOCUMENT_TYPE_LABELS,
   ClientDocumentType,
 } from "@/const/client-document.const";
+import { validateDocumentFile } from "@/utils/document-compression";
 import { useUploadClientDocument } from "@/hooks/clients";
 import {
   UploadCloud,
@@ -76,20 +76,13 @@ export function ClientDocumentUploadDialog({
     const selectedFile = e.target.files?.[0];
     if (!selectedFile) return;
 
-    // Validate size limit (2MB)
-    if (selectedFile.size > CLIENT_DOCUMENT_MAX_SIZE_BYTES) {
-      const maxMb = CLIENT_DOCUMENT_MAX_SIZE_BYTES / (1024 * 1024);
-      setValidationError(`Selected file exceeds the maximum permitted limit of ${maxMb}MB.`);
-      return;
-    }
-
-    // Validate mime type
-    const isAllowed = (CLIENT_DOCUMENT_ALLOWED_MIME_TYPES as readonly string[]).includes(
-      selectedFile.type
-    );
-    if (!isAllowed && selectedFile.type) {
+    try {
+      validateDocumentFile(selectedFile, CLIENT_DOCUMENT_MAX_SIZE_BYTES);
+    } catch (err) {
       setValidationError(
-        `File format "${selectedFile.type}" is not supported. Permitted formats: PDF, Word (DOC/DOCX), and images (JPEG, PNG, WebP).`
+        err instanceof Error
+          ? err.message
+          : "Invalid file. Max size 2MB (PDF, Word, Images)."
       );
       return;
     }
@@ -109,8 +102,14 @@ export function ClientDocumentUploadDialog({
     const droppedFile = e.dataTransfer.files?.[0];
     if (!droppedFile) return;
 
-    if (droppedFile.size > CLIENT_DOCUMENT_MAX_SIZE_BYTES) {
-      setValidationError("Selected file exceeds the maximum permitted limit of 2MB.");
+    try {
+      validateDocumentFile(droppedFile, CLIENT_DOCUMENT_MAX_SIZE_BYTES);
+    } catch (err) {
+      setValidationError(
+        err instanceof Error
+          ? err.message
+          : "Invalid file. Max size 2MB (PDF, Word, Images)."
+      );
       return;
     }
 

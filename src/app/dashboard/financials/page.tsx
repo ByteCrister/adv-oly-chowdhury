@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { FinancialsPage } from "@/components/financials";
 
+export const instant = false;
+
 export const metadata: Metadata = {
   title: "Fees & Financial Accounts | Advocate Oly Chowdhury",
   description:

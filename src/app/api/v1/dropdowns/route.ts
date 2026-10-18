@@ -80,7 +80,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     }
 
     case DROPDOWN_TYPES.COURT: {
-      const filter: Record<string, unknown> = { isActive: true };
+      const filter: Record<string, unknown> = { isActive: true, deletedAt: null };
 
       if (search?.trim()) {
         const regex = new RegExp(escapeRegex(search.trim()), "i");

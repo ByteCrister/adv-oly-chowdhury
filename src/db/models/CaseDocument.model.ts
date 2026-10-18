@@ -54,6 +54,11 @@ const caseDocumentSchema = new Schema<ICaseDocumentRecord>(
       default: false,
       index: true,
     },
+    deletedAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
   },
   {
     timestamps: true,
@@ -63,7 +68,9 @@ const caseDocumentSchema = new Schema<ICaseDocumentRecord>(
 
 caseDocumentSchema.index({ caseId: 1, createdAt: -1 });
 caseDocumentSchema.index({ caseId: 1, documentType: 1 });
-caseDocumentSchema.index({ caseId: 1, assetId: 1 });
+caseDocumentSchema.index({ caseId: 1, assetReferenceId: 1 });
+caseDocumentSchema.index({ caseId: 1, deletedAt: 1 });
+caseDocumentSchema.index({ deletedAt: 1, createdAt: -1 });
 
 export const CaseDocument: Model<ICaseDocumentRecord> =
   (mongoose.models[MODELS.CASE_DOCUMENT] as Model<ICaseDocumentRecord>) ||

@@ -77,7 +77,10 @@ export const PATCH = withErrorHandler(
 
     // If name or district is updated, check for duplicate conflict with other courts
     if (validated.name || validated.district) {
-      const existingRecord = await Court.findById(objectId).lean();
+      const existingRecord = await Court.findOne({
+        _id: objectId,
+        deletedAt: null,
+      }).lean();
       if (!existingRecord) {
         throw ApiError.notFound("Court not found");
       }
@@ -87,6 +90,7 @@ export const PATCH = withErrorHandler(
 
       const duplicate = await Court.findOne({
         _id: { $ne: objectId },
+        deletedAt: null,
         name: { $regex: new RegExp(`^${targetName}$`, "i") },
         district: { $regex: new RegExp(`^${targetDistrict}$`, "i") },
       });
@@ -100,7 +104,10 @@ export const PATCH = withErrorHandler(
 
     // Execute update inside a transaction
     const updatedCourt = await withTransaction(async (dbSession) => {
-      const court = await Court.findById(objectId).session(dbSession);
+      const court = await Court.findOne({
+        _id: objectId,
+        deletedAt: null,
+      }).session(dbSession);
       if (!court) {
         throw ApiError.notFound("Court not found");
       }
@@ -122,7 +129,7 @@ export const PATCH = withErrorHandler(
 
     // Compute relation counts for response DTO
     const [casesCount, hearingsCount, assetsCount] = await Promise.all([
-      Case.countDocuments({ courtId: objectId }),
+      Case.countDocuments({ courtId: objectId, deletedAt: null }),
       Hearing.countDocuments({ courtId: objectId }),
       AssetReference.countDocuments({
         ownerType: ASSET_OWNER_TYPES.COURT,
@@ -157,8 +164,9 @@ export const PUT = PATCH;
 /**
  * DELETE /api/v1/courts/[id]
  *
- * Permanently delete a court. Enforces reference integrity by checking
- * for linked Cases, Hearings, and AssetReferences before deletion.
+ * Safely soft-deletes a court record (sets deletedAt timestamp and marks inactive).
+ * Enforces reference integrity by checking for linked active Cases, Hearings,
+ * and AssetReferences before moving to trash.
  */
 export const DELETE = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
@@ -173,14 +181,17 @@ export const DELETE = withErrorHandler(
     }
 
     const objectId = new mongoose.Types.ObjectId(id);
-    const court = await Court.findById(objectId);
+    const court = await Court.findOne({
+      _id: objectId,
+      deletedAt: null,
+    });
     if (!court) {
-      throw ApiError.notFound("Court not found");
+      throw ApiError.notFound("Court not found or already deleted");
     }
 
     // Association guard: check if court is referenced anywhere
     const [caseCount, hearingCount, assetCount] = await Promise.all([
-      Case.countDocuments({ courtId: objectId }),
+      Case.countDocuments({ courtId: objectId, deletedAt: null }),
       Hearing.countDocuments({ courtId: objectId }),
       AssetReference.countDocuments({
         ownerType: ASSET_OWNER_TYPES.COURT,
@@ -215,12 +226,14 @@ export const DELETE = withErrorHandler(
       );
     }
 
-    // Perform hard delete
-    await Court.findByIdAndDelete(objectId);
+    // Perform soft delete
+    court.deletedAt = new Date();
+    court.isActive = false;
+    await court.save();
 
     const response: CourtDeleteResponse = {
       success: true,
-      message: `Court "${court.name}" was permanently deleted successfully.`,
+      message: `Court "${court.name}" was moved to trash successfully.`,
       id,
     };
 

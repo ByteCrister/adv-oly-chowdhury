@@ -53,5 +53,4 @@ export const CLIENT_QUERY_KEYS = {
     [...CLIENT_QUERY_KEYS.lists(), filters] as const,
   details: () => [...CLIENT_QUERY_KEYS.all, "detail"] as const,
   detail: (id: string) => [...CLIENT_QUERY_KEYS.details(), id] as const,
-  stats: () => [...CLIENT_QUERY_KEYS.all, "stats"] as const,
 };

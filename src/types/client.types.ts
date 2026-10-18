@@ -167,6 +167,7 @@ export interface ClientPaginationResponse {
   limit: ClientPageLimit;
   totalPages: number;
   hasMore: boolean;
+  stats: ClientOverallStatsDto;
 }
 
 /**

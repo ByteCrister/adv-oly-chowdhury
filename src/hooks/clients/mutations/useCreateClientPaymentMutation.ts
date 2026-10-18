@@ -57,9 +57,6 @@ export function useCreateClientPaymentMutation(
           queryKey: CLIENT_QUERY_KEYS.lists(),
         }),
         queryClient.invalidateQueries({
-          queryKey: CLIENT_QUERY_KEYS.stats(),
-        }),
-        queryClient.invalidateQueries({
           queryKey: FINANCIAL_QUERY_KEYS.all,
         }),
       ]);

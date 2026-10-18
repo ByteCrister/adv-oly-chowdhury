@@ -109,7 +109,9 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     parsed.data;
 
   // Build MongoDB query filter
-  const filter: Record<string, unknown> = {};
+  const filter: Record<string, unknown> = {
+    deletedAt: null,
+  };
 
   if (courtType && courtType !== "ALL") {
     filter.courtType = courtType;
@@ -181,7 +183,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   // Compute relation counts for courts in the current page
   const [caseCounts, hearingCounts, assetCounts] = await Promise.all([
     Case.aggregate<{ _id: mongoose.Types.ObjectId; count: number }>([
-      { $match: { courtId: { $in: courtIds } } },
+      { $match: { courtId: { $in: courtIds }, deletedAt: null } },
       { $group: { _id: "$courtId", count: { $sum: 1 } } },
     ]),
     Hearing.aggregate<{ _id: mongoose.Types.ObjectId; count: number }>([
@@ -247,6 +249,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
 
   // Check if court already exists with identical name and district
   const existingCourt = await Court.findOne({
+    deletedAt: null,
     name: { $regex: new RegExp(`^${validated.name.trim()}$`, "i") },
     district: { $regex: new RegExp(`^${validated.district.trim()}$`, "i") },
   });

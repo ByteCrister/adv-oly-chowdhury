@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { CaseExpenseFormPage } from "@/components/financials";
 
+export const instant = false;
+
 interface CaseExpenseRouteProps {
   params: Promise<{
     id: string;
