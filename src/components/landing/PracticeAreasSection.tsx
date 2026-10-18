@@ -1,6 +1,3 @@
-"use client";
-
-import * as React from "react";
 import {
   ReceiptText,
   Scale,
@@ -14,6 +11,7 @@ import {
 import { ADVOCATE_INFO } from "@/const/advocate";
 import { FadeIn, FadeInUp } from "@/components/wrappers/Motion";
 import { cn } from "@/lib/utils";
+import type { LandingPracticeArea } from "@/lib/landing/landing.types";
 
 const ICON_MAP = {
   ReceiptText,
@@ -24,7 +22,15 @@ const ICON_MAP = {
   Users2,
 };
 
-export default function PracticeAreasSection() {
+export interface PracticeAreasSectionProps {
+  practiceAreas?: readonly LandingPracticeArea[];
+}
+
+export default function PracticeAreasSection({
+  practiceAreas,
+}: PracticeAreasSectionProps = {}) {
+  const areas = practiceAreas && practiceAreas.length > 0 ? practiceAreas : ADVOCATE_INFO.practiceAreas;
+
   return (
     <section
       id="practice"
@@ -76,7 +82,7 @@ export default function PracticeAreasSection() {
 
         {/* Practice Cards Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          {ADVOCATE_INFO.practiceAreas.map((area, idx) => {
+          {areas.map((area, idx) => {
             const Icon =
               ICON_MAP[area.icon as keyof typeof ICON_MAP] || Scale;
             return (

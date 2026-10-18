@@ -5,7 +5,14 @@ import { getToken } from "next-auth/jwt";
 const PUBLIC_PREFIXES = [
   "/api/auth",
   "/_next",
-  "/favicon.ico",
+  "/favicon",
+  "/apple-touch-icon",
+  "/android-chrome",
+  "/mstile",
+  "/site.webmanifest",
+  "/browserconfig.xml",
+  "/robots.txt",
+  "/sitemap.xml",
   "/images",
   "/icons",
   "/fonts",
@@ -17,8 +24,11 @@ const PUBLIC_PAGES = ["/", "/signin", "/singin"];
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // 1. Always allow static assets, API auth endpoints, and fonts
-  if (PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
+  // 1. Always allow static assets, favicon/manifest files, API auth endpoints, and fonts
+  if (
+    PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix)) ||
+    /\.(ico|png|jpg|jpeg|svg|webp|webmanifest|xml|txt)$/i.test(pathname)
+  ) {
     return NextResponse.next();
   }
 
@@ -54,5 +64,7 @@ export async function proxy(req: NextRequest) {
 export default proxy;
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|webmanifest|xml|txt)$).*)",
+  ],
 };

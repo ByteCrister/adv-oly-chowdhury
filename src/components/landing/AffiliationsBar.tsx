@@ -1,21 +1,31 @@
-"use client";
-
-import * as React from "react";
 import { Scale, Award, Globe2, Landmark } from "lucide-react";
 import { FadeInUp } from "@/components/wrappers/Motion";
 import { cn } from "@/lib/utils";
+import type { LandingBarRegistrations, LandingChamberInfo } from "@/lib/landing/landing.types";
 
-export default function AffiliationsBar() {
+export interface AffiliationsBarProps {
+  barRegistrations?: LandingBarRegistrations;
+  chamber?: LandingChamberInfo;
+}
+
+export default function AffiliationsBar({
+  barRegistrations,
+  chamber,
+}: AffiliationsBarProps = {}) {
   const affiliations = [
     {
       title: "Sylhet District Bar Association",
-      subtitle: "Member Advocate · Regular Practitioner",
+      subtitle: barRegistrations?.barAssociationMemberNo
+        ? `Member No: ${barRegistrations.barAssociationMemberNo} · Regular Practitioner`
+        : "Member Advocate · Regular Practitioner",
       meta: "District Judiciary",
       icon: Scale,
     },
     {
       title: "Sylhet District Taxes Bar Association",
-      subtitle: "Member Advocate · ESTD. 1974",
+      subtitle: barRegistrations?.taxesBarMemberNo
+        ? `Member No: ${barRegistrations.taxesBarMemberNo} · ESTD. 1974`
+        : "Member Advocate · ESTD. 1974",
       meta: "Taxation & Revenue Specialist",
       icon: Landmark,
     },
@@ -26,8 +36,8 @@ export default function AffiliationsBar() {
       icon: Globe2,
     },
     {
-      title: "Judge's Court, Sylhet",
-      subtitle: "Chamber 323, Bar Hall No: 02",
+      title: chamber ? `${chamber.court}, ${chamber.city}` : "Judge's Court, Sylhet",
+      subtitle: chamber ? `${chamber.room}, ${chamber.barHall}` : "Chamber 323, Bar Hall No: 02",
       meta: "Permanent Chamber",
       icon: Award,
     },

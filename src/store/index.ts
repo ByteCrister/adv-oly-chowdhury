@@ -4,4 +4,6 @@ export * from "./useCourtStore";
 export * from "./useClientStore";
 export * from "./useClientDocumentStore";
 export * from "./useClientPaymentStore";
+export * from "./useHearingStore";
+export * from "./useCaseStore";
 

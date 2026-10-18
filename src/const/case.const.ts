@@ -78,3 +78,86 @@ export const CASE_PRIORITY_LABELS: Record<CasePriority, string> = {
   [CASE_PRIORITIES.HIGH]: "High",
   [CASE_PRIORITIES.URGENT]: "Urgent",
 };
+
+export const CASE_PAGE_LIMITS = [10, 20, 50, 100] as const;
+export type CasePageLimit = (typeof CASE_PAGE_LIMITS)[number];
+export const CASE_DEFAULT_PAGE_LIMIT: CasePageLimit = 10;
+
+export const CASE_SORT_OPTIONS = {
+  NEWEST: "newest",
+  OLDEST: "oldest",
+  TITLE_ASC: "title_asc",
+  TITLE_DESC: "title_desc",
+  CASE_NUMBER_ASC: "case_number_asc",
+  CASE_NUMBER_DESC: "case_number_desc",
+  FILING_DATE_DESC: "filing_date_desc",
+  FILING_DATE_ASC: "filing_date_asc",
+  NEXT_HEARING_ASC: "next_hearing_asc",
+  NEXT_HEARING_DESC: "next_hearing_desc",
+} as const;
+
+export const CASE_SORT_OPTION_LIST = Object.values(CASE_SORT_OPTIONS);
+export type CaseSortOption = (typeof CASE_SORT_OPTIONS)[keyof typeof CASE_SORT_OPTIONS];
+
+export const CASE_SORT_LABELS: Record<CaseSortOption, string> = {
+  [CASE_SORT_OPTIONS.NEWEST]: "Recently Created",
+  [CASE_SORT_OPTIONS.OLDEST]: "Oldest Created",
+  [CASE_SORT_OPTIONS.TITLE_ASC]: "Title (A-Z)",
+  [CASE_SORT_OPTIONS.TITLE_DESC]: "Title (Z-A)",
+  [CASE_SORT_OPTIONS.CASE_NUMBER_ASC]: "Case Number (Asc)",
+  [CASE_SORT_OPTIONS.CASE_NUMBER_DESC]: "Case Number (Desc)",
+  [CASE_SORT_OPTIONS.FILING_DATE_DESC]: "Filing Date (Latest First)",
+  [CASE_SORT_OPTIONS.FILING_DATE_ASC]: "Filing Date (Earliest First)",
+  [CASE_SORT_OPTIONS.NEXT_HEARING_ASC]: "Next Hearing (Upcoming First)",
+  [CASE_SORT_OPTIONS.NEXT_HEARING_DESC]: "Next Hearing (Latest First)",
+};
+
+export const CASE_STATUS_BADGE_VARIANTS: Record<
+  CaseStatus,
+  "gold" | "sapphire" | "emerald" | "amber" | "destructive" | "purple" | "muted"
+> = {
+  [CASE_STATUSES.DRAFT]: "muted",
+  [CASE_STATUSES.ACTIVE]: "sapphire",
+  [CASE_STATUSES.HEARING_STAGED]: "gold",
+  [CASE_STATUSES.ARGUMENTS_PENDING]: "amber",
+  [CASE_STATUSES.JUDGMENT_RESERVED]: "purple",
+  [CASE_STATUSES.ON_HOLD]: "destructive",
+  [CASE_STATUSES.DISPOSED]: "emerald",
+  [CASE_STATUSES.CLOSED]: "muted",
+};
+
+export const CASE_PRIORITY_BADGE_VARIANTS: Record<
+  CasePriority,
+  "gold" | "sapphire" | "emerald" | "destructive"
+> = {
+  [CASE_PRIORITIES.LOW]: "emerald",
+  [CASE_PRIORITIES.NORMAL]: "sapphire",
+  [CASE_PRIORITIES.HIGH]: "gold",
+  [CASE_PRIORITIES.URGENT]: "destructive",
+};
+
+export const CASE_QUERY_KEYS = {
+  all: ["cases"] as const,
+  lists: () => [...CASE_QUERY_KEYS.all, "list"] as const,
+  list: (filters: Record<string, unknown> = {}) =>
+    [...CASE_QUERY_KEYS.lists(), filters] as const,
+  details: () => [...CASE_QUERY_KEYS.all, "detail"] as const,
+  detail: (id: string) => [...CASE_QUERY_KEYS.details(), id] as const,
+  hearings: (caseId: string, filters: Record<string, unknown> = {}) =>
+    [...CASE_QUERY_KEYS.detail(caseId), "hearings", filters] as const,
+  hearingsPrefix: (caseId: string) =>
+    [...CASE_QUERY_KEYS.detail(caseId), "hearings"] as const,
+  documents: (caseId: string, filters: Record<string, unknown> = {}) =>
+    [...CASE_QUERY_KEYS.detail(caseId), "documents", filters] as const,
+  documentsPrefix: (caseId: string) =>
+    [...CASE_QUERY_KEYS.detail(caseId), "documents"] as const,
+  events: (caseId: string, filters: Record<string, unknown> = {}) =>
+    [...CASE_QUERY_KEYS.detail(caseId), "events", filters] as const,
+  eventsPrefix: (caseId: string) =>
+    [...CASE_QUERY_KEYS.detail(caseId), "events"] as const,
+  parties: (caseId: string, filters: Record<string, unknown> = {}) =>
+    [...CASE_QUERY_KEYS.detail(caseId), "parties", filters] as const,
+  partiesPrefix: (caseId: string) =>
+    [...CASE_QUERY_KEYS.detail(caseId), "parties"] as const,
+};
+

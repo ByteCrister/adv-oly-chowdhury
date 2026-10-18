@@ -1,9 +1,18 @@
 "use client";
 
-import React, { useState, useEffect, useTransition } from "react";
+import React, { useState, useTransition } from "react";
 import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
-import { Eye, EyeOff, Loader2, AlertCircle, Lock, Mail } from "lucide-react";
+import {
+  Eye,
+  EyeOff,
+  Loader2,
+  AlertCircle,
+  Lock,
+  Mail,
+  ShieldAlert,
+  ArrowRight,
+} from "lucide-react";
 
 interface FormErrors {
   email?: string;
@@ -11,46 +20,49 @@ interface FormErrors {
   form?: string;
 }
 
+function getAuthErrorMessage(errorParam: string | null): string | undefined {
+  if (!errorParam) return undefined;
+
+  switch (errorParam) {
+    case "AccountNotFound":
+      return "Access Restricted: This Google account is not authorized. Only the pre-approved chamber administrator can sign in.";
+    case "VerificationFailed":
+      return "Authentication verification failed. Please try again or use your chamber password.";
+    case "OAuthAccountNotLinked":
+      return "This email is registered with another sign-in method. Please sign in with your email and password.";
+    case "CredentialsSignin":
+      return "Invalid credentials. Please verify your email and password.";
+    case "AccessDenied":
+      return "Access denied. You do not have permission to access this chamber portal.";
+    default:
+      return "Authentication error occurred. Please try again or contact chamber support.";
+  }
+}
+
 export function SignInForm() {
   const searchParams = useSearchParams();
+  const errorParam = searchParams.get("error");
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [errors, setErrors] = useState<FormErrors>({});
+  const [prevErrorParam, setPrevErrorParam] = useState(errorParam);
+  const [errors, setErrors] = useState<FormErrors>(() => {
+    const initialError = getAuthErrorMessage(errorParam);
+    return initialError ? { form: initialError } : {};
+  });
   const [isPending, startTransition] = useTransition();
   const [googlePending, setGooglePending] = useState(false);
 
-  // Check URL query parameters for OAuth or server errors
-  useEffect(() => {
-    const errorParam = searchParams.get("error");
-    if (!errorParam) return;
-
-    if (errorParam === "AccountNotFound") {
-      setErrors({
-        form: "Access Restricted: This Google account is not authorized. Only the pre-approved chamber administrator can sign in.",
-      });
-    } else if (errorParam === "VerificationFailed") {
-      setErrors({
-        form: "Authentication verification failed. Please try again or use your password credentials.",
-      });
-    } else if (errorParam === "OAuthAccountNotLinked") {
-      setErrors({
-        form: "This email is registered with another sign-in method. Please sign in with your email and password.",
-      });
-    } else if (errorParam === "CredentialsSignin") {
-      setErrors({
-        form: "Invalid credentials. Please verify your email and password.",
-      });
-    } else if (errorParam === "AccessDenied") {
-      setErrors({
-        form: "Access denied. You do not have permission to access this resource.",
-      });
-    } else {
-      setErrors({
-        form: "Authentication error. Please try again.",
-      });
-    }
-  }, [searchParams]);
+  // Synchronize state if URL query param changes during client navigation
+  if (errorParam !== prevErrorParam) {
+    setPrevErrorParam(errorParam);
+    const newFormError = getAuthErrorMessage(errorParam);
+    setErrors((prev) => ({
+      ...prev,
+      form: newFormError,
+    }));
+  }
 
   // Client Validation
   function validate(): FormErrors {
@@ -149,49 +161,77 @@ export function SignInForm() {
   const isLoading = isPending || googlePending;
 
   return (
-    <div className="flex flex-col gap-6 w-full">
+    <div className="flex flex-col gap-5 sm:gap-6 w-full">
       {/* Top Banner Alert for Server / Rate-limit / Whitelist errors */}
       {errors.form && (
         <div
           role="alert"
           aria-live="polite"
-          className="p-3.5 bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-sm rounded-xl flex items-start gap-2.5 backdrop-blur-sm animate-in fade-in-50 duration-200"
+          className="relative overflow-hidden p-4 bg-gradient-to-r from-red-500/10 via-red-500/[0.08] to-red-500/5 border border-red-500/30 text-red-700 dark:text-red-300 text-xs sm:text-sm rounded-2xl flex items-start gap-3 backdrop-blur-md shadow-sm animate-in fade-in-50 slide-in-from-top-2 duration-300"
         >
-          <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-red-500" />
-          <span className="leading-snug">{errors.form}</span>
+          {/* Subtle accent glow line */}
+          <div
+            aria-hidden="true"
+            className="absolute top-0 inset-x-4 h-px bg-gradient-to-r from-transparent via-red-500/40 to-transparent"
+          />
+          <ShieldAlert className="w-5 h-5 shrink-0 mt-0.5 text-red-500 dark:text-red-400" />
+          <div className="flex-1 leading-relaxed">{errors.form}</div>
         </div>
       )}
 
-      <form onSubmit={handleCredentialsSubmit} className="flex flex-col gap-4" noValidate>
+      <form
+        onSubmit={handleCredentialsSubmit}
+        className="flex flex-col gap-4 sm:gap-4.5"
+        noValidate
+      >
         {/* Email Field */}
         <div className="flex flex-col gap-1.5">
           <label
             htmlFor="signin-email"
-            className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5"
+            className="text-[11px] sm:text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5"
           >
-            <Mail className="w-3.5 h-3.5 text-primary" />
-            Email Address
+            <Mail className="w-3.5 h-3.5 text-gold-600 dark:text-gold-400 shrink-0" />
+            <span>Chamber Email Address</span>
           </label>
-          <div className="relative">
+
+          <div
+            className={`relative rounded-xl transition-all duration-200 border ${
+              errors.email
+                ? "border-red-500/80 ring-2 ring-red-500/20 bg-red-500/[0.02]"
+                : "border-slate-200/90 dark:border-white/10 hover:border-slate-300 dark:hover:border-white/20 focus-within:border-gold-500/80 dark:focus-within:border-gold-400 focus-within:ring-4 focus-within:ring-gold-500/15 dark:focus-within:ring-gold-400/20"
+            } bg-slate-50/80 dark:bg-[#070E1E]/80 backdrop-blur-md shadow-[inset_0_1px_2px_rgba(0,0,0,0.03)] dark:shadow-[inset_0_1px_2px_rgba(0,0,0,0.4)]`}
+          >
+            {/* Top specular reflection line inside input */}
+            <span
+              aria-hidden="true"
+              className="absolute inset-x-2 top-0 h-px bg-gradient-to-r from-transparent via-white/80 dark:via-white/10 to-transparent pointer-events-none rounded-t-xl"
+            />
+
             <input
               id="signin-email"
               type="email"
-              autoComplete="email"
+              autoComplete="username"
+              enterKeyHint="next"
+              spellCheck={false}
               placeholder="advocate@example.com"
               disabled={isLoading}
               value={email}
               onChange={(e) => {
                 setEmail(e.target.value);
-                setErrors((prev) => ({ ...prev, email: undefined, form: undefined }));
+                setErrors((prev) => ({
+                  ...prev,
+                  email: undefined,
+                  form: undefined,
+                }));
               }}
-              className={`w-full h-11 px-3.5 rounded-xl border bg-background/60 dark:bg-card/40 backdrop-blur-sm text-foreground placeholder:text-muted-foreground/60 text-sm transition-all focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary ${
-                errors.email ? "border-red-500 ring-1 ring-red-500/30" : "border-border"
-              }`}
+              className="w-full h-12 px-3.5 rounded-xl bg-transparent text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 text-sm font-medium transition-all focus:outline-none disabled:opacity-50"
             />
           </div>
+
           {errors.email && (
-            <span className="text-xs text-red-500 mt-0.5 flex items-center gap-1">
-              • {errors.email}
+            <span className="text-xs text-red-600 dark:text-red-400 mt-0.5 flex items-center gap-1 font-medium animate-in fade-in-50 duration-200">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+              <span>{errors.email}</span>
             </span>
           )}
         </div>
@@ -201,34 +241,55 @@ export function SignInForm() {
           <div className="flex items-center justify-between">
             <label
               htmlFor="signin-password"
-              className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5"
+              className="text-[11px] sm:text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5"
             >
-              <Lock className="w-3.5 h-3.5 text-primary" />
-              Password
+              <Lock className="w-3.5 h-3.5 text-gold-600 dark:text-gold-400 shrink-0" />
+              <span>Master Password</span>
             </label>
+            <span className="text-[10px] text-muted-foreground/80 font-medium">
+              Encrypted Key
+            </span>
           </div>
-          <div className="relative">
+
+          <div
+            className={`relative rounded-xl transition-all duration-200 border ${
+              errors.password
+                ? "border-red-500/80 ring-2 ring-red-500/20 bg-red-500/[0.02]"
+                : "border-slate-200/90 dark:border-white/10 hover:border-slate-300 dark:hover:border-white/20 focus-within:border-gold-500/80 dark:focus-within:border-gold-400 focus-within:ring-4 focus-within:ring-gold-500/15 dark:focus-within:ring-gold-400/20"
+            } bg-slate-50/80 dark:bg-[#070E1E]/80 backdrop-blur-md shadow-[inset_0_1px_2px_rgba(0,0,0,0.03)] dark:shadow-[inset_0_1px_2px_rgba(0,0,0,0.4)]`}
+          >
+            {/* Top specular reflection line inside input */}
+            <span
+              aria-hidden="true"
+              className="absolute inset-x-2 top-0 h-px bg-gradient-to-r from-transparent via-white/80 dark:via-white/10 to-transparent pointer-events-none rounded-t-xl"
+            />
+
             <input
               id="signin-password"
               type={showPassword ? "text" : "password"}
               autoComplete="current-password"
+              enterKeyHint="done"
               placeholder="••••••••••••"
               disabled={isLoading}
               value={password}
               onChange={(e) => {
                 setPassword(e.target.value);
-                setErrors((prev) => ({ ...prev, password: undefined, form: undefined }));
+                setErrors((prev) => ({
+                  ...prev,
+                  password: undefined,
+                  form: undefined,
+                }));
               }}
-              className={`w-full h-11 px-3.5 pr-11 rounded-xl border bg-background/60 dark:bg-card/40 backdrop-blur-sm text-foreground placeholder:text-muted-foreground/60 text-sm transition-all focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary ${
-                errors.password ? "border-red-500 ring-1 ring-red-500/30" : "border-border"
-              }`}
+              className="w-full h-12 pl-3.5 pr-12 rounded-xl bg-transparent text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 text-sm font-medium transition-all focus:outline-none disabled:opacity-50"
             />
+
             <button
               type="button"
-              tabIndex={-1}
+              aria-pressed={showPassword}
               aria-label={showPassword ? "Hide password" : "Show password"}
+              title={showPassword ? "Hide password" : "Show password"}
               onClick={() => setShowPassword((v) => !v)}
-              className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1 rounded-md focus:outline-none"
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 dark:text-slate-400 dark:hover:text-gold-300 hover:bg-slate-200/50 dark:hover:bg-white/10 transition-colors focus:outline-none focus:ring-2 focus:ring-gold-500/40"
             >
               {showPassword ? (
                 <EyeOff className="w-4 h-4" />
@@ -237,54 +298,68 @@ export function SignInForm() {
               )}
             </button>
           </div>
+
           {errors.password && (
-            <span className="text-xs text-red-500 mt-0.5 flex items-center gap-1">
-              • {errors.password}
+            <span className="text-xs text-red-600 dark:text-red-400 mt-0.5 flex items-center gap-1 font-medium animate-in fade-in-50 duration-200">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+              <span>{errors.password}</span>
             </span>
           )}
         </div>
 
-        {/* Credentials Submit Button */}
+        {/* Credentials Submit Button — Ultra Glossy Gold */}
         <button
           type="submit"
           disabled={isLoading}
-          className="w-full h-11 mt-1 rounded-xl font-medium text-sm flex items-center justify-center gap-2 bg-primary text-primary-foreground hover:opacity-95 active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none transition-all shadow-md shadow-primary/20 cursor-pointer"
+          className="w-full h-12 mt-2 rounded-xl font-bold text-sm flex items-center justify-center gap-2 btn-gold-gloss active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none transition-all cursor-pointer shadow-lg"
         >
           {isPending ? (
             <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span>Verifying & Signing in…</span>
+              <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+              <span>Verifying Chamber Credentials…</span>
             </>
           ) : (
-            <span>Sign In with Password</span>
+            <>
+              <span>Sign In to Chamber</span>
+              <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
+            </>
           )}
         </button>
       </form>
 
       {/* Divider */}
       <div className="flex items-center gap-3">
-        <div className="flex-1 h-px bg-border/70" />
-        <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-widest">
+        <div className="flex-1 h-px bg-gradient-to-r from-transparent via-slate-300 dark:via-white/15 to-transparent" />
+        <span className="text-[10px] sm:text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-widest px-2.5 py-0.5 rounded-full bg-slate-100/80 dark:bg-white/[0.04] border border-slate-200/70 dark:border-white/10">
           or continue with
         </span>
-        <div className="flex-1 h-px bg-border/70" />
+        <div className="flex-1 h-px bg-gradient-to-r from-transparent via-slate-300 dark:via-white/15 to-transparent" />
       </div>
 
-      {/* Google OAuth Button */}
+      {/* Google OAuth Button — Glossy Secondary Card */}
       <button
         type="button"
         disabled={isLoading}
         onClick={handleGoogleSignIn}
-        className="w-full h-11 rounded-xl font-medium text-sm flex items-center justify-center gap-3 border border-border bg-card/60 hover:bg-muted/60 hover:border-border/80 active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none transition-all cursor-pointer shadow-sm"
+        className="group relative w-full h-12 rounded-xl font-semibold text-sm flex items-center justify-center gap-3 border transition-all duration-300 cursor-pointer overflow-hidden disabled:opacity-50 disabled:pointer-events-none active:scale-[0.99] bg-white/90 hover:bg-white dark:bg-white/[0.05] dark:hover:bg-white/[0.09] text-slate-800 dark:text-slate-100 border-slate-200/90 hover:border-gold-500/50 dark:border-white/10 dark:hover:border-gold-400/40 shadow-xs hover:shadow-md dark:hover:shadow-black/40"
       >
+        {/* Specular reflection line on top of Google button */}
+        <span
+          aria-hidden="true"
+          className="absolute inset-x-3 top-0 h-px bg-gradient-to-r from-transparent via-white/80 dark:via-white/20 to-transparent pointer-events-none"
+        />
+
         {googlePending ? (
           <>
             <Loader2 className="w-4 h-4 animate-spin text-foreground" />
-            <span>Connecting to Google…</span>
+            <span>Connecting to Google OAuth…</span>
           </>
         ) : (
           <>
-            <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+            <svg
+              className="w-4.5 h-4.5 shrink-0 transition-transform group-hover:scale-105"
+              viewBox="0 0 24 24"
+            >
               <path
                 fill="#4285F4"
                 d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -302,7 +377,7 @@ export function SignInForm() {
                 d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
               />
             </svg>
-            <span className="text-foreground">Continue with Google</span>
+            <span className="tracking-tight">Sign in with Google Account</span>
           </>
         )}
       </button>

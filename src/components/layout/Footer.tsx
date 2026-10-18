@@ -1,5 +1,3 @@
-"use client";
-
 import * as React from "react";
 import {
   Scale,
@@ -8,10 +6,11 @@ import {
   Mail,
   Shield,
   ArrowUp,
-  MessageSquare,
   ExternalLink,
 } from "lucide-react";
 import { ADVOCATE_INFO } from "@/const/advocate";
+import { WhatsAppIcon } from "@/components/shared";
+import { CurrentYear } from "./CurrentYear";
 import { cn } from "@/lib/utils";
 
 export default function Footer() {
@@ -162,21 +161,17 @@ export default function Footer() {
               </div>
             </div>
 
-            {/* Clear, Eye-pleasing WhatsApp Link Button */}
+            {/* Glossy, High-End WhatsApp Consultation Link Button */}
             <div className="pt-2">
               <a
                 href={ADVOCATE_INFO.contact.whatsappUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={cn(
-                  "inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-extrabold text-xs uppercase tracking-wider transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] shadow-md",
-                  "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950/15",
-                  "dark:bg-emerald-600 dark:hover:bg-emerald-500 dark:text-white dark:border dark:border-emerald-400/30"
-                )}
+                className="btn-whatsapp-gloss inline-flex items-center gap-2.5 px-4.5 py-2.5 rounded-xl text-xs font-extrabold uppercase tracking-wider text-white shadow-md"
               >
-                <MessageSquare className="w-3.5 h-3.5" />
+                <WhatsAppIcon className="w-4 h-4 shrink-0" />
                 <span>WhatsApp Consultation</span>
-                <ExternalLink className="w-3 h-3 ml-0.5 opacity-90" />
+                <ExternalLink className="w-3.5 h-3.5 ml-0.5 opacity-90 shrink-0" />
               </a>
             </div>
           </div>
@@ -213,7 +208,9 @@ export default function Footer() {
             "border-t border-slate-300/80 dark:border-white/10 text-slate-600 dark:text-slate-400"
           )}
         >
-          <p>© 2026 Advocate Aminul Islam Chowdhury Oly. All rights reserved.</p>
+          <p>
+            © <CurrentYear /> {ADVOCATE_INFO.fullName}. All rights reserved.
+          </p>
           <div className="flex items-center gap-6">
             <span>Sylhet, Bangladesh</span>
             <a

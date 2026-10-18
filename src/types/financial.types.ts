@@ -2,6 +2,7 @@ import {
   FinancialRecordType,
   FinancialPageLimit,
   FinancialSortOption,
+  FINANCIAL_RECORD_TYPES,
 } from "@/const/financial.const";
 import { PaymentMethod, PaymentType } from "@/const/client-payment.const";
 import { CaseExpenseCategory } from "@/const/case-expense.const";
@@ -12,7 +13,7 @@ import { CaseExpenseCategory } from "@/const/case-expense.const";
  */
 export interface UnifiedFinancialRecordDto {
   id: string; // Mongo _id
-  recordType: "PAYMENT" | "EXPENSE";
+  recordType: typeof FINANCIAL_RECORD_TYPES.PAYMENT | typeof FINANCIAL_RECORD_TYPES.EXPENSE;
   transactionDate: string; // ISO date string
   amount: number;
   currency: string;

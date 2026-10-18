@@ -193,7 +193,6 @@ export function ProfileAvatarDialog({
                       fill
                       sizes="112px"
                       className="object-cover"
-                      priority
                     />
                   ) : (
                     <div className="flex flex-col items-center justify-center text-gold-600 dark:text-gold-400 font-serif font-bold text-2xl">

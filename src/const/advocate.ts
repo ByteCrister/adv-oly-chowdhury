@@ -81,8 +81,8 @@ export const ADVOCATE_INFO = {
   },
 
   images: {
-    headshot: "/images/profile/Polished Corporate Headshot.png",
-    courtroom: "/images/profile/e0a04911-ad59-448a-a475-a8a170bedb7b.jpg",
+    headshot: "/images/profile/img-1.png",
+    courtroom: "/images/profile/img-1.png",
   },
 
   practiceAreas: [

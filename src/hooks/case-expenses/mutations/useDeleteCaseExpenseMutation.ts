@@ -4,6 +4,7 @@ import { useMutation, useQueryClient, UseMutationOptions } from "@tanstack/react
 import axios from "axios";
 import { CASE_EXPENSE_QUERY_KEYS } from "@/const/case-expense.const";
 import { FINANCIAL_QUERY_KEYS } from "@/const/financial.const";
+import { CASE_QUERY_KEYS } from "@/const/case.const";
 import type { CaseExpenseDeleteResponse } from "@/types/case-expense.types";
 
 /**
@@ -18,7 +19,7 @@ export async function deleteCaseExpense(id: string): Promise<CaseExpenseDeleteRe
 
 /**
  * TanStack Query mutation hook for deleting a case expense.
- * Automatically invalidates case expense caches and unified financials.
+ * Automatically invalidates case expense caches, unified financials, and case details.
  */
 export function useDeleteCaseExpenseMutation(
   options?: UseMutationOptions<
@@ -39,6 +40,9 @@ export function useDeleteCaseExpenseMutation(
         }),
         queryClient.invalidateQueries({
           queryKey: FINANCIAL_QUERY_KEYS.all,
+        }),
+        queryClient.invalidateQueries({
+          queryKey: CASE_QUERY_KEYS.all,
         }),
       ]);
       await options?.onSuccess?.(data, variables, context, mutation);

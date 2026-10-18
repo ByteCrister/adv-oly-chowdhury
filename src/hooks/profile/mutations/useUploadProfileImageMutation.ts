@@ -3,6 +3,7 @@
 import { useMutation, useQueryClient, UseMutationOptions } from "@tanstack/react-query";
 import axios from "axios";
 import { profileKeys } from "../queries/useProfile";
+import { DASHBOARD_QUERY_KEYS } from "@/const/dashboard.const";
 
 interface UploadAvatarResponse {
   success: boolean;
@@ -34,7 +35,10 @@ export function useUploadProfileImageMutation(
     ...options,
     mutationFn: uploadProfileImage,
     onSuccess: async (data, variables, context, mutation) => {
-      queryClient.invalidateQueries({ queryKey: profileKeys.me() });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: profileKeys.all }),
+        queryClient.invalidateQueries({ queryKey: DASHBOARD_QUERY_KEYS.all }),
+      ]);
       await options?.onSuccess?.(data, variables, context, mutation);
     },
   });

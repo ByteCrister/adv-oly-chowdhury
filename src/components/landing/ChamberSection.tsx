@@ -1,44 +1,31 @@
-"use client";
-
-import * as React from "react";
 import {
   MapPin,
   Building2,
   Clock,
   Phone,
-  Copy,
-  Check,
   Calendar,
   Scale,
 } from "lucide-react";
 import { ADVOCATE_INFO } from "@/const/advocate";
-import { useToast } from "@/components/shared/use-toast";
 import { FadeIn, FadeInRight } from "@/components/wrappers/Motion";
+import { CopyAddressButton } from "./client/CopyAddressButton";
 import { cn } from "@/lib/utils";
+import type { LandingChamberInfo } from "@/lib/landing/landing.types";
 
-export default function ChamberSection() {
-  const { toast } = useToast();
-  const [copied, setCopied] = React.useState(false);
+export interface ChamberSectionProps {
+  chamber?: LandingChamberInfo;
+  phone?: string;
+  phoneInternational?: string;
+}
 
-  const handleCopyAddress = async () => {
-    try {
-      await navigator.clipboard.writeText(ADVOCATE_INFO.chamber.fullAddress);
-      setCopied(true);
-      toast({
-        title: "Chamber Address Copied",
-        description: ADVOCATE_INFO.chamber.fullAddress,
-        variant: "gold",
-        duration: 4000,
-      });
-      setTimeout(() => setCopied(false), 2500);
-    } catch {
-      toast({
-        title: "Could not copy",
-        description: "Please copy the address manually.",
-        variant: "warning",
-      });
-    }
-  };
+export default function ChamberSection({
+  chamber: chamberProp,
+  phone: phoneProp,
+  phoneInternational: phoneInternationalProp,
+}: ChamberSectionProps = {}) {
+  const chamber = chamberProp || ADVOCATE_INFO.chamber;
+  const phone = phoneProp || ADVOCATE_INFO.contact.phone;
+  const phoneInternational = phoneInternationalProp || ADVOCATE_INFO.contact.phoneInternational;
 
   return (
     <section
@@ -73,7 +60,7 @@ export default function ChamberSection() {
               </h2>
               <p className="text-base text-slate-600 dark:text-slate-300 leading-relaxed font-normal">
                 Advocate Aminul Islam Chowdhury Oly conducts his primary litigation practice
-                directly inside the historic Judge&apos;s Court premises in Sylhet. Clients, corporate
+                directly inside the historic {chamber.court} premises in {chamber.city}. Clients, corporate
                 representatives, and instructing counsel can meet in person for case evaluations,
                 brief reviews, and pre-hearing conferences.
               </p>
@@ -105,36 +92,14 @@ export default function ChamberSection() {
                     Official Chamber Unit
                   </div>
                   <div className="text-base font-serif font-bold text-slate-900 dark:text-white">
-                    {ADVOCATE_INFO.chamber.room}
+                    {chamber.room}
                   </div>
                   <div className="text-xs text-slate-600 dark:text-slate-300 mt-0.5 font-normal">
-                    {ADVOCATE_INFO.chamber.barHall}, {ADVOCATE_INFO.chamber.court},{" "}
-                    {ADVOCATE_INFO.chamber.city}
+                    {chamber.barHall}, {chamber.court}, {chamber.city}
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleCopyAddress}
-                  className={cn(
-                    "px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 shadow-xs",
-                    "bg-slate-100 hover:bg-slate-200 text-slate-800 hover:text-slate-950 border border-slate-300",
-                    "dark:bg-white/10 dark:hover:bg-white/15 dark:text-slate-100 dark:hover:text-white dark:border-white/20"
-                  )}
-                  title="Copy full address"
-                >
-                  {copied ? (
-                    <>
-                      <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                      <span>Copied</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3.5 h-3.5 text-gold-700 dark:text-gold-400" />
-                      <span>Copy</span>
-                    </>
-                  )}
-                </button>
+                <CopyAddressButton fullAddress={chamber.fullAddress} />
               </div>
 
               {/* Consultation Hours Card */}
@@ -161,7 +126,7 @@ export default function ChamberSection() {
                     Chamber Schedule &amp; Court Routine
                   </div>
                   <div className="text-base font-serif font-bold text-slate-900 dark:text-white">
-                    {ADVOCATE_INFO.chamber.consultationHours}
+                    {chamber.consultationHours}
                   </div>
                   <div className="text-xs text-slate-600 dark:text-slate-300 mt-0.5 font-normal">
                     Morning court proceedings · Afternoon &amp; evening chamber conferences
@@ -183,7 +148,7 @@ export default function ChamberSection() {
                 <span>Prior Appointment Protocol</span>
               </div>
               <p className="leading-relaxed font-normal">
-                Due to ongoing trial appearances and appellate hearings at the Judge&apos;s Court, clients are
+                Due to ongoing trial appearances and appellate hearings at the {chamber.court}, clients are
                 requested to call or message ahead to confirm chamber availability and ensure unhurried
                 attention for their legal brief.
               </p>
@@ -227,7 +192,7 @@ export default function ChamberSection() {
                     </div>
                     <div>
                       <h3 className="font-serif text-xl font-bold text-white tracking-tight">
-                        Judge&apos;s Court, Sylhet
+                        {chamber.court}, {chamber.city}
                       </h3>
                       <p className="text-xs text-gold-300">
                         Sylhet District Judiciary Complex
@@ -240,17 +205,17 @@ export default function ChamberSection() {
                       background: "linear-gradient(180deg,#F6E3AE,#D8B870)",
                     }}
                   >
-                    Bar Hall 02
+                    {chamber.barHall}
                   </span>
                 </div>
 
                 {/* Details Breakdown */}
                 <div className="space-y-3.5 py-6">
                   {[
-                    { label: "Judicial District", val: "Sylhet, Bangladesh" },
-                    { label: "Court Complex", val: "Judge's Court, Sylhet" },
-                    { label: "Bar Hall / Section", val: "Bar Hall No: 02" },
-                    { label: "Chamber Unit", val: "Chamber No. 323 (3rd Floor)" },
+                    { label: "Judicial District", val: `${chamber.city}, Bangladesh` },
+                    { label: "Court Complex", val: `${chamber.court}, ${chamber.city}` },
+                    { label: "Bar Hall / Section", val: chamber.barHall },
+                    { label: "Chamber Unit", val: chamber.room },
                   ].map(({ label, val }) => (
                     <div
                       key={label}
@@ -266,10 +231,10 @@ export default function ChamberSection() {
                   >
                     <span className="text-slate-400">Direct Chamber Mobile:</span>
                     <a
-                      href={`tel:${ADVOCATE_INFO.contact.phoneInternational}`}
+                      href={`tel:${phoneInternational}`}
                       className="font-mono font-bold text-gold-300 hover:text-white transition-colors"
                     >
-                      {ADVOCATE_INFO.contact.phone}
+                      {phone}
                     </a>
                   </div>
                 </div>
@@ -277,21 +242,17 @@ export default function ChamberSection() {
                 {/* Bottom Actions */}
                 <div className="pt-2 flex flex-col sm:flex-row gap-3">
                   <a
-                    href={`tel:${ADVOCATE_INFO.contact.phoneInternational}`}
+                    href={`tel:${phoneInternational}`}
                     className="btn-gold-gloss flex-1 inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-xl text-xs font-extrabold uppercase tracking-wider"
                   >
                     <Phone className="w-3.5 h-3.5" />
                     <span>Call for Chamber Appointment</span>
                   </a>
 
-                  <button
-                    type="button"
-                    onClick={handleCopyAddress}
+                  <CopyAddressButton
+                    fullAddress={chamber.fullAddress}
                     className="inline-flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-xs font-semibold text-slate-100 hover:text-white transition-all hover:scale-[1.02] bg-white/10 hover:bg-white/20 border border-white/20"
-                  >
-                    <Copy className="w-3.5 h-3.5 text-gold-300" />
-                    <span>Copy Address</span>
-                  </button>
+                  />
                 </div>
               </div>
             </FadeInRight>

@@ -12,4 +12,8 @@ export * from "./client-document.types";
 export * from "./case-document.types";
 export * from "./document.types";
 export * from "./task.types";
+export * from "./hearing.types";
+export * from "./case.types";
+export * from "./case-party.types";
+export * from "./case-event.types";
 

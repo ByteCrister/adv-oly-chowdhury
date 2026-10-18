@@ -66,32 +66,7 @@ export function DocumentToolbar({
   hasActiveFilters,
   stats,
 }: DocumentToolbarProps) {
-  // Collect document types based on active scope
-  const availableDocTypes = React.useMemo(() => {
-    if (scope === DOCUMENT_SCOPES.CASE) {
-      return CASE_DOCUMENT_TYPE_LIST.map((type) => ({
-        value: type,
-        label: CASE_DOCUMENT_TYPE_LABELS[type] || type,
-      }));
-    }
-    if (scope === DOCUMENT_SCOPES.CLIENT) {
-      return CLIENT_DOCUMENT_TYPE_LIST.map((type) => ({
-        value: type,
-        label: CLIENT_DOCUMENT_TYPE_LABELS[type] || type,
-      }));
-    }
-    // ALL scope: combine with entity indicators
-    return [
-      ...CASE_DOCUMENT_TYPE_LIST.map((type) => ({
-        value: type,
-        label: `Case: ${CASE_DOCUMENT_TYPE_LABELS[type] || type}`,
-      })),
-      ...CLIENT_DOCUMENT_TYPE_LIST.map((type) => ({
-        value: type,
-        label: `Client: ${CLIENT_DOCUMENT_TYPE_LABELS[type] || type}`,
-      })),
-    ];
-  }, [scope]);
+
 
   return (
     <div className="space-y-3.5">
@@ -187,11 +162,41 @@ export function DocumentToolbar({
               className="h-8.5 px-2.5 py-1 text-xs rounded-xl bg-card/70 border border-border/70 dark:border-white/10 text-foreground focus:outline-none focus:ring-1 focus:ring-gold-500/40"
             >
               <option value="ALL">All Categories</option>
-              {availableDocTypes.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
-              ))}
+              {scope === DOCUMENT_SCOPES.CASE &&
+                CASE_DOCUMENT_TYPE_LIST.map((type) => (
+                  <option key={type} value={type}>
+                    {CASE_DOCUMENT_TYPE_LABELS[type] || type}
+                  </option>
+                ))}
+              {scope === DOCUMENT_SCOPES.CLIENT &&
+                CLIENT_DOCUMENT_TYPE_LIST.map((type) => (
+                  <option key={type} value={type}>
+                    {CLIENT_DOCUMENT_TYPE_LABELS[type] || type}
+                  </option>
+                ))}
+              {scope === DOCUMENT_SCOPES.ALL && (
+                <>
+                  <optgroup label="Case Documents">
+                    {CASE_DOCUMENT_TYPE_LIST.filter((type) => type !== "OTHER").map((type) => (
+                      <option key={`case-${type}`} value={type}>
+                        {CASE_DOCUMENT_TYPE_LABELS[type] || type}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Client Documents">
+                    {CLIENT_DOCUMENT_TYPE_LIST.filter((type) => type !== "OTHER").map((type) => (
+                      <option key={`client-${type}`} value={type}>
+                        {CLIENT_DOCUMENT_TYPE_LABELS[type] || type}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="General">
+                    <option key="general-other" value="OTHER">
+                      Other / Uncategorized
+                    </option>
+                  </optgroup>
+                </>
+              )}
             </select>
           </div>
 

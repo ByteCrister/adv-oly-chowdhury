@@ -1,12 +1,15 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, UseMutationOptions } from "@tanstack/react-query";
 import axios from "axios";
 import {
   TaskStatusUpdateDto,
   TaskUpdateApiResponse,
 } from "@/types/dashboard.ui.type";
 import { DASHBOARD_QUERY_KEYS } from "@/const/dashboard.const";
+import { TASK_QUERY_KEYS } from "@/const/task.const";
+import { CLIENT_QUERY_KEYS } from "@/const/client.const";
+import { CASE_QUERY_KEYS } from "@/const/case.const";
 
 export async function updateTaskStatus(
   dto: TaskStatusUpdateDto
@@ -19,16 +22,33 @@ export async function updateTaskStatus(
   return response.data;
 }
 
-export function useUpdateTaskStatusMutation() {
+export function useUpdateTaskStatusMutation(
+  options?: UseMutationOptions<TaskUpdateApiResponse, Error, TaskStatusUpdateDto>
+) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...options,
     mutationFn: updateTaskStatus,
-    onSuccess: () => {
-      // Invalidate dashboard queries to update task counts and lists
-      queryClient.invalidateQueries({
-        queryKey: DASHBOARD_QUERY_KEYS.all,
-      });
+    onSuccess: async (data, variables, context, mutation) => {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: DASHBOARD_QUERY_KEYS.all,
+        }),
+        queryClient.invalidateQueries({
+          queryKey: TASK_QUERY_KEYS.all,
+        }),
+        queryClient.invalidateQueries({
+          queryKey: TASK_QUERY_KEYS.detail(variables.taskId),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: CLIENT_QUERY_KEYS.all,
+        }),
+        queryClient.invalidateQueries({
+          queryKey: CASE_QUERY_KEYS.all,
+        }),
+      ]);
+      await options?.onSuccess?.(data, variables, context, mutation);
     },
   });
 }

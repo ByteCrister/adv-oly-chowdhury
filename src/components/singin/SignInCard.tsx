@@ -7,48 +7,96 @@ import { SignInForm } from "./SignInForm";
 
 export function SignInCard() {
   return (
-    <div className="relative w-full max-w-[440px] mx-auto">
-      {/* Ambient Radial Background Glow */}
+    <div className="relative w-full max-w-[460px] mx-auto z-10">
+      {/* Top Floating Navigation: Back to Public Portfolio */}
+      <div className="flex items-center justify-start mb-4 px-1.5 sm:px-2">
+        <Link
+          href="/"
+          className="group inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold text-slate-700 dark:text-slate-300 hover:text-gold-700 dark:hover:text-gold-300 bg-white/70 dark:bg-white/[0.05] hover:bg-white dark:hover:bg-white/[0.1] border border-slate-200/80 dark:border-white/10 backdrop-blur-md shadow-xs transition-all duration-200 cursor-pointer"
+        >
+          <ArrowLeft className="w-3.5 h-3.5 transition-transform duration-200 group-hover:-translate-x-1" />
+          <span>Return to Public Portfolio</span>
+        </Link>
+      </div>
+
+      {/* Ambient Multi-Layer Radial Glow Orbs */}
       <div
         aria-hidden="true"
-        className="absolute -top-16 -left-16 w-72 h-72 bg-primary/20 rounded-full blur-3xl pointer-events-none -z-10 animate-pulse duration-1000"
+        className="absolute -top-16 -left-16 w-72 h-72 bg-gradient-to-br from-sapphire-400/25 to-primary/20 dark:from-sapphire-500/20 dark:to-primary/10 rounded-full blur-3xl pointer-events-none -z-10 animate-pulse duration-1000"
       />
       <div
         aria-hidden="true"
-        className="absolute -bottom-16 -right-16 w-72 h-72 bg-amber-500/15 dark:bg-amber-400/10 rounded-full blur-3xl pointer-events-none -z-10"
+        className="absolute -bottom-20 -right-16 w-80 h-80 bg-gradient-to-tl from-gold-400/25 to-amber-500/20 dark:from-gold-400/15 dark:to-amber-500/10 rounded-full blur-3xl pointer-events-none -z-10"
       />
 
-      {/* Glassmorphism Card Container */}
-      <div className="relative backdrop-blur-xl bg-card/85 dark:bg-card/70 border border-border/70 dark:border-white/10 shadow-2xl shadow-primary/5 rounded-3xl p-7 sm:p-9 transition-all">
-        {/* Top Header & Emblem */}
-        <div className="flex flex-col items-center text-center mb-7">
-          <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/25 flex items-center justify-center text-primary mb-4 shadow-sm">
-            <Scale className="w-7 h-7" />
+      {/* Main Luxury Glassmorphism Card Container */}
+      <div className="relative backdrop-blur-2xl bg-white/85 dark:bg-[#070E1E]/85 border border-slate-200/90 dark:border-white/12 shadow-[0_20px_60px_-15px_rgba(16,28,51,0.12),0_8px_24px_-8px_rgba(192,154,78,0.14)] dark:shadow-[0_25px_70px_-15px_rgba(0,0,0,0.7),0_0_40px_-10px_rgba(216,184,112,0.15)] rounded-[28px] sm:rounded-[32px] p-6 sm:p-9 transition-all duration-300 overflow-hidden">
+        {/* Specular Top Sheen Edge Highlight */}
+        <div
+          aria-hidden="true"
+          className="absolute inset-x-8 top-0 h-[1.5px] bg-gradient-to-r from-transparent via-white/90 dark:via-gold-300/50 to-transparent pointer-events-none"
+        />
+
+        {/* Ambient Top Light Flare */}
+        <div
+          aria-hidden="true"
+          className="absolute -top-24 left-1/2 -translate-x-1/2 w-48 h-24 bg-gradient-to-b from-gold-400/20 dark:from-gold-300/15 to-transparent rounded-full blur-2xl pointer-events-none"
+        />
+
+        {/* Top Header & Chamber Emblem */}
+        <div className="flex flex-col items-center text-center mb-6 sm:mb-7">
+          {/* Medallion with 3D Gloss Sheen */}
+          <div className="relative mb-4 group">
+            <div className="absolute -inset-1.5 rounded-2xl bg-gradient-to-r from-gold-400/30 via-sapphire-400/20 to-gold-500/30 blur-md opacity-75 group-hover:opacity-100 transition-opacity pointer-events-none" />
+
+            <div className="relative w-16 h-16 rounded-2xl sidebar-emblem-gloss flex items-center justify-center text-gold-700 dark:text-gold-300 shadow-md">
+              {/* Specular highlight sweep across medallion */}
+              <div
+                aria-hidden="true"
+                className="absolute inset-x-2 top-0 h-1/2 bg-gradient-to-b from-white/40 to-transparent rounded-t-2xl pointer-events-none"
+              />
+              <Scale className="w-8 h-8 drop-shadow-sm transition-transform duration-300 group-hover:scale-105" />
+            </div>
           </div>
 
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-[11px] font-semibold text-primary uppercase tracking-wider mb-2">
-            <ShieldCheck className="w-3.5 h-3.5" />
-            <span>Restricted Access</span>
-          </div>
-
-          <h1 className="text-2xl font-serif font-bold text-foreground tracking-tight">
-            Advocate Portal
-          </h1>
-          <p className="text-xs text-muted-foreground mt-1 max-w-[280px]">
-            Advocate Aminul Islam Chowdhury Oly
-            <br />
-            <span className="text-[11px] text-muted-foreground/80">
-              Judge&apos;s Court, Sylhet • Chamber Management
+          {/* Chamber Restricted Status Pill */}
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gold-500/10 dark:bg-gold-400/10 border border-gold-500/25 dark:border-gold-400/25 text-[10.5px] sm:text-[11px] font-bold text-gold-800 dark:text-gold-300 uppercase tracking-widest mb-2.5 shadow-xs">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-gold-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-gold-500 dark:bg-gold-400" />
             </span>
-          </p>
+            <span>Restricted Access • Chamber Portal</span>
+          </div>
+
+          {/* Heading with Serif Distinction */}
+          <h1 className="text-2xl sm:text-3xl font-serif font-bold text-slate-900 dark:text-white tracking-tight leading-tight">
+            Chamber Authentication
+          </h1>
+
+          <div className="mt-1.5 flex flex-col items-center gap-0.5">
+            <p className="text-xs sm:text-sm font-semibold text-slate-800 dark:text-slate-200 tracking-tight">
+              Advocate Aminul Islam Chowdhury Oly
+            </p>
+            <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 font-medium">
+              Judge&apos;s Court, Sylhet • Chamber Management
+            </p>
+          </div>
+
+          {/* Decorative hairline */}
+          <div className="w-16 h-px bg-gradient-to-r from-transparent via-gold-500/50 to-transparent mt-4 mb-1" />
         </div>
 
         {/* Interactive Sign-In Form Wrapped in Suspense */}
         <Suspense
           fallback={
-            <div className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground text-sm">
-              <Loader2 className="w-6 h-6 animate-spin text-primary" />
-              <span>Loading authentication…</span>
+            <div className="flex flex-col items-center justify-center py-12 gap-3 text-muted-foreground text-sm">
+              <div className="relative">
+                <div className="w-10 h-10 rounded-full border-2 border-gold-500/20 border-t-gold-500 animate-spin" />
+                <Loader2 className="w-5 h-5 animate-spin text-gold-600 dark:text-gold-400 absolute inset-0 m-auto" />
+              </div>
+              <span className="text-xs font-medium tracking-wide">
+                Loading secure authentication gateway…
+              </span>
             </div>
           }
         >
@@ -56,19 +104,15 @@ export function SignInCard() {
         </Suspense>
 
         {/* Security Notice & Footer */}
-        <div className="mt-8 pt-5 border-t border-border/60 flex flex-col items-center gap-3 text-center">
-          <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
-            <ShieldCheck className="w-3.5 h-3.5 text-muted-foreground/70" />
-            <span>Encrypted Session • Whitelist-Only Security</span>
-          </p>
+        <div className="mt-7 pt-5 border-t border-slate-200/80 dark:border-white/10 flex flex-col items-center gap-2.5 text-center">
+          <div className="inline-flex items-center gap-2 text-[11px] text-slate-600 dark:text-slate-400 font-medium">
+            <ShieldCheck className="w-3.5 h-3.5 text-gold-600 dark:text-gold-400 shrink-0" />
+            <span>256-Bit SSL Encrypted • Whitelist-Only Authorization</span>
+          </div>
 
-          <Link
-            href="/"
-            className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 transition-colors group mt-1"
-          >
-            <ArrowLeft className="w-3.5 h-3.5 transition-transform group-hover:-translate-x-0.5" />
-            <span>Return to Public Portfolio</span>
-          </Link>
+          <p className="text-[10px] text-slate-400 dark:text-slate-500">
+            Authorized for Advocate Aminul Islam Chowdhury Oly &amp; designated officers.
+          </p>
         </div>
       </div>
     </div>

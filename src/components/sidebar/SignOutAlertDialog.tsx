@@ -31,7 +31,7 @@ export function SignOutAlertDialog({
   isSigningOut = false,
   displayName = "Advocate Oly Chowdhury",
   displayEmail = "advocateaico@gmail.com",
-  avatarSrc = "/images/profile/Polished Corporate Headshot.png",
+  avatarSrc = "/images/profile/img-1.png",
 }: SignOutAlertDialogProps) {
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>

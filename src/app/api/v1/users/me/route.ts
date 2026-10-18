@@ -9,6 +9,7 @@ import "@/db/models/Asset.model";
 import { AssetReference } from "@/db/models/AssetReference.model";
 import { profileUpdateSchema } from "@/utils/zod";
 import type { ProfileAvatarDto, ProfileSignatureDto } from "@/types/profile.ui.type";
+import { revalidateLandingCache } from "@/lib/landing";
 
 interface PopulatedAsset {
   _id?: mongoose.Types.ObjectId | string;
@@ -238,6 +239,9 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
   if (!updatedUser) {
     throw ApiError.notFound("User account not found.");
   }
+
+  // Invalidate landing page cache and prerendered route following successful profile update
+  revalidateLandingCache();
 
   const formattedData = formatUserResponse(updatedUser);
   return NextResponse.json(

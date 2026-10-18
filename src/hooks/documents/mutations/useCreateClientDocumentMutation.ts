@@ -36,10 +36,10 @@ export function useCreateUnifiedClientDocumentMutation(
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: DOCUMENT_QUERY_KEYS.all }),
         queryClient.invalidateQueries({
-          queryKey: CLIENT_DOCUMENT_QUERY_KEYS.byClient(variables.data.clientId),
+          queryKey: CLIENT_DOCUMENT_QUERY_KEYS.all,
         }),
         queryClient.invalidateQueries({
-          queryKey: CLIENT_QUERY_KEYS.detail(variables.data.clientId),
+          queryKey: CLIENT_QUERY_KEYS.all,
         }),
       ]);
       await options?.onSuccess?.(data, variables, context, mutation);

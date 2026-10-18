@@ -3,6 +3,7 @@
 import { useMutation, useQueryClient, UseMutationOptions } from "@tanstack/react-query";
 import axios from "axios";
 import { COURT_QUERY_KEYS } from "@/const/court.const";
+import { DROPDOWN_QUERY_KEYS } from "@/const/dropdown.const";
 import type { CreateCourtInput, CourtActionResponse } from "@/types/court.types";
 
 /**
@@ -15,7 +16,7 @@ export async function createCourt(payload: CreateCourtInput): Promise<CourtActio
 
 /**
  * TanStack Query mutation hook for creating a court.
- * Automatically invalidates court query caches upon success.
+ * Automatically invalidates court query caches and dropdowns upon success.
  */
 export function useCreateCourtMutation(
   options?: UseMutationOptions<CourtActionResponse, Error, CreateCourtInput>
@@ -26,7 +27,10 @@ export function useCreateCourtMutation(
     ...options,
     mutationFn: createCourt,
     onSuccess: async (data, variables, context, mutation) => {
-      await queryClient.invalidateQueries({ queryKey: COURT_QUERY_KEYS.all });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: COURT_QUERY_KEYS.all }),
+        queryClient.invalidateQueries({ queryKey: DROPDOWN_QUERY_KEYS.ALL }),
+      ]);
       await options?.onSuccess?.(data, variables, context, mutation);
     },
   });

@@ -4,6 +4,7 @@ import { useMutation, useQueryClient, UseMutationOptions } from "@tanstack/react
 import axios from "axios";
 import { CASE_EXPENSE_QUERY_KEYS } from "@/const/case-expense.const";
 import { FINANCIAL_QUERY_KEYS } from "@/const/financial.const";
+import { CASE_QUERY_KEYS } from "@/const/case.const";
 import type {
   UpdateCaseExpenseInput,
   CaseExpenseActionResponse,
@@ -30,7 +31,7 @@ export async function updateCaseExpense({
 
 /**
  * TanStack Query mutation hook for updating an existing case expense.
- * Automatically invalidates case expense details, case expense lists, and unified financials.
+ * Automatically invalidates case expense details, case expense lists, unified financials, and case details.
  */
 export function useUpdateCaseExpenseMutation(
   options?: UseMutationOptions<
@@ -54,6 +55,9 @@ export function useUpdateCaseExpenseMutation(
         }),
         queryClient.invalidateQueries({
           queryKey: FINANCIAL_QUERY_KEYS.all,
+        }),
+        queryClient.invalidateQueries({
+          queryKey: CASE_QUERY_KEYS.all,
         }),
       ]);
       await options?.onSuccess?.(data, variables, context, mutation);

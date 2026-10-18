@@ -185,78 +185,88 @@ function EditTaskForm({
         </div>
 
         {/* Status & Priority Row */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
           {/* Status */}
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-foreground">Current Status</label>
-            <div className="grid grid-cols-2 gap-1.5 p-1 bg-muted/40 rounded-xl border border-border/50">
-              {TASK_STATUS_LIST.map((st) => (
-                <button
-                  key={st}
-                  type="button"
-                  onClick={() => setStatus(st)}
-                  className={`py-1.5 px-2 rounded-lg text-xs font-medium transition-all ${
-                    status === st
-                      ? "bg-card text-foreground font-semibold shadow-xs border border-border/60"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {TASK_STATUS_LABELS[st]}
-                </button>
-              ))}
+            <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground font-mono flex items-center gap-1.5">
+              <span>Current Status</span>
+            </label>
+            <div className="grid grid-cols-2 gap-1.5 p-1 bg-muted/40 dark:bg-white/[0.04] rounded-xl border border-border/70 dark:border-white/10 shadow-inner">
+              {TASK_STATUS_LIST.map((st) => {
+                const isSelected = status === st;
+                return (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() => setStatus(st)}
+                    className={`py-1.5 px-2 rounded-lg text-xs transition-all duration-200 select-none ${
+                      isSelected
+                        ? "bg-gradient-to-r from-gold-400 via-gold-500 to-amber-500 text-midnight-950 font-bold shadow-xs shadow-gold-500/25 scale-[1.02]"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted/50 font-medium"
+                    }`}
+                  >
+                    {TASK_STATUS_LABELS[st]}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
           {/* Priority */}
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-foreground">Priority Level</label>
-            <div className="grid grid-cols-2 gap-1.5 p-1 bg-muted/40 rounded-xl border border-border/50">
-              {TASK_PRIORITY_LIST.map((pr) => (
-                <button
-                  key={pr}
-                  type="button"
-                  onClick={() => setPriority(pr)}
-                  className={`py-1.5 px-2 rounded-lg text-xs font-medium transition-all ${
-                    priority === pr
-                      ? pr === TASK_PRIORITIES.URGENT
-                        ? "bg-red-500/15 text-red-600 dark:text-red-400 font-bold border border-red-500/30"
-                        : pr === TASK_PRIORITIES.HIGH
-                        ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 font-bold border border-amber-500/30"
-                        : "bg-card text-foreground font-semibold shadow-xs border border-border/60"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {TASK_PRIORITY_LABELS[pr]}
-                </button>
-              ))}
+            <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground font-mono flex items-center gap-1.5">
+              <span>Priority Level</span>
+            </label>
+            <div className="grid grid-cols-2 gap-1.5 p-1 bg-muted/40 dark:bg-white/[0.04] rounded-xl border border-border/70 dark:border-white/10 shadow-inner">
+              {TASK_PRIORITY_LIST.map((pr) => {
+                const isSelected = priority === pr;
+                return (
+                  <button
+                    key={pr}
+                    type="button"
+                    onClick={() => setPriority(pr)}
+                    className={`py-1.5 px-2 rounded-lg text-xs transition-all duration-200 select-none ${
+                      isSelected
+                        ? pr === TASK_PRIORITIES.URGENT
+                          ? "bg-gradient-to-r from-red-500/25 to-red-600/15 text-red-600 dark:text-red-400 font-bold border border-red-500/40 shadow-xs"
+                          : pr === TASK_PRIORITIES.HIGH
+                          ? "bg-gradient-to-r from-amber-500/25 to-amber-600/15 text-amber-600 dark:text-amber-400 font-bold border border-amber-500/40 shadow-xs"
+                          : "bg-card text-foreground font-bold shadow-xs border border-border/80 dark:border-white/20"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted/50 font-medium"
+                    }`}
+                  >
+                    {TASK_PRIORITY_LABELS[pr]}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
 
         {/* Due Date & Time */}
-        <div className="p-3 rounded-xl bg-muted/30 border border-border/50 space-y-2">
-          <label className="text-xs font-semibold text-foreground flex items-center gap-1">
+        <div className="relative overflow-hidden p-3.5 rounded-xl bg-white/60 dark:bg-card/40 border border-border/80 dark:border-white/10 shadow-2xs space-y-2">
+          <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground font-mono flex items-center gap-1.5">
             <Calendar className="w-3.5 h-3.5 text-gold-500" />
             <span>Target Deadline (Optional)</span>
           </label>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <div>
-              <span className="text-[10px] text-muted-foreground block mb-1">Due Date</span>
+              <span className="text-[10px] text-muted-foreground/80 block mb-1 font-mono uppercase tracking-wider">Due Date</span>
               <Input
                 type="date"
                 value={dueDate}
                 onChange={(e) => setDueDate(e.target.value)}
-                className="h-9 text-xs"
+                className="h-9.5 text-xs bg-card border-border/80 dark:border-white/10 focus-visible:ring-gold-500/40"
               />
             </div>
             <div>
-              <span className="text-[10px] text-muted-foreground block mb-1">Due Time</span>
+              <span className="text-[10px] text-muted-foreground/80 block mb-1 font-mono uppercase tracking-wider">Due Time</span>
               <Input
                 type="time"
                 value={dueTime}
                 onChange={(e) => setDueTime(e.target.value)}
                 disabled={!dueDate}
-                className="h-9 text-xs"
+                className="h-9.5 text-xs bg-card border-border/80 dark:border-white/10 focus-visible:ring-gold-500/40"
               />
             </div>
           </div>
@@ -266,7 +276,7 @@ function EditTaskForm({
         <div className="space-y-1.5">
           <label
             htmlFor="edit-task-desc"
-            className="text-xs font-semibold text-foreground flex items-center gap-1"
+            className="text-xs font-bold uppercase tracking-wider text-muted-foreground font-mono flex items-center gap-1.5"
           >
             <FileText className="w-3.5 h-3.5 text-gold-500" />
             <span>Task Brief & Instructions</span>
@@ -277,14 +287,14 @@ function EditTaskForm({
             onChange={(e) => setDescription(e.target.value)}
             rows={3}
             placeholder="Add relevant notes, court room numbers, document checklist, or instructions..."
-            className="w-full rounded-xl border border-input bg-transparent px-3 py-2 text-xs shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-transparent transition-all"
+            className="w-full rounded-xl border border-border/80 dark:border-white/10 bg-white/60 dark:bg-card/40 backdrop-blur-md px-3.5 py-2.5 text-xs shadow-2xs placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gold-500/50 focus-visible:border-gold-500/50 transition-all text-foreground"
           />
         </div>
 
         {/* Linked Case & Client Selectors */}
         <div className="space-y-3 pt-1">
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-foreground flex items-center gap-1">
+            <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground font-mono flex items-center gap-1.5">
               <Briefcase className="w-3.5 h-3.5 text-gold-500" />
               <span>Associated Case Matter</span>
             </label>
@@ -294,12 +304,12 @@ function EditTaskForm({
               onChange={handleCaseSelect}
               placeholder="Search case title or number..."
               searchPlaceholder="Type case title or ref..."
-              className="h-10 text-xs"
+              className="h-10 text-xs shadow-2xs"
             />
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-foreground flex items-center gap-1">
+            <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground font-mono flex items-center gap-1.5">
               <Users className="w-3.5 h-3.5 text-gold-500" />
               <span>Associated Client</span>
             </label>
@@ -309,30 +319,30 @@ function EditTaskForm({
               onChange={(val) => setClientId(val)}
               placeholder="Search client name..."
               searchPlaceholder="Type client name..."
-              className="h-10 text-xs"
+              className="h-10 text-xs shadow-2xs"
             />
           </div>
         </div>
       </div>
 
-      <SheetFooter className="p-6 pt-4 border-t border-border/60 dark:border-white/10 shrink-0 bg-background/60 dark:bg-card/30 backdrop-blur-md gap-2">
+      <SheetFooter className="p-5 sm:p-6 border-t border-border/70 dark:border-white/10 shrink-0 bg-white/70 dark:bg-card/40 backdrop-blur-xl flex flex-row items-center justify-end gap-2.5">
         <Button
           type="button"
           variant="outline"
           onClick={onClose}
           disabled={isPending}
-          className="h-10 px-4 rounded-xl text-xs"
+          className="h-10 px-4.5 rounded-xl text-xs border-border/80 dark:border-white/10 hover:bg-muted/50"
         >
           Cancel
         </Button>
-        <Button
+        <button
           type="submit"
           disabled={isPending || !title.trim()}
-          className="h-10 px-5 rounded-xl text-xs bg-gold-500 hover:bg-gold-600 text-midnight-950 font-semibold gap-1.5 shadow-md shadow-gold-500/10"
+          className="btn-gold-gloss h-10 px-6 rounded-xl text-xs sm:text-sm font-extrabold flex items-center gap-2 cursor-pointer shadow-md disabled:opacity-50"
         >
           {isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-          <span>{isPending ? "Saving..." : "Update Task"}</span>
-        </Button>
+          <span>{isPending ? "Saving..." : "Update Task Dossier"}</span>
+        </button>
       </SheetFooter>
     </form>
   );
@@ -347,19 +357,26 @@ export function EditTaskDialog({
     <Sheet open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <SheetContent
         side="right"
-        className="w-full sm:max-w-md md:max-w-lg lg:max-w-xl p-0 flex flex-col gap-0 overflow-hidden"
+        className="w-full sm:max-w-md md:max-w-lg lg:max-w-xl p-0 flex flex-col gap-0 overflow-hidden bg-background/95 dark:bg-midnight-950/95 backdrop-blur-2xl border-l border-border/80 dark:border-white/10 shadow-2xl"
       >
-        <SheetHeader className="p-6 pb-4 border-b border-border/60 dark:border-white/10 shrink-0 bg-background/50 dark:bg-card/20 backdrop-blur-md">
-          <div className="flex items-center gap-2 text-gold-500 mb-1">
-            <Edit2 className="w-5 h-5" />
-            <span className="text-xs font-semibold tracking-wider uppercase font-mono">
-              Modify Task Dossier
-            </span>
+        <SheetHeader className="relative p-6 pb-4 border-b border-border/70 dark:border-white/10 shrink-0 bg-white/70 dark:bg-card/30 backdrop-blur-xl">
+          {/* Specular bottom hairline */}
+          <div className="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-gold-400/35 to-transparent pointer-events-none" />
+
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-gold-400/25 via-gold-500/15 to-transparent border border-gold-400/40 text-gold-500 dark:text-gold-400 flex items-center justify-center shrink-0 shadow-[0_2px_12px_rgba(192,154,78,0.25)]">
+              <Edit2 className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="text-[10px] font-bold tracking-wider uppercase font-mono text-gold-600 dark:text-gold-400 block">
+                Modify Task Dossier
+              </span>
+              <SheetTitle className="font-serif text-xl sm:text-2xl text-foreground font-bold tracking-tight">
+                Edit Chamber Task
+              </SheetTitle>
+            </div>
           </div>
-          <SheetTitle className="font-serif text-xl sm:text-2xl text-foreground font-bold">
-            Edit Chamber Task
-          </SheetTitle>
-          <SheetDescription className="text-xs text-muted-foreground">
+          <SheetDescription className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
             Update deadlines, chamber priority, status, or case matter context.
           </SheetDescription>
         </SheetHeader>

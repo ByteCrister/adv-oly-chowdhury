@@ -7,6 +7,7 @@ import { useMediaUpload, computeFileHash } from "@/hooks/media/useMediaUpload";
 import { usePrepareUploadMutation } from "@/hooks/media/mutations/usePrepareUploadMutation";
 import { useUpdateProfileMutation } from "./mutations/useUpdateProfileMutation";
 import { profileKeys } from "./queries/useProfile";
+import { DASHBOARD_QUERY_KEYS } from "@/const/dashboard.const";
 import { ProfileApiResponse, ProfileUpdateDto } from "@/types/profile.ui.type";
 import {
   compressImage,
@@ -271,8 +272,9 @@ export function useProfileAvatar({
       const payload = buildProfilePayload(finalAssetReferenceId);
       await updateProfileMutation.mutateAsync(payload);
 
-      // Refresh profile cache everywhere
-      await queryClient.invalidateQueries({ queryKey: profileKeys.me() });
+      // Refresh profile and dashboard cache everywhere
+      await queryClient.invalidateQueries({ queryKey: profileKeys.all });
+      await queryClient.invalidateQueries({ queryKey: DASHBOARD_QUERY_KEYS.all });
 
       setStage("complete");
       setStageMessage("Profile avatar updated successfully!");
@@ -316,7 +318,8 @@ export function useProfileAvatar({
       // Call dedicated DELETE endpoint to unlink avatar and soft-delete the AssetReference
       await axios.delete("/api/v1/users/me/avatar");
 
-      await queryClient.invalidateQueries({ queryKey: profileKeys.me() });
+      await queryClient.invalidateQueries({ queryKey: profileKeys.all });
+      await queryClient.invalidateQueries({ queryKey: DASHBOARD_QUERY_KEYS.all });
       clearSelection();
       setStage("complete");
       setStageMessage("Profile avatar removed.");

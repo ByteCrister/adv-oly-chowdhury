@@ -88,6 +88,8 @@ export function ProfileHeader({
                       sizes="(max-width: 640px) 96px, 112px"
                       className="object-cover transition-transform duration-500 group-hover:scale-105"
                       priority
+                      loading="eager"
+                      fetchPriority="high"
                     />
                   ) : (
                     <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-gold-500/20 via-gold-500/10 to-transparent text-gold-600 dark:text-gold-400 font-serif font-bold text-2xl sm:text-3xl">

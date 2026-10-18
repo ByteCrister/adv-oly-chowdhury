@@ -1,6 +1,3 @@
-"use client";
-
-import * as React from "react";
 import {
   GraduationCap,
   Award,
@@ -12,8 +9,19 @@ import {
 } from "lucide-react";
 import { FadeIn, FadeInUp } from "@/components/wrappers/Motion";
 import { cn } from "@/lib/utils";
+import type { LandingBarRegistrations, LandingProfile } from "@/lib/landing/landing.types";
 
-export default function CredentialsSection() {
+export interface CredentialsSectionProps {
+  barRegistrations?: LandingBarRegistrations;
+  profile?: LandingProfile;
+}
+
+export default function CredentialsSection({
+  barRegistrations,
+  profile,
+}: CredentialsSectionProps = {}) {
+  const fullName = profile?.fullName || "Advocate Aminul Islam Chowdhury Oly";
+
   const credentials = [
     {
       degree: "LL.M",
@@ -56,19 +64,25 @@ export default function CredentialsSection() {
   const barMemberships = [
     {
       title: "Sylhet District Bar Association",
-      role: "Member Advocate · Regular Practitioner",
+      role: barRegistrations?.barAssociationMemberNo
+        ? `Member No: ${barRegistrations.barAssociationMemberNo} · Regular Practitioner`
+        : "Member Advocate · Regular Practitioner",
       region: "Sylhet, Bangladesh",
       detail:
         "Active enrollment and regular appearances representing litigants before the District and Sessions Judge Court, Sylhet.",
       icon: Landmark,
+      membershipNo: barRegistrations?.barAssociationMemberNo || null,
     },
     {
       title: "Sylhet District Taxes Bar Association",
-      role: "Member Advocate · Revenue Practitioner",
+      role: barRegistrations?.taxesBarMemberNo
+        ? `Member No: ${barRegistrations.taxesBarMemberNo} · Revenue Practitioner`
+        : "Member Advocate · Revenue Practitioner",
       region: "ESTD. 1974",
       detail:
         "Dedicated taxation bar membership covering tax assessment hearings, corporate return scrutiny, and appellate tribunals.",
       icon: Award,
+      membershipNo: barRegistrations?.taxesBarMemberNo || null,
     },
     {
       title: "International Bar Association (IBA)",
@@ -77,6 +91,7 @@ export default function CredentialsSection() {
       detail:
         "Connection to international legal practitioners and adherence to internationally recognized benchmarks of ethical practice and advocacy.",
       icon: Globe2,
+      membershipNo: null,
     },
   ];
 
@@ -113,8 +128,9 @@ export default function CredentialsSection() {
 
           <FadeInUp delay={0.2}>
             <p className="text-base text-slate-600 dark:text-slate-300 leading-relaxed font-normal">
-              Every credential and enrollment presented here is authentic and verified from
-              Advocate Aminul Islam Chowdhury Oly&apos;s official professional records and bar registers.
+              Every credential and enrollment presented here is authentic and verified from{" "}
+              {fullName}&apos;s official professional records and bar registers
+              {barRegistrations?.barCouncilId ? ` (Bar Council Sanad No: ${barRegistrations.barCouncilId})` : ""}.
             </p>
           </FadeInUp>
         </div>

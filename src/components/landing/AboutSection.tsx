@@ -1,6 +1,3 @@
-"use client";
-
-import * as React from "react";
 import Image from "next/image";
 import {
   GraduationCap,
@@ -12,8 +9,18 @@ import {
 import { ADVOCATE_INFO } from "@/const/advocate";
 import { FadeIn, FadeInLeft } from "@/components/wrappers/Motion";
 import { cn } from "@/lib/utils";
+import type { LandingProfile } from "@/lib/landing/landing.types";
 
-export default function AboutSection() {
+export interface AboutSectionProps {
+  profile?: LandingProfile;
+}
+
+export default function AboutSection({ profile }: AboutSectionProps = {}) {
+  const fullName = profile?.fullName || ADVOCATE_INFO.fullName;
+  const preferredName = profile?.preferredName || ADVOCATE_INFO.preferredName;
+  const courtroomImage = ADVOCATE_INFO.images.courtroom;
+  const chamber = profile?.chamber || ADVOCATE_INFO.chamber;
+
   const pillars = [
     {
       title: "Dual Master's Academic Pedigree",
@@ -76,8 +83,8 @@ export default function AboutSection() {
                 {/* Courtroom Photo Container */}
                 <div className="relative aspect-[4/5] rounded-2xl overflow-hidden bg-slate-950">
                   <Image
-                    src={ADVOCATE_INFO.images.courtroom}
-                    alt="Advocate Aminul Islam Chowdhury Oly in Court Robes"
+                    src={courtroomImage}
+                    alt={`${fullName} in Court Robes`}
                     fill
                     sizes="(max-width: 768px) 100vw, 440px"
                     className="object-cover object-center transition-transform duration-700 hover:scale-[1.03]"
@@ -104,7 +111,7 @@ export default function AboutSection() {
                   >
                     <div>
                       <div className="text-xs font-bold text-gold-300">
-                        Courtroom Robes · Judge&apos;s Court, Sylhet
+                        Courtroom Robes · {chamber.court}, {chamber.city}
                       </div>
                       <div className="text-[11px] text-slate-300">
                         District Judiciary Premises
@@ -120,7 +127,7 @@ export default function AboutSection() {
                 <div className="pt-4 px-2 pb-1 flex items-center justify-between">
                   <div>
                     <span className="text-base font-serif font-bold text-slate-900 dark:text-white block">
-                      {ADVOCATE_INFO.fullName}
+                      {fullName}
                     </span>
                     <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
                       B.S.S (Hon&apos;s) · M.S.S · LL.B · LL.M
@@ -175,9 +182,13 @@ export default function AboutSection() {
               </h2>
 
               <p className="text-base text-slate-700 dark:text-slate-300 leading-relaxed font-normal">
-                Advocate <strong className="text-slate-900 dark:text-white font-semibold">Aminul Islam Chowdhury Oly</strong> is
-                an enrolled legal practitioner operating from his permanent chamber at
-                the Judge&apos;s Court in Sylhet. With advanced postgraduate qualifications in both
+                <strong className="text-slate-900 dark:text-white font-semibold">
+                  {(preferredName || fullName).startsWith("Advocate")
+                    ? (preferredName || fullName)
+                    : `Advocate ${preferredName || fullName}`}
+                </strong>{" "}
+                is an enrolled legal practitioner operating from his permanent chamber at
+                the {chamber.court} in {chamber.city}. With advanced postgraduate qualifications in both
                 law (LL.M) and the social sciences (M.S.S), he combines comprehensive statutory analysis
                 with deep socio-legal insight into civil, commercial, and property disputes.
               </p>

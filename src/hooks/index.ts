@@ -9,4 +9,6 @@ export * from "./case-expenses";
 export * from "./financials";
 export * from "./documents";
 export * from "./tasks";
+export * from "./hearings";
+export * from "./cases";
 

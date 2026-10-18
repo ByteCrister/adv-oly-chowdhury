@@ -4,6 +4,7 @@ import { useMutation, useQueryClient, UseMutationOptions } from "@tanstack/react
 import axios from "axios";
 import { CASE_EXPENSE_QUERY_KEYS } from "@/const/case-expense.const";
 import { FINANCIAL_QUERY_KEYS } from "@/const/financial.const";
+import { CASE_QUERY_KEYS } from "@/const/case.const";
 import type {
   CreateCaseExpenseInput,
   CaseExpenseActionResponse,
@@ -24,7 +25,7 @@ export async function createCaseExpense(
 
 /**
  * TanStack Query mutation hook for recording a new case expense.
- * Automatically invalidates case expense lists, unified financials, and related aggregates.
+ * Automatically invalidates case expense lists, unified financials, and case details.
  */
 export function useCreateCaseExpenseMutation(
   options?: UseMutationOptions<
@@ -45,6 +46,9 @@ export function useCreateCaseExpenseMutation(
         }),
         queryClient.invalidateQueries({
           queryKey: FINANCIAL_QUERY_KEYS.all,
+        }),
+        queryClient.invalidateQueries({
+          queryKey: CASE_QUERY_KEYS.all,
         }),
       ]);
       await options?.onSuccess?.(data, variables, context, mutation);

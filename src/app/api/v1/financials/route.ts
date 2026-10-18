@@ -7,6 +7,7 @@ import { ClientPayment } from "@/db/models/ClientPayment.model";
 import {
   FINANCIAL_DEFAULT_PAGE_LIMIT,
   FINANCIAL_PAGE_LIMITS,
+  FINANCIAL_RECORD_TYPES,
   FINANCIAL_SORT_OPTIONS,
   FinancialPageLimit,
   FinancialSortOption,
@@ -115,7 +116,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   const paymentProjectStage = {
     $project: {
       _id: 1,
-      recordType: { $literal: "PAYMENT" },
+      recordType: { $literal: FINANCIAL_RECORD_TYPES.PAYMENT },
       transactionDate: "$paymentDate",
       amount: "$amount",
       currency: "$currency",
@@ -138,7 +139,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   const expenseProjectStage = {
     $project: {
       _id: 1,
-      recordType: { $literal: "EXPENSE" },
+      recordType: { $literal: FINANCIAL_RECORD_TYPES.EXPENSE },
       transactionDate: "$expenseDate",
       amount: "$amount",
       currency: "$currency",
@@ -344,22 +345,22 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
             _id: null,
             totalIncome: {
               $sum: {
-                $cond: [{ $eq: ["$recordType", "PAYMENT"] }, "$amount", 0],
+                $cond: [{ $eq: ["$recordType", FINANCIAL_RECORD_TYPES.PAYMENT] }, "$amount", 0],
               },
             },
             totalExpense: {
               $sum: {
-                $cond: [{ $eq: ["$recordType", "EXPENSE"] }, "$amount", 0],
+                $cond: [{ $eq: ["$recordType", FINANCIAL_RECORD_TYPES.EXPENSE] }, "$amount", 0],
               },
             },
             paymentCount: {
               $sum: {
-                $cond: [{ $eq: ["$recordType", "PAYMENT"] }, 1, 0],
+                $cond: [{ $eq: ["$recordType", FINANCIAL_RECORD_TYPES.PAYMENT] }, 1, 0],
               },
             },
             expenseCount: {
               $sum: {
-                $cond: [{ $eq: ["$recordType", "EXPENSE"] }, 1, 0],
+                $cond: [{ $eq: ["$recordType", FINANCIAL_RECORD_TYPES.EXPENSE] }, 1, 0],
               },
             },
           },
@@ -368,7 +369,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       methodBreakdown: [
         {
           $match: {
-            recordType: "PAYMENT",
+            recordType: FINANCIAL_RECORD_TYPES.PAYMENT,
             paymentMethod: { $ne: null },
           },
         },
@@ -382,7 +383,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       categoryBreakdown: [
         {
           $match: {
-            recordType: "EXPENSE",
+            recordType: FINANCIAL_RECORD_TYPES.EXPENSE,
             expenseCategory: { $ne: null },
           },
         },

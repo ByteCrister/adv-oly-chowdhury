@@ -4,6 +4,7 @@ import ConnectDB from "@/config/db";
 import User from "@/db/models/User.model";
 import { DEFAULT_CHAMBER_ADDRESS, DEFAULT_HOME_ADDRESS } from "@/utils/zod";
 import { USER_STATUSES } from "@/const";
+import { revalidateLandingCache } from "@/lib/landing";
 
 /**
  * Hardcoded complete test user object for testing Advocate Oly Chowdhury's chamber portal.
@@ -114,6 +115,9 @@ export async function POST(req: NextRequest) {
         setDefaultsOnInsert: true,
       }
     ).lean();
+
+    // Invalidate landing page cache so changes are immediately visible
+    revalidateLandingCache();
 
     // 5. Return success response with credentials for testing
     return NextResponse.json(

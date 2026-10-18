@@ -27,7 +27,7 @@ export function useFinalizeUploadMutation(
     ...options,
     mutationFn: finalizeMediaUpload,
     onSuccess: (data, variables, context) => {
-      queryClient.invalidateQueries({ queryKey: mediaKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: mediaKeys.all });
       if (options?.onSuccess) {
         (options.onSuccess as (data: FinalizeApiResponse, variables: FinalizeBatchRequest, context: unknown) => void)(
           data,

@@ -30,7 +30,7 @@ export function SidebarUser({ isCollapsed = false }: SidebarUserProps) {
   const profile = profileResponse?.data;
   const displayName = profile?.preferredName || profile?.name || session?.user?.name || "Advocate Oly Chowdhury";
   const displayEmail = profile?.email || session?.user?.email || "advocateaico@gmail.com";
-  const avatarSrc = profile?.avatarUrl || "/images/profile/Polished Corporate Headshot.png";
+  const avatarSrc = profile?.avatarUrl || "/images/profile/img-1.png";
 
   return (
     <>

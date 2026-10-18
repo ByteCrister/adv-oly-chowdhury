@@ -20,6 +20,7 @@ import {
   ASSET_PURPOSES,
 } from "@/const/asset-reference.const";
 import { formatUserResponse, RawUserRecord } from "../route";
+import { revalidateLandingCache } from "@/lib/landing";
 
 const MAX_AVATAR_SIZE_BYTES = 2 * 1024 * 1024; // 2 MB
 const ALLOWED_MIME_TYPES = [
@@ -170,6 +171,9 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     throw ApiError.notFound("User account not found.");
   }
 
+  // Invalidate landing page cache and prerendered route following avatar upload
+  revalidateLandingCache();
+
   const formattedData = formatUserResponse(updatedUser);
 
   return NextResponse.json(
@@ -203,6 +207,9 @@ export const DELETE = withErrorHandler(async () => {
   await User.findByIdAndUpdate(userId, {
     $set: { profileAssetReferenceId: null },
   });
+
+  // Invalidate landing page cache and prerendered route following avatar deletion
+  revalidateLandingCache();
 
   return NextResponse.json(
     {

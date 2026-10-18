@@ -1,9 +1,18 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { Toaster } from "@/components/shared/toaster";
 import { fontVariables } from "@/utils/fonts";
 import { QueryProvider } from "@/components/providers/QueryProvider";
 import { AuthProvider } from "@/components/providers/AuthProvider";
+import {
+  CHAMBER_FAVICONS_METADATA,
+  CHAMBER_MANIFEST_METADATA,
+  CHAMBER_APPLE_WEB_APP_METADATA,
+  CHAMBER_OTHER_METADATA,
+  CHAMBER_VIEWPORT_METADATA,
+} from "@/const";
+
+export const viewport: Viewport = CHAMBER_VIEWPORT_METADATA;
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://advocateaico.com"),
@@ -23,13 +32,17 @@ export const metadata: Metadata = {
     "Criminal Lawyer Sylhet",
   ],
   authors: [{ name: "Advocate Aminul Islam Chowdhury Oly" }],
+  icons: CHAMBER_FAVICONS_METADATA,
+  manifest: CHAMBER_MANIFEST_METADATA,
+  appleWebApp: CHAMBER_APPLE_WEB_APP_METADATA,
+  other: CHAMBER_OTHER_METADATA,
   openGraph: {
     title: "Advocate Aminul Islam Chowdhury Oly | Legal Counsel & Advocate",
     description:
       "Advocate (LL.M, LL.B, M.S.S, B.S.S) practicing at Judge's Court, Sylhet. Specialist in civil litigation, criminal defense, and taxation law.",
     images: [
       {
-        url: "/images/profile/Polished Corporate Headshot.png",
+        url: "/images/profile/img-1.png",
         width: 800,
         height: 800,
         alt: "Advocate Aminul Islam Chowdhury Oly",

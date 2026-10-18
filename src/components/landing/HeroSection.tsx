@@ -1,6 +1,3 @@
-"use client";
-
-import * as React from "react";
 import Image from "next/image";
 import {
   Scale,
@@ -19,8 +16,27 @@ import {
   FadeInRight,
 } from "@/components/wrappers/Motion";
 import { cn } from "@/lib/utils";
+import type { LandingProfile } from "@/lib/landing/landing.types";
 
-export default function HeroSection() {
+export interface HeroSectionProps {
+  profile?: LandingProfile;
+}
+
+export default function HeroSection({ profile }: HeroSectionProps = {}) {
+  const fullName = profile?.fullName || ADVOCATE_INFO.fullName;
+  const preferredName = profile?.preferredName || ADVOCATE_INFO.preferredName;
+  const subtitle = profile?.subtitle || ADVOCATE_INFO.subtitle;
+  const tagline = profile?.tagline || ADVOCATE_INFO.tagline;
+  const avatarUrl = profile?.avatarUrl || ADVOCATE_INFO.images.headshot;
+  const phone = profile?.phone || ADVOCATE_INFO.contact.phone;
+  const phoneInternational = profile?.phoneInternational || ADVOCATE_INFO.contact.phoneInternational;
+  const chamber = profile?.chamber || ADVOCATE_INFO.chamber;
+
+  // Split name for visual gradient styling
+  const nameParts = fullName.split(" ");
+  const firstPart = nameParts.length > 2 ? nameParts.slice(0, 2).join(" ") : nameParts[0] || fullName;
+  const highlightPart = nameParts.length > 2 ? nameParts.slice(2).join(" ") : nameParts.slice(1).join(" ") || preferredName;
+
   return (
     <section
       className={cn(
@@ -73,16 +89,16 @@ export default function HeroSection() {
                 )}
               >
                 <Scale className="w-3.5 h-3.5 text-gold-700 dark:text-gold-400" />
-                <span>Advocate · Judge&apos;s Court, Sylhet</span>
+                <span>{subtitle || `${profile?.title || "Advocate"} · ${chamber.court}, ${chamber.city}`}</span>
               </div>
             </FadeIn>
 
             {/* Headline */}
             <FadeInUp delay={0.12} className="space-y-4">
               <h1 className="font-serif text-4xl sm:text-5xl xl:text-6xl font-extrabold tracking-tight text-slate-900 dark:text-white leading-[1.12]">
-                Aminul Islam<br className="hidden sm:inline" />{" "}
+                {firstPart}<br className="hidden sm:inline" />{" "}
                 <span className="hero-name-gradient">
-                  Chowdhury Oly
+                  {highlightPart}
                 </span>
               </h1>
 
@@ -112,7 +128,7 @@ export default function HeroSection() {
             {/* Tagline */}
             <FadeInUp delay={0.22}>
               <p className="text-base sm:text-lg text-slate-700 dark:text-slate-200 leading-relaxed max-w-xl mx-auto lg:mx-0 font-normal">
-                {ADVOCATE_INFO.tagline}. Dedicated civil litigation, criminal defense,
+                {tagline}. Dedicated civil litigation, criminal defense,
                 and specialist revenue &amp; taxation advocacy before the District Courts
                 and Tax Tribunals of Sylhet.
               </p>
@@ -202,10 +218,12 @@ export default function HeroSection() {
                 {/* Portrait Image Container */}
                 <div className="relative w-full aspect-[4/5] rounded-2xl overflow-hidden bg-slate-950">
                   <Image
-                    src={ADVOCATE_INFO.images.headshot}
-                    alt="Advocate Aminul Islam Chowdhury Oly"
+                    src={avatarUrl}
+                    alt={fullName}
                     fill
                     priority
+                    loading="eager"
+                    fetchPriority="high"
                     sizes="(max-width: 768px) 100vw, (max-width: 1200px) 45vw, 480px"
                     className="object-cover object-top transition-transform duration-700 hover:scale-[1.02]"
                   />
@@ -249,12 +267,16 @@ export default function HeroSection() {
                         <MapPin className="w-4 h-4" />
                       </div>
                       <div>
-                        <div className="text-xs font-bold text-white">Chamber 323 · Bar Hall 02</div>
-                        <div className="text-[11px] text-slate-300">Judge&apos;s Court, Sylhet</div>
+                        <div className="text-xs font-bold text-white">
+                          {chamber.room} · {chamber.barHall}
+                        </div>
+                        <div className="text-[11px] text-slate-300">
+                          {chamber.court}, {chamber.city}
+                        </div>
                       </div>
                     </div>
                     <a
-                      href={`tel:${ADVOCATE_INFO.contact.phoneInternational}`}
+                      href={`tel:${phoneInternational}`}
                       className="btn-gold-gloss p-2.5 rounded-xl flex items-center justify-center shrink-0"
                       title="Direct call to Advocate"
                       aria-label="Direct call to Advocate"
@@ -273,7 +295,7 @@ export default function HeroSection() {
                     <span>Available for Consultations</span>
                   </div>
                   <span className="font-mono text-gold-800 dark:text-gold-400 font-bold">
-                    {ADVOCATE_INFO.contact.phone}
+                    {phone}
                   </span>
                 </div>
               </div>

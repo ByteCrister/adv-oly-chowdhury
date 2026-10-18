@@ -7,4 +7,8 @@ export * from "./client-document.validation";
 export * from "./case-document.validation";
 export * from "./document.validation";
 export * from "./task.validation";
+export * from "./hearing.validation";
+export * from "./case.validation";
+export * from "./case-party.validation";
+export * from "./case-event.validation";
 

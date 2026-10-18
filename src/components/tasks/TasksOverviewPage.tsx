@@ -138,31 +138,44 @@ export function TasksOverviewPage() {
 
       {/* Page Header */}
       <FadeInUp delay={0.05} duration={0.4}>
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2 border-b border-border/60">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-gold-500/10 text-gold-500 flex items-center justify-center border border-gold-500/20">
-                <CheckSquare className="w-4 h-4" />
+        <div className="relative pb-5">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-3">
+                {/* Chamber Emblem Medallion */}
+                <div className="relative w-10 h-10 rounded-2xl bg-gradient-to-br from-gold-400/25 via-gold-500/15 to-transparent border border-gold-400/40 shadow-[0_2px_12px_rgba(192,154,78,0.25)] flex items-center justify-center text-gold-500 dark:text-gold-400 shrink-0">
+                  <div className="absolute inset-0 rounded-2xl bg-radial from-white/30 to-transparent pointer-events-none" />
+                  <CheckSquare className="w-5 h-5 relative" />
+                </div>
+                <div>
+                  <h1 className="font-serif text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight text-foreground">
+                    Chamber Tasks & Deadlines
+                  </h1>
+                </div>
               </div>
-              <h1 className="font-serif text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
-                Tasks
-              </h1>
+              <p className="text-xs sm:text-sm text-muted-foreground max-w-3xl leading-relaxed">
+                Centralized registry for court filing deadlines, certified copy follow-ups, legal drafting action items, and chamber assignments.
+              </p>
             </div>
-            <p className="text-xs sm:text-sm text-muted-foreground">
-              Court filing deadlines, legal drafting action items, certified copy follow-ups, and chamber assignments.
-            </p>
+
+            {/* Glossy Primary CTA Button */}
+            <div className="flex items-center gap-2.5 self-start md:self-auto shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsCreateOpen(true)}
+                className="btn-gold-gloss h-10 px-5 rounded-xl text-xs sm:text-sm font-extrabold flex items-center gap-2 cursor-pointer shadow-lg active:scale-98 transition-transform"
+              >
+                <Plus className="w-4 h-4 stroke-[2.5]" />
+                <span>+ Create Task</span>
+              </button>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2.5">
-            <Button
-              type="button"
-              onClick={() => setIsCreateOpen(true)}
-              className="h-10 px-4 rounded-xl text-xs sm:text-sm font-semibold bg-gold-500 hover:bg-gold-600 text-midnight-950 shadow-sm gap-1.5"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Create Task</span>
-            </Button>
-          </div>
+          {/* Specular bottom hairline separator */}
+          <div
+            className="absolute bottom-0 inset-x-0 h-[1px] bg-gradient-to-r from-transparent via-gold-400/35 dark:via-gold-400/25 to-transparent pointer-events-none"
+            aria-hidden="true"
+          />
         </div>
       </FadeInUp>
 
