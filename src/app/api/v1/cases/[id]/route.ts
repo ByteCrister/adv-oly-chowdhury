@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
+import { withTransaction } from "@/lib/helpers/withTransaction";
 import ConnectDB from "@/db";
 import { Case } from "@/db/models/Case.model";
 import { Client } from "@/db/models/Client.model";
@@ -11,6 +12,12 @@ import { CaseDocument } from "@/db/models/CaseDocument.model";
 import { CaseEvent } from "@/db/models/CaseEvent.model";
 import { CaseParty } from "@/db/models/CaseParty.model";
 import { CASE_STATUSES } from "@/const/case.const";
+import {
+  recordAuditLog,
+  calculateAuditDiff,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
 import { updateCaseSchema } from "@/utils/zod/case.validation";
 import { formatCaseListItem } from "../route";
 import type {
@@ -87,7 +94,7 @@ export const GET = withErrorHandler(
  */
 export const PATCH = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
 
     const { id } = await params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -105,6 +112,8 @@ export const PATCH = withErrorHandler(
     if (!caseDoc) {
       throw ApiError.notFound("Case not found or has been archived.");
     }
+
+    const beforeState = caseDoc.toObject();
 
     // If internalReference is modified, ensure uniqueness
     if (
@@ -187,7 +196,24 @@ export const PATCH = withErrorHandler(
       caseDoc.closureReason = validated.closureReason?.trim() || null;
     }
 
-    await caseDoc.save();
+    const diff = calculateAuditDiff(beforeState, caseDoc.toObject());
+
+    await withTransaction(async (dbSession) => {
+      await caseDoc.save({ session: dbSession });
+
+      // Record audit log for case update
+      await recordAuditLog({
+        req,
+        userId,
+        action: AUDIT_ACTIONS.UPDATE,
+        entityType: AUDIT_ENTITY_TYPES.CASE,
+        entityId: caseDoc._id,
+        oldValues: diff.oldValues,
+        newValues: diff.newValues,
+        description: `Updated case "${caseDoc.title}" (${caseDoc.internalReference})`,
+        session: dbSession,
+      });
+    });
 
     // Fetch updated populated case and relation counts
     const [updatedDoc, hearingsCount, documentsCount, eventsCount, partiesCount] =
@@ -239,7 +265,7 @@ export const PUT = PATCH;
  */
 export const DELETE = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
 
     const { id } = await params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -255,9 +281,24 @@ export const DELETE = withErrorHandler(
       throw ApiError.notFound("Case not found or has already been archived.");
     }
 
-    // Soft-delete the case
-    caseDoc.deletedAt = new Date();
-    await caseDoc.save();
+    await withTransaction(async (dbSession) => {
+      // Soft-delete the case
+      caseDoc.deletedAt = new Date();
+      await caseDoc.save({ session: dbSession });
+
+      // Record audit log for case soft deletion
+      await recordAuditLog({
+        req,
+        userId,
+        action: AUDIT_ACTIONS.SOFT_DELETE,
+        entityType: AUDIT_ENTITY_TYPES.CASE,
+        entityId: caseDoc._id,
+        oldValues: { deletedAt: null },
+        newValues: { deletedAt: caseDoc.deletedAt },
+        description: `Archived case "${caseDoc.title}" (${caseDoc.internalReference})`,
+        session: dbSession,
+      });
+    });
 
     const response: CaseDeleteResponse = {
       success: true,

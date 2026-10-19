@@ -5,91 +5,57 @@ import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import Task from "@/db/models/Task.model";
 import Case from "@/db/models/Case.model";
 import Client from "@/db/models/Client.model";
-import { TASK_STATUSES, TASK_PRIORITIES } from "@/const/task.const";
+import { TASK_STATUSES } from "@/const/task.const";
 import {
-  objectIdValidator,
+  recordAuditLog,
+  calculateAuditDiff,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
+import {
+  taskIdParamSchema,
   updateTaskSchema,
 } from "@/utils/zod/task.validation";
 import type {
-  TaskItemDto,
   TaskActionResponse,
   TaskDeleteResponse,
+  RawTaskCaseInput,
+  RawTaskClientInput,
 } from "@/types/task.types";
-import ConnectDB from "@/db";
+import { formatTaskItem } from "../route";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
-function formatTaskItem(doc: Record<string, unknown>): TaskItemDto {
-  const now = new Date();
-  const dueAtDate = doc.dueAt ? new Date(doc.dueAt as Date) : null;
-  const isCompleted = doc.status === TASK_STATUSES.COMPLETED;
-  const isCancelled = doc.status === TASK_STATUSES.CANCELLED;
-  const isOverdue = Boolean(dueAtDate && dueAtDate < now && !isCompleted && !isCancelled);
-
-  const rawCase = doc.caseDetails as Record<string, unknown> | null | undefined;
-  const rawClient = doc.clientDetails as Record<string, unknown> | null | undefined;
-
-  return {
-    id: (doc._id as mongoose.Types.ObjectId).toString(),
-    title: (doc.title as string) || "Untitled Task",
-    description: (doc.description as string) || null,
-    status: (doc.status as TaskItemDto["status"]) || TASK_STATUSES.TODO,
-    priority: (doc.priority as TaskItemDto["priority"]) || TASK_PRIORITIES.NORMAL,
-    dueAt: dueAtDate ? dueAtDate.toISOString() : null,
-    completedAt: doc.completedAt ? new Date(doc.completedAt as Date).toISOString() : null,
-    isOverdue,
-    caseId: doc.caseId ? (doc.caseId as mongoose.Types.ObjectId).toString() : null,
-    caseDetails: rawCase?._id
-      ? {
-          id: (rawCase._id as mongoose.Types.ObjectId).toString(),
-          title: (rawCase.title as string) || "Untitled Case",
-          caseNumber: (rawCase.caseNumber as string) || null,
-          internalReference: (rawCase.internalReference as string) || "",
-          caseStatus: (rawCase.caseStatus as string) || undefined,
-        }
-      : null,
-    clientId: doc.clientId ? (doc.clientId as mongoose.Types.ObjectId).toString() : null,
-    clientDetails: rawClient?._id
-      ? {
-          id: (rawClient._id as mongoose.Types.ObjectId).toString(),
-          name: (rawClient.name as string) || "Unknown Client",
-          clientNumber: (rawClient.clientNumber as string) || "",
-          organizationName: (rawClient.organizationName as string) || null,
-          phone: (rawClient.phone as string) || null,
-        }
-      : null,
-    createdAt: doc.createdAt ? new Date(doc.createdAt as Date).toISOString() : "",
-    updatedAt: doc.updatedAt ? new Date(doc.updatedAt as Date).toISOString() : "",
-  };
-}
-
 /**
  * PATCH /api/v1/tasks/[id]
  *
- * Update permitted task fields, manage completion dates, and enforce relationship integrity.
+ * Update permitted task fields, manage completion dates, enforce relationship integrity,
+ * and track changes via compliance audit log with zero redundant queries.
  */
 export const PATCH = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
 
     const { id } = await params;
-    const parsedId = objectIdValidator.safeParse(id);
+    const parsedId = taskIdParamSchema.safeParse({ id });
     if (!parsedId.success) {
       throw ApiError.badRequest("Invalid task ID format");
     }
 
-    await ConnectDB();
+    const taskId = parsedId.data.id;
 
     const existingTask = await Task.findOne({
-      _id: parsedId.data,
+      _id: taskId,
       deletedAt: null,
     });
 
     if (!existingTask) {
       throw ApiError.notFound("Task not found or has already been deleted");
     }
+
+    const beforeState = existingTask.toObject();
 
     const body = await req.json().catch(() => ({}));
     const parsed = updateTaskSchema.safeParse(body);
@@ -107,42 +73,53 @@ export const PATCH = withErrorHandler(
       clientId,
     } = parsed.data;
 
+    let caseDoc: RawTaskCaseInput | null | undefined = undefined;
+    let clientDoc: RawTaskClientInput | null | undefined = undefined;
+
     // Validate Case relationship if changing
     if (caseId !== undefined) {
       if (caseId) {
-        const caseDoc = await Case.findOne({
+        const fetchedCase = await Case.findOne({
           _id: caseId,
           deletedAt: null,
-        }).select("_id clientId");
+        })
+          .select("_id clientId title caseNumber internalReference caseStatus")
+          .lean();
 
-        if (!caseDoc) {
+        if (!fetchedCase) {
           throw ApiError.badRequest("Selected case does not exist or has been deleted");
         }
+        caseDoc = fetchedCase;
         existingTask.caseId = new mongoose.Types.ObjectId(caseId);
 
         // Auto-link client from case if clientId is not explicitly set in payload
-        if (clientId === undefined && caseDoc.clientId && !existingTask.clientId) {
-          existingTask.clientId = caseDoc.clientId as mongoose.Types.ObjectId;
+        if (clientId === undefined && fetchedCase.clientId && !existingTask.clientId) {
+          existingTask.clientId = fetchedCase.clientId as mongoose.Types.ObjectId;
         }
       } else {
         existingTask.caseId = null;
+        caseDoc = null;
       }
     }
 
     // Validate Client relationship if changing
     if (clientId !== undefined) {
       if (clientId) {
-        const clientDoc = await Client.findOne({
+        const fetchedClient = await Client.findOne({
           _id: clientId,
           deletedAt: null,
-        }).select("_id");
+        })
+          .select("_id name clientNumber organizationName phone")
+          .lean();
 
-        if (!clientDoc) {
+        if (!fetchedClient) {
           throw ApiError.badRequest("Selected client does not exist or has been deleted");
         }
+        clientDoc = fetchedClient;
         existingTask.clientId = new mongoose.Types.ObjectId(clientId);
       } else {
         existingTask.clientId = null;
+        clientDoc = null;
       }
     }
 
@@ -180,32 +157,53 @@ export const PATCH = withErrorHandler(
 
     await existingTask.save();
 
-    // Re-populate updated document
-    const updatedDoc = await Task.findById(existingTask._id)
-      .populate("caseId", "title caseNumber internalReference caseStatus")
-      .populate("clientId", "name clientNumber organizationName phone")
-      .lean();
+    // Record audit log for task update
+    const diff = calculateAuditDiff(beforeState, existingTask.toObject());
+    await recordAuditLog({
+      req,
+      userId,
+      action: AUDIT_ACTIONS.UPDATE,
+      entityType: AUDIT_ENTITY_TYPES.TASK,
+      entityId: existingTask._id,
+      oldValues: diff.oldValues,
+      newValues: diff.newValues,
+      description: `Updated task "${existingTask.title}"`,
+    });
 
-    if (!updatedDoc) {
-      throw ApiError.internal("Failed to retrieve updated task");
+    // Resolve related case details if not already fetched during relationship update
+    if (caseDoc === undefined) {
+      caseDoc = existingTask.caseId
+        ? await Case.findOne({
+            _id: existingTask.caseId,
+            deletedAt: null,
+          })
+            .select("_id title caseNumber internalReference caseStatus")
+            .lean()
+        : null;
     }
 
-    const formattedDoc = {
-      ...updatedDoc,
-      caseDetails: updatedDoc.caseId,
-      clientDetails: updatedDoc.clientId,
-      caseId: updatedDoc.caseId
-        ? ((updatedDoc.caseId as unknown as Record<string, unknown>)._id as mongoose.Types.ObjectId)
-        : null,
-      clientId: updatedDoc.clientId
-        ? ((updatedDoc.clientId as unknown as Record<string, unknown>)._id as mongoose.Types.ObjectId)
-        : null,
-    };
+    // Resolve related client details if not already fetched during relationship update
+    if (clientDoc === undefined) {
+      clientDoc = existingTask.clientId
+        ? await Client.findOne({
+            _id: existingTask.clientId,
+            deletedAt: null,
+          })
+            .select("_id name clientNumber organizationName phone")
+            .lean()
+        : null;
+    }
+
+    const taskDto = formatTaskItem({
+      ...existingTask.toObject(),
+      caseDetails: caseDoc,
+      clientDetails: clientDoc,
+    });
 
     const response: TaskActionResponse = {
       success: true,
       message: "Task updated successfully",
-      data: formatTaskItem(formattedDoc as unknown as Record<string, unknown>),
+      data: taskDto,
     };
 
     return NextResponse.json(response, { status: 200 });
@@ -220,18 +218,18 @@ export const PATCH = withErrorHandler(
  */
 export const DELETE = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
 
     const { id } = await params;
-    const parsedId = objectIdValidator.safeParse(id);
+    const parsedId = taskIdParamSchema.safeParse({ id });
     if (!parsedId.success) {
       throw ApiError.badRequest("Invalid task ID format");
     }
 
-    await ConnectDB();
+    const taskId = parsedId.data.id;
 
     const task = await Task.findOne({
-      _id: parsedId.data,
+      _id: taskId,
       deletedAt: null,
     });
 
@@ -242,10 +240,22 @@ export const DELETE = withErrorHandler(
     task.deletedAt = new Date();
     await task.save();
 
+    // Record audit log for task soft deletion
+    await recordAuditLog({
+      req,
+      userId,
+      action: AUDIT_ACTIONS.SOFT_DELETE,
+      entityType: AUDIT_ENTITY_TYPES.TASK,
+      entityId: task._id,
+      oldValues: { deletedAt: null },
+      newValues: { deletedAt: task.deletedAt },
+      description: `Moved task "${task.title}" to trash`,
+    });
+
     const response: TaskDeleteResponse = {
       success: true,
       message: "Task moved to trash successfully",
-      id: parsedId.data,
+      id: taskId,
     };
 
     return NextResponse.json(response, { status: 200 });

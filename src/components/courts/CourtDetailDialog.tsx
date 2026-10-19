@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import {
-  Building2,
   MapPin,
   UserCheck,
   Briefcase,

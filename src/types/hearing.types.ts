@@ -174,3 +174,67 @@ export interface HearingDeleteResponse {
   message: string;
   id: string;
 }
+
+/**
+ * Populated Case relationship on a Hearing document
+ */
+export interface IPopulatedHearingCase {
+  _id: unknown;
+  internalReference?: string;
+  caseNumber?: string | null;
+  title?: string;
+  caseType?: string;
+  caseStatus?: string;
+  priority?: string;
+  courtId?: unknown;
+  clientId?: unknown;
+  filingDate?: Date | string | null;
+  nextHearingDate?: Date | string | null;
+}
+
+/**
+ * Populated Client relationship on a Hearing document
+ */
+export interface IPopulatedHearingClient {
+  _id: unknown;
+  name?: string;
+  clientNumber?: string;
+  organizationName?: string | null;
+  clientType?: string;
+  phone?: string | null;
+  email?: string | null;
+}
+
+/**
+ * Populated Court relationship on a Hearing document
+ */
+export interface IPopulatedHearingCourt {
+  _id: unknown;
+  name?: string;
+  courtType?: string;
+  district?: string;
+  roomOrHall?: string | null;
+  address?: string | null;
+  presidingJudgeTitle?: string | null;
+}
+
+/**
+ * Lean Mongoose Document representing a populated Hearing record
+ */
+export interface IPopulatedHearingDoc {
+  _id: unknown;
+  caseId: unknown;
+  courtId?: unknown;
+  hearingDate: Date | string;
+  startTime?: string | null;
+  hearingType?: string | null;
+  purpose?: string | null;
+  outcome?: string | null;
+  nextDate?: Date | string | null;
+  status: HearingStatus;
+  adjournmentReason?: string | null;
+  notes?: string | null;
+  isDeletable?: boolean;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+}

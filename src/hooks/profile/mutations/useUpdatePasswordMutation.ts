@@ -1,8 +1,10 @@
 "use client";
 
-import { useMutation, UseMutationOptions } from "@tanstack/react-query";
+import { useMutation, useQueryClient, UseMutationOptions } from "@tanstack/react-query";
 import axios from "axios";
 import { PasswordUpdateDto } from "@/types/profile.ui.type";
+import { AUDIT_QUERY_KEYS } from "@/const/audit-log.const";
+import { profileKeys } from "../queries/useProfile";
 
 interface PasswordUpdateResponse {
   success: boolean;
@@ -23,9 +25,18 @@ export async function updatePassword(
 export function useUpdatePasswordMutation(
   options?: UseMutationOptions<PasswordUpdateResponse, Error, PasswordUpdateDto>
 ) {
+  const queryClient = useQueryClient();
+
   return useMutation({
     ...options,
     mutationFn: updatePassword,
+    onSuccess: async (data, variables, context, mutation) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: profileKeys.all }),
+        queryClient.invalidateQueries({ queryKey: AUDIT_QUERY_KEYS.all }),
+      ]);
+      await options?.onSuccess?.(data, variables, context, mutation);
+    },
   });
 }
 

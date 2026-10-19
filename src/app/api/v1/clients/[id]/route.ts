@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
+import ConnectDB from "@/db";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
@@ -9,6 +10,12 @@ import { ClientDocument } from "@/db/models/ClientDocument.model";
 import { ClientPayment } from "@/db/models/ClientPayment.model";
 import { Task } from "@/db/models/Task.model";
 import { AssetReference } from "@/db/models/AssetReference.model";
+import {
+  recordAuditLog,
+  calculateAuditDiff,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
 import {
   CLIENT_TYPE_LABELS,
   CLIENT_STATUS_LABELS,
@@ -29,6 +36,7 @@ import {
 import { CASE_STATUSES } from "@/const/case.const";
 import { TASK_STATUSES } from "@/const/task.const";
 import { updateClientSchema } from "@/utils/zod/client.validation";
+import { formatSafeIsoDate } from "@/app/api/v1/clients/route";
 import type {
   ClientDetailDto,
   ClientActionResponse,
@@ -39,7 +47,6 @@ import type {
 } from "@/types/client.types";
 import type { IAsset } from "@/types/db/asset.type";
 import type { IAssetReferenceDocument } from "@/types/db/asset-reference.type";
-import ConnectDB from "@/db";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -47,6 +54,7 @@ interface RouteParams {
 
 /**
  * Fetch and construct the comprehensive ClientDetailDto for a client.
+ * Uses bounded queries and database-level aggregations to eliminate memory bloat.
  */
 async function buildClientDetailDto(
   clientId: mongoose.Types.ObjectId,
@@ -60,19 +68,56 @@ async function buildClientDetailDto(
     throw ApiError.notFound("Client not found or has been removed");
   }
 
-  // Parallel fetch for relationships and summaries
+  // Parallel fetch for bounded relationships and aggregated metrics
   const [
-    cases,
-    documents,
-    payments,
+    caseStatsAgg,
+    recentCases,
+    totalDocuments,
+    recentDocuments,
+    paymentStatsAgg,
+    recentPayments,
     pendingTasksCount,
   ] = await Promise.all([
+    Case.aggregate<{
+      _id: null;
+      totalCases: number;
+      activeCases: number;
+      closedCases: number;
+    }>([
+      { $match: { clientId, deletedAt: null } },
+      {
+        $group: {
+          _id: null,
+          totalCases: { $sum: 1 },
+          activeCases: {
+            $sum: { $cond: [{ $eq: ["$caseStatus", CASE_STATUSES.ACTIVE] }, 1, 0] },
+          },
+          closedCases: {
+            $sum: {
+              $cond: [
+                {
+                  $in: [
+                    "$caseStatus",
+                    [CASE_STATUSES.DISPOSED, CASE_STATUSES.CLOSED],
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+        },
+      },
+    ]),
     Case.find({ clientId, deletedAt: null })
       .sort({ createdAt: -1 })
+      .limit(5)
       .populate<{ courtId: { name: string } }>("courtId", "name")
       .lean(),
-    ClientDocument.find({ clientId })
+    ClientDocument.countDocuments({ clientId, deletedAt: null }),
+    ClientDocument.find({ clientId, deletedAt: null })
       .sort({ createdAt: -1 })
+      .limit(5)
       .populate<{
         assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
       }>({
@@ -80,8 +125,25 @@ async function buildClientDetailDto(
         populate: { path: "assetId" },
       })
       .lean(),
+    ClientPayment.aggregate<{
+      _id: null;
+      totalPayments: number;
+      totalPaidAmount: number;
+      lastPaymentDate: Date | null;
+    }>([
+      { $match: { clientId } },
+      {
+        $group: {
+          _id: null,
+          totalPayments: { $sum: 1 },
+          totalPaidAmount: { $sum: "$amount" },
+          lastPaymentDate: { $max: "$paymentDate" },
+        },
+      },
+    ]),
     ClientPayment.find({ clientId })
       .sort({ paymentDate: -1 })
+      .limit(5)
       .populate<{ caseId: { internalReference: string; caseNumber: string } }>(
         "caseId",
         "internalReference caseNumber"
@@ -94,19 +156,18 @@ async function buildClientDetailDto(
   ]);
 
   // Aggregate stats
-  const totalCases = cases.length;
-  const activeCases = cases.filter((c) => c.caseStatus === CASE_STATUSES.ACTIVE).length;
-  const closedCases = cases.filter((c) => c.caseStatus === CASE_STATUSES.DISPOSED).length;
-  const totalDocuments = documents.length;
-  const totalPayments = payments.length;
-  const totalPaidAmount = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
-  const lastPaymentDate =
-    payments.length > 0 && payments[0].paymentDate
-      ? new Date(payments[0].paymentDate).toISOString()
-      : null;
+  const caseStats = caseStatsAgg[0];
+  const totalCases = caseStats?.totalCases ?? 0;
+  const activeCases = caseStats?.activeCases ?? 0;
+  const closedCases = caseStats?.closedCases ?? 0;
+
+  const paymentStats = paymentStatsAgg[0];
+  const totalPayments = paymentStats?.totalPayments ?? 0;
+  const totalPaidAmount = paymentStats?.totalPaidAmount ?? 0;
+  const lastPaymentDate = formatSafeIsoDate(paymentStats?.lastPaymentDate);
 
   // Map Recent Cases
-  const recentCases: ClientCaseSummaryDto[] = cases.slice(0, 5).map((c) => ({
+  const mappedRecentCases: ClientCaseSummaryDto[] = recentCases.map((c) => ({
     id: c._id.toString(),
     internalReference: c.internalReference,
     caseNumber: c.caseNumber || null,
@@ -114,12 +175,12 @@ async function buildClientDetailDto(
     caseType: c.caseType,
     caseStatus: c.caseStatus,
     courtName: c.courtId?.name || null,
-    filingDate: c.filingDate ? new Date(c.filingDate).toISOString() : null,
-    nextHearingDate: c.nextHearingDate ? new Date(c.nextHearingDate).toISOString() : null,
+    filingDate: formatSafeIsoDate(c.filingDate),
+    nextHearingDate: formatSafeIsoDate(c.nextHearingDate),
   }));
 
   // Map Recent Documents
-  const recentDocuments: ClientDocumentSummaryDto[] = documents.slice(0, 5).map((d) => {
+  const mappedRecentDocuments: ClientDocumentSummaryDto[] = recentDocuments.map((d) => {
     const assetRef = d.assetReferenceId as unknown as (IAssetReferenceDocument & {
       assetId: IAsset;
     });
@@ -131,25 +192,25 @@ async function buildClientDetailDto(
       documentType: d.documentType as ClientDocumentType,
       documentTypeLabel:
         CLIENT_DOCUMENT_TYPE_LABELS[d.documentType as ClientDocumentType] || d.documentType,
-      documentDate: d.documentDate ? new Date(d.documentDate).toISOString() : null,
-      expiryDate: d.expiryDate ? new Date(d.expiryDate).toISOString() : null,
+      documentDate: formatSafeIsoDate(d.documentDate),
+      expiryDate: formatSafeIsoDate(d.expiryDate),
       fileUrl: asset?.secureUrl || "",
       fileName: assetRef?.originalFileName || asset?.originalFilename || d.title,
       fileSize: asset?.bytes || 0,
       mimeType: asset?.mimeType || "application/octet-stream",
-      createdAt: d.createdAt ? new Date(d.createdAt).toISOString() : "",
+      createdAt: formatSafeIsoDate(d.createdAt) || "",
     };
   });
 
   // Map Recent Payments
-  const recentPayments: ClientPaymentSummaryDto[] = payments.slice(0, 5).map((p) => {
+  const mappedRecentPayments: ClientPaymentSummaryDto[] = recentPayments.map((p) => {
     const caseRef = p.caseId
       ? p.caseId.caseNumber || p.caseId.internalReference
       : null;
 
     return {
       id: p._id.toString(),
-      paymentDate: new Date(p.paymentDate).toISOString(),
+      paymentDate: formatSafeIsoDate(p.paymentDate) || new Date().toISOString(),
       amount: p.amount,
       currency: p.currency || "BDT",
       paymentMethod: p.paymentMethod as PaymentMethod,
@@ -178,7 +239,7 @@ async function buildClientDetailDto(
     organizationName: client.organizationName || null,
     fatherOrSpouseName: client.fatherOrSpouseName || null,
     motherName: client.motherName || null,
-    dateOfBirth: client.dateOfBirth ? new Date(client.dateOfBirth).toISOString() : null,
+    dateOfBirth: formatSafeIsoDate(client.dateOfBirth),
     nationalId: client.nationalId || null,
     phone: client.phone || null,
     alternatePhone: client.alternatePhone || null,
@@ -197,11 +258,11 @@ async function buildClientDetailDto(
       lastPaymentDate,
       pendingTasksCount,
     },
-    recentCases,
-    recentDocuments,
-    recentPayments,
-    createdAt: client.createdAt ? new Date(client.createdAt).toISOString() : "",
-    updatedAt: client.updatedAt ? new Date(client.updatedAt).toISOString() : "",
+    recentCases: mappedRecentCases,
+    recentDocuments: mappedRecentDocuments,
+    recentPayments: mappedRecentPayments,
+    createdAt: formatSafeIsoDate(client.createdAt) || "",
+    updatedAt: formatSafeIsoDate(client.updatedAt) || "",
   };
 }
 
@@ -219,8 +280,9 @@ export const GET = withErrorHandler(
       throw ApiError.badRequest("Invalid client ID format");
     }
 
-    const objectId = new mongoose.Types.ObjectId(id);
     await ConnectDB();
+
+    const objectId = new mongoose.Types.ObjectId(id);
     const dto = await buildClientDetailDto(objectId);
 
     return NextResponse.json({
@@ -233,11 +295,11 @@ export const GET = withErrorHandler(
 /**
  * PATCH /api/v1/clients/[id]
  *
- * Update client details inside a database transaction.
+ * Update client details inside a database transaction without default overrides.
  */
 export const PATCH = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
 
     const { id } = await params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -274,6 +336,8 @@ export const PATCH = withErrorHandler(
       if (!client) {
         throw ApiError.notFound("Client not found");
       }
+
+      const beforeState = client.toObject();
 
       if (validated.clientNumber !== undefined) {
         client.clientNumber = validated.clientNumber.trim().toUpperCase();
@@ -316,6 +380,20 @@ export const PATCH = withErrorHandler(
       }
 
       await client.save({ session: dbSession });
+
+      // Record audit log for client update
+      const diff = calculateAuditDiff(beforeState, client.toObject());
+      await recordAuditLog({
+        req,
+        userId,
+        action: AUDIT_ACTIONS.UPDATE,
+        entityType: AUDIT_ENTITY_TYPES.CLIENT,
+        entityId: client._id,
+        oldValues: diff.oldValues,
+        newValues: diff.newValues,
+        description: `Updated client "${client.name}" (${client.clientNumber})`,
+        session: dbSession,
+      });
     });
 
     const updatedDto = await buildClientDetailDto(objectId);
@@ -340,12 +418,12 @@ export const PUT = PATCH;
 /**
  * DELETE /api/v1/clients/[id]
  *
- * Safely soft-deletes a client and associated documents' asset references.
+ * Safely soft-deletes a client and associated documents & asset references.
  * Enforces financial and relational integrity guards (rejects if active cases or payments exist).
  */
 export const DELETE = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
 
     const { id } = await params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -390,14 +468,26 @@ export const DELETE = withErrorHandler(
 
     // Perform safe soft deletion inside transaction
     await withTransaction(async (dbSession) => {
+      const beforeState = client.toObject();
+
       // 1. Soft-delete client record
       client.deletedAt = new Date();
       client.status = CLIENT_STATUSES.ARCHIVED;
       await client.save({ session: dbSession });
 
-      // 2. Soft-delete linked document asset references
-      const clientDocs = await ClientDocument.find({ clientId: objectId }).session(dbSession);
+      // 2. Soft-delete client documents and linked asset references
+      const clientDocs = await ClientDocument.find({
+        clientId: objectId,
+        deletedAt: null,
+      }).session(dbSession);
+
       const assetRefIds = clientDocs.map((d) => d.assetReferenceId);
+
+      await ClientDocument.updateMany(
+        { clientId: objectId, deletedAt: null },
+        { deletedAt: new Date() },
+        { session: dbSession }
+      );
 
       if (assetRefIds.length > 0) {
         await AssetReference.updateMany(
@@ -406,6 +496,19 @@ export const DELETE = withErrorHandler(
           { session: dbSession }
         );
       }
+
+      // Record audit log for client soft deletion
+      await recordAuditLog({
+        req,
+        userId,
+        action: AUDIT_ACTIONS.SOFT_DELETE,
+        entityType: AUDIT_ENTITY_TYPES.CLIENT,
+        entityId: client._id,
+        oldValues: { deletedAt: null, status: beforeState.status },
+        newValues: { deletedAt: client.deletedAt, status: CLIENT_STATUSES.ARCHIVED },
+        description: `Archived client "${client.name}" (${client.clientNumber})`,
+        session: dbSession,
+      });
     });
 
     const response: ClientDeleteResponse = {

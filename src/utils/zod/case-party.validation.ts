@@ -105,7 +105,7 @@ export const casePartyQueryFilterSchema = z.object({
   partyType: z.string().trim().optional(),
   sort: z
     .enum(CASE_PARTY_SORT_OPTION_LIST as [string, ...string[]])
-    .default(CASE_PARTY_SORT_OPTIONS.NEWEST),
+    .default(CASE_PARTY_SORT_OPTIONS.NAME_ASC),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce
     .number()

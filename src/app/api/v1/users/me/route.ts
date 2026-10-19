@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
-import ConnectDB from "@/config/db";
 import User from "@/db/models/User.model";
 // Ensure models are registered in Mongoose schema cache for nested populate
 import "@/db/models/Asset.model";
@@ -10,6 +9,12 @@ import { AssetReference } from "@/db/models/AssetReference.model";
 import { profileUpdateSchema } from "@/utils/zod";
 import type { ProfileAvatarDto, ProfileSignatureDto } from "@/types/profile.ui.type";
 import { revalidateLandingCache } from "@/lib/landing";
+import {
+  recordAuditLog,
+  calculateAuditDiff,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
 
 interface PopulatedAsset {
   _id?: mongoose.Types.ObjectId | string;
@@ -106,8 +111,6 @@ export function formatUserResponse(user: RawUserRecord) {
 export const GET = withErrorHandler(async () => {
   const userId = await getUserId();
 
-  await ConnectDB();
-
   const user = (await User.findById(userId)
     .populate({
       path: "profileAssetReferenceId",
@@ -138,6 +141,11 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
   const body = await req.json();
   const updateData = profileUpdateSchema.parse(body);
 
+  const existingUser = (await User.findById(userId).lean()) as RawUserRecord | null;
+  if (!existingUser || existingUser.isActive === false) {
+    throw ApiError.notFound("User account not found or inactive.");
+  }
+
   // Resolve profile asset reference ID (supports both new profileAssetReferenceId and legacy profileAssetId)
   const profileAssetRefId =
     updateData.profileAssetReferenceId !== undefined
@@ -163,17 +171,13 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
     homeAddress: updateData.homeAddress,
   };
 
-  await ConnectDB();
-
   if (profileAssetRefId !== undefined) {
     const targetProfileRef =
       profileAssetRefId && mongoose.Types.ObjectId.isValid(profileAssetRefId)
         ? new mongoose.Types.ObjectId(profileAssetRefId)
         : null;
 
-    // Check if user currently has an existing profileAssetReferenceId
-    const existingUser = await User.findById(userId).select("profileAssetReferenceId");
-    const prevProfileRefId = existingUser?.profileAssetReferenceId;
+    const prevProfileRefId = existingUser.profileAssetReferenceId as mongoose.Types.ObjectId | null;
 
     // If changing or removing the avatar, soft-delete the previous AssetReference
     if (
@@ -194,8 +198,7 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
         ? new mongoose.Types.ObjectId(signatureAssetRefId)
         : null;
 
-    const existingUser = await User.findById(userId).select("signatureAssetReferenceId");
-    const prevSigRefId = existingUser?.signatureAssetReferenceId;
+    const prevSigRefId = existingUser.signatureAssetReferenceId as mongoose.Types.ObjectId | null;
 
     if (
       prevSigRefId &&
@@ -239,6 +242,18 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
   if (!updatedUser) {
     throw ApiError.notFound("User account not found.");
   }
+
+  const diff = calculateAuditDiff(existingUser, updatedUser);
+  await recordAuditLog({
+    req,
+    userId,
+    action: AUDIT_ACTIONS.UPDATE,
+    entityType: AUDIT_ENTITY_TYPES.USER,
+    entityId: userId,
+    oldValues: diff.oldValues,
+    newValues: diff.newValues,
+    description: `Updated profile details for user "${updatedUser.name || updatedUser.email || userId}"`,
+  });
 
   // Invalidate landing page cache and prerendered route following successful profile update
   revalidateLandingCache();

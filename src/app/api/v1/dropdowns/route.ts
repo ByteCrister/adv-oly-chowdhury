@@ -9,7 +9,7 @@ import { User } from "@/db/models/User.model";
 import { DROPDOWN_TYPES } from "@/const/dropdown.const";
 import { dropdownQuerySchema } from "@/utils/zod/dropdown.validation";
 import type { DropdownItem, DropdownApiResponse } from "@/types/dropdown.types";
-import { sanitizeSearchParam, escapeRegex } from "@/lib/helpers/search.helper";
+import { sanitizeSearchParam, buildSearchFilter } from "@/lib/helpers/search.helper";
 
 /**
  * GET /api/v1/dropdowns
@@ -42,14 +42,9 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     case DROPDOWN_TYPES.CLIENT: {
       const filter: Record<string, unknown> = { deletedAt: null };
 
-      if (search?.trim()) {
-        const regex = new RegExp(escapeRegex(search.trim()), "i");
-        filter.$or = [
-          { name: regex },
-          { clientNumber: regex },
-          { organizationName: regex },
-          { phone: regex },
-        ];
+      const clientSearchFilter = buildSearchFilter(search, ["name", "clientNumber", "organizationName", "phone"]);
+      if (clientSearchFilter) {
+        filter.$or = clientSearchFilter;
       }
 
       const docs = await Client.find(filter)
@@ -79,14 +74,9 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     case DROPDOWN_TYPES.COURT: {
       const filter: Record<string, unknown> = { isActive: true, deletedAt: null };
 
-      if (search?.trim()) {
-        const regex = new RegExp(escapeRegex(search.trim()), "i");
-        filter.$or = [
-          { name: regex },
-          { district: regex },
-          { courtType: regex },
-          { presidingJudgeTitle: regex },
-        ];
+      const courtSearchFilter = buildSearchFilter(search, ["name", "district", "courtType", "presidingJudgeTitle"]);
+      if (courtSearchFilter) {
+        filter.$or = courtSearchFilter;
       }
 
       const docs = await Court.find(filter)
@@ -121,13 +111,9 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
         filter.courtId = new mongoose.Types.ObjectId(courtId);
       }
 
-      if (search?.trim()) {
-        const regex = new RegExp(escapeRegex(search.trim()), "i");
-        filter.$or = [
-          { title: regex },
-          { caseNumber: regex },
-          { internalReference: regex },
-        ];
+      const caseSearchFilter = buildSearchFilter(search, ["title", "caseNumber", "internalReference"]);
+      if (caseSearchFilter) {
+        filter.$or = caseSearchFilter;
       }
 
       const docs = await Case.find(filter)
@@ -164,9 +150,9 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     case DROPDOWN_TYPES.USER: {
       const filter: Record<string, unknown> = { isActive: true };
 
-      if (search?.trim()) {
-        const regex = new RegExp(escapeRegex(search.trim()), "i");
-        filter.$or = [{ name: regex }, { email: regex }];
+      const userSearchFilter = buildSearchFilter(search, ["name", "email"]);
+      if (userSearchFilter) {
+        filter.$or = userSearchFilter;
       }
 
       const docs = await User.find(filter)

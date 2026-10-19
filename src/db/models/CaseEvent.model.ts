@@ -50,6 +50,9 @@ const caseEventSchema = new Schema<ICaseEventDocument>(
 );
 
 caseEventSchema.index({ caseId: 1, eventDate: -1 });
+caseEventSchema.index({ caseId: 1, eventDate: 1 });
+caseEventSchema.index({ caseId: 1, createdAt: -1 });
+caseEventSchema.index({ caseId: 1, eventType: 1, eventDate: -1 });
 
 export const CaseEvent: Model<ICaseEventDocument> =
   (mongoose.models[MODELS.CASE_EVENT] as Model<ICaseEventDocument>) ||

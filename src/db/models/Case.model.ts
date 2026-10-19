@@ -132,6 +132,12 @@ const caseSchema = new Schema<ICaseDocument>(
 caseSchema.index({ caseStatus: 1, nextHearingDate: 1 });
 caseSchema.index({ clientId: 1, caseStatus: 1 });
 caseSchema.index({ courtId: 1, caseNumber: 1 });
+caseSchema.index({ deletedAt: 1, createdAt: -1 });
+caseSchema.index({ deletedAt: 1, caseStatus: 1, createdAt: -1 });
+caseSchema.index({ deletedAt: 1, clientId: 1, createdAt: -1 });
+caseSchema.index({ deletedAt: 1, courtId: 1, createdAt: -1 });
+caseSchema.index({ deletedAt: 1, nextHearingDate: 1 });
+caseSchema.index({ deletedAt: 1, filingDate: -1 });
 caseSchema.index({ title: "text", caseNumber: "text", internalReference: "text", description: "text" });
 
 export const Case: Model<ICaseDocument> =

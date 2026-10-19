@@ -6,10 +6,27 @@ import {
 } from "@/const/court.const";
 
 /**
-  * Full Court Data Transfer Object returned in list items.
-  * Contains all court properties and computed relation metadata
-  * so single-court GET requests are never needed.
-  */
+ * Raw document or lean query representation for formatting into CourtListItemDto.
+ */
+export interface CourtDocInput {
+  _id?: unknown;
+  id?: string;
+  name?: string | null;
+  courtType?: string | null;
+  district?: string | null;
+  division?: string | null;
+  roomOrHall?: string | null;
+  address?: string | null;
+  presidingJudgeTitle?: string | null;
+  isActive?: boolean | null;
+  createdAt?: Date | string | null;
+  updatedAt?: Date | string | null;
+}
+
+/**
+ * Full Court Data Transfer Object returned in list and detail responses.
+ * Contains all court properties and computed relation metadata.
+ */
 export interface CourtListItemDto {
   id: string;
   name: string;

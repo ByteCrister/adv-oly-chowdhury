@@ -66,6 +66,11 @@ const courtSchema = new Schema<ICourtDocument>(
   }
 );
 
+// Compound indexes supporting high-frequency query and sort patterns
+courtSchema.index({ deletedAt: 1, createdAt: -1 });
+courtSchema.index({ deletedAt: 1, isActive: 1, createdAt: -1 });
+courtSchema.index({ deletedAt: 1, isActive: 1, name: 1 });
+courtSchema.index({ deletedAt: 1, courtType: 1, createdAt: -1 });
 courtSchema.index({ deletedAt: 1, district: 1, courtType: 1 });
 courtSchema.index({ deletedAt: 1, name: 1, district: 1 });
 

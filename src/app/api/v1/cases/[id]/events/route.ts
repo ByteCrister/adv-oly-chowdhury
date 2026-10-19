@@ -4,6 +4,11 @@ import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
 import { sanitizeSearchParam, buildSearchRegex } from "@/lib/helpers/search.helper";
+import {
+  recordAuditLog,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
 import ConnectDB from "@/db";
 import { Case } from "@/db/models/Case.model";
 import { CaseEvent } from "@/db/models/CaseEvent.model";
@@ -23,6 +28,7 @@ import {
   createCaseEventSchema,
   caseEventQueryFilterSchema,
 } from "@/utils/zod/case-event.validation";
+import { formatSafeIsoDate } from "@/app/api/v1/cases/route";
 import type {
   CaseEventItemDto,
   CaseEventPaginationResponse,
@@ -53,17 +59,17 @@ export function formatCaseEventItem(
     eventTypeLabel: CASE_EVENT_TYPE_LABELS[eventType] || eventType,
     title: doc.title as string,
     description: (doc.description as string) || null,
-    eventDate: doc.eventDate ? new Date(doc.eventDate as Date).toISOString() : new Date().toISOString(),
+    eventDate: formatSafeIsoDate(doc.eventDate) || new Date().toISOString(),
     assetReferenceId: assetRef?._id
       ? assetRef._id.toString()
       : doc.assetReferenceId
-      ? (doc.assetReferenceId as mongoose.Types.ObjectId).toString()
+      ? String(doc.assetReferenceId)
       : null,
     attachment:
       assetRef && asset
         ? {
             id: (assetRef._id as mongoose.Types.ObjectId).toString(),
-            assetId: (asset._id as mongoose.Types.ObjectId).toString(),
+            assetId: String(asset._id),
             originalFileName:
               assetRef.originalFileName || asset.originalFilename || "Attachment",
             fileUrl: asset.secureUrl || "",
@@ -72,8 +78,8 @@ export function formatCaseEventItem(
             sizeBytes: asset.bytes || 0,
           }
         : null,
-    createdAt: doc.createdAt ? new Date(doc.createdAt as Date).toISOString() : new Date().toISOString(),
-    updatedAt: doc.updatedAt ? new Date(doc.updatedAt as Date).toISOString() : new Date().toISOString(),
+    createdAt: formatSafeIsoDate(doc.createdAt) || new Date().toISOString(),
+    updatedAt: formatSafeIsoDate(doc.updatedAt) || new Date().toISOString(),
   };
 }
 
@@ -267,7 +273,7 @@ export const GET = withErrorHandler(
  */
 export const POST = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
 
     const { id } = await params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -289,27 +295,24 @@ export const POST = withErrorHandler(
     };
 
     const validated = createCaseEventSchema.parse(payload);
-
-    let assetRefObjectId: mongoose.Types.ObjectId | null = null;
-    let existingRef: IAssetReferenceDocument | null = null;
-
-    if (validated.assetReferenceId) {
-      assetRefObjectId = new mongoose.Types.ObjectId(validated.assetReferenceId);
-      existingRef = await AssetReference.findOne({
-        _id: assetRefObjectId,
-        deletedAt: null,
-      });
-
-      if (!existingRef) {
-        throw ApiError.badRequest(
-          "Referenced attachment does not exist or has been deleted."
-        );
-      }
-    }
+    const assetRefObjectId = validated.assetReferenceId
+      ? new mongoose.Types.ObjectId(validated.assetReferenceId)
+      : null;
 
     const createdEvent = await withTransaction(async (dbSession) => {
-      // 1. If attachment reference provided, assign ownership
-      if (existingRef && assetRefObjectId) {
+      // 1. If attachment reference provided, verify and assign ownership inside session
+      if (assetRefObjectId) {
+        const existingRef = await AssetReference.findOne({
+          _id: assetRefObjectId,
+          deletedAt: null,
+        }).session(dbSession);
+
+        if (!existingRef) {
+          throw ApiError.badRequest(
+            "Referenced attachment does not exist or has been deleted."
+          );
+        }
+
         existingRef.ownerType = ASSET_OWNER_TYPES.CASE_EVENT;
         existingRef.ownerId = caseObjectId;
         await existingRef.save({ session: dbSession });
@@ -329,6 +332,19 @@ export const POST = withErrorHandler(
         ],
         { session: dbSession }
       );
+
+      // 3. Record audit log for case event creation
+      await recordAuditLog({
+        req,
+        userId,
+        action: AUDIT_ACTIONS.CREATE,
+        entityType: AUDIT_ENTITY_TYPES.CASE_EVENT,
+        entityId: eventDoc._id,
+        oldValues: null,
+        newValues: eventDoc.toObject(),
+        description: `Added event "${eventDoc.title}" to case`,
+        session: dbSession,
+      });
 
       return eventDoc;
     });

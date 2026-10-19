@@ -10,12 +10,16 @@ import {
   CLIENT_SORT_OPTION_LIST,
   ClientType,
   ClientStatus,
+  ClientPageLimit,
+  ClientSortOption,
 } from "@/const/client.const";
 
 /**
- * Validation schema for creating a new client.
+ * Base validation schema for client attributes without injected default values.
+ * Used as the foundation for createClientSchema (which injects defaults) and
+ * updateClientSchema (which partials WITHOUT defaults to prevent unintended field resets).
  */
-export const createClientSchema = z.object({
+export const baseClientSchema = z.object({
   clientNumber: z
     .string()
     .trim()
@@ -23,16 +27,12 @@ export const createClientSchema = z.object({
     .min(3, "Client number must be at least 3 characters")
     .max(50, "Client number cannot exceed 50 characters")
     .optional(),
-  clientType: z
-    .enum(CLIENT_TYPE_LIST as [ClientType, ...ClientType[]], {
-      message: "Invalid client type",
-    })
-    .default(CLIENT_TYPES.INDIVIDUAL),
-  status: z
-    .enum(CLIENT_STATUS_LIST as [ClientStatus, ...ClientStatus[]], {
-      message: "Invalid client status",
-    })
-    .default(CLIENT_STATUSES.ACTIVE),
+  clientType: z.enum(CLIENT_TYPE_LIST as [ClientType, ...ClientType[]], {
+    message: "Invalid client type",
+  }),
+  status: z.enum(CLIENT_STATUS_LIST as [ClientStatus, ...ClientStatus[]], {
+    message: "Invalid client status",
+  }),
   name: z
     .string()
     .trim()
@@ -58,11 +58,13 @@ export const createClientSchema = z.object({
     .optional(),
   dateOfBirth: z
     .string()
-    .nullable()
-    .optional()
+    .trim()
     .refine((val) => !val || !isNaN(Date.parse(val)), {
       message: "Invalid date of birth format",
-    }),
+    })
+    .transform((val) => (val === "" ? null : val))
+    .nullable()
+    .optional(),
   nationalId: z
     .string()
     .trim()
@@ -110,9 +112,39 @@ export const createClientSchema = z.object({
 });
 
 /**
- * Validation schema for updating an existing client.
+ * Validation schema for creating a new client.
+ * Injects default clientType and status.
  */
-export const updateClientSchema = createClientSchema.partial();
+export const createClientSchema = baseClientSchema.extend({
+  clientType: baseClientSchema.shape.clientType.default(CLIENT_TYPES.INDIVIDUAL),
+  status: baseClientSchema.shape.status.default(CLIENT_STATUSES.ACTIVE),
+});
+
+/**
+ * Validation schema for updating an existing client.
+ * Partials the base schema WITHOUT defaults, ensuring omitted properties
+ * are not overwritten with default values.
+ */
+export const updateClientSchema = baseClientSchema.partial();
+
+/**
+ * Strongly typed page limit schema validated against CLIENT_PAGE_LIMITS.
+ */
+export const clientPageLimitSchema = z.preprocess(
+  (val) => {
+    if (val === undefined || val === null || val === "") {
+      return CLIENT_DEFAULT_PAGE_LIMIT;
+    }
+    const parsed = Number(val);
+    return isNaN(parsed) ? val : parsed;
+  },
+  z.custom<ClientPageLimit>(
+    (val) => (CLIENT_PAGE_LIMITS as readonly number[]).includes(Number(val)),
+    {
+      message: `Limit must be one of: ${CLIENT_PAGE_LIMITS.join(", ")}`,
+    }
+  )
+);
 
 /**
  * Validation schema for client listing query parameters.
@@ -123,25 +155,21 @@ export const clientQueryFilterSchema = z.object({
   status: z.string().trim().optional(),
   startDate: z
     .string()
+    .trim()
     .optional()
     .refine((val) => !val || !isNaN(Date.parse(val)), {
       message: "Invalid startDate format",
     }),
   endDate: z
     .string()
+    .trim()
     .optional()
     .refine((val) => !val || !isNaN(Date.parse(val)), {
       message: "Invalid endDate format",
     }),
   sort: z
-    .enum(CLIENT_SORT_OPTION_LIST as [string, ...string[]])
+    .enum(CLIENT_SORT_OPTION_LIST as [ClientSortOption, ...ClientSortOption[]])
     .default(CLIENT_SORT_OPTIONS.NEWEST),
   page: z.coerce.number().int().min(1).default(1),
-  limit: z.coerce
-    .number()
-    .int()
-    .refine((val) => (CLIENT_PAGE_LIMITS as readonly number[]).includes(val), {
-      message: `Limit must be one of: ${CLIENT_PAGE_LIMITS.join(", ")}`,
-    })
-    .default(CLIENT_DEFAULT_PAGE_LIMIT),
+  limit: clientPageLimitSchema.default(CLIENT_DEFAULT_PAGE_LIMIT),
 });

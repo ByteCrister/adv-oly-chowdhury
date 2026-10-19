@@ -4,6 +4,7 @@ import { useMutation, useQueryClient, UseMutationOptions } from "@tanstack/react
 import axios from "axios";
 import { COURT_QUERY_KEYS } from "@/const/court.const";
 import { DROPDOWN_QUERY_KEYS } from "@/const/dropdown.const";
+import { AUDIT_QUERY_KEYS } from "@/const/audit-log.const";
 import type { CourtDeleteResponse } from "@/types/court.types";
 
 /**
@@ -31,6 +32,7 @@ export function useDeleteCourtMutation(
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: COURT_QUERY_KEYS.all }),
         queryClient.invalidateQueries({ queryKey: DROPDOWN_QUERY_KEYS.ALL }),
+        queryClient.invalidateQueries({ queryKey: AUDIT_QUERY_KEYS.all }),
       ]);
       await options?.onSuccess?.(data, id, context, mutation);
     },

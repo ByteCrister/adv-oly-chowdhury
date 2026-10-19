@@ -1,16 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
+import ConnectDB from "@/db";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
 import { sanitizeSearchParam, buildSearchRegex } from "@/lib/helpers/search.helper";
+import {
+  recordAuditLog,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
 import { Client } from "@/db/models/Client.model";
 import { Case } from "@/db/models/Case.model";
 import { ClientDocument } from "@/db/models/ClientDocument.model";
 import { ClientPayment } from "@/db/models/ClientPayment.model";
 import {
   CLIENT_DEFAULT_PAGE_LIMIT,
-  CLIENT_PAGE_LIMITS,
   CLIENT_SORT_OPTIONS,
   CLIENT_TYPE_LABELS,
   CLIENT_STATUS_LABELS,
@@ -31,12 +36,26 @@ import type {
   ClientOverallStatsDto,
 } from "@/types/client.types";
 import type { IClientDocument } from "@/types/db/client.type";
-import ConnectDB from "@/db";
+
+/**
+ * Safely converts an arbitrary date representation into an ISO string.
+ */
+export function formatSafeIsoDate(val: unknown): string | null {
+  if (!val) return null;
+  if (val instanceof Date) return isNaN(val.getTime()) ? null : val.toISOString();
+  if (typeof val === "string" || typeof val === "number") {
+    const d = new Date(val);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  }
+  return null;
+}
 
 /**
  * Generate a sequential, year-scoped clientNumber (e.g. CL-2026-0001).
  */
-async function generateClientNumber(dbSession?: mongoose.ClientSession): Promise<string> {
+export async function generateClientNumber(
+  dbSession?: mongoose.ClientSession
+): Promise<string> {
   const currentYear = new Date().getFullYear();
   const prefix = `CL-${currentYear}-`;
 
@@ -103,8 +122,8 @@ function formatClientListItem(
     totalPayments,
     totalPaidAmount,
     isDeletable: totalCases === 0 && totalPayments === 0,
-    createdAt: client.createdAt ? new Date(client.createdAt as Date).toISOString() : "",
-    updatedAt: client.updatedAt ? new Date(client.updatedAt as Date).toISOString() : "",
+    createdAt: formatSafeIsoDate(client.createdAt) || new Date().toISOString(),
+    updatedAt: formatSafeIsoDate(client.updatedAt) || new Date().toISOString(),
   };
 }
 
@@ -118,18 +137,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
 
   const { searchParams } = new URL(req.url);
 
-  // Validate limit parameter if provided
-  const rawLimit = searchParams.get("limit");
-  if (rawLimit !== null) {
-    const parsedLimit = parseInt(rawLimit, 10);
-    if (!CLIENT_PAGE_LIMITS.includes(parsedLimit as ClientPageLimit)) {
-      throw ApiError.badRequest(
-        `Invalid page limit "${rawLimit}". Allowed page limits are: ${CLIENT_PAGE_LIMITS.join(", ")}`
-      );
-    }
-  }
-
-  // Parse and validate query parameters
+  // Parse and validate query parameters through Zod schema
   const rawParams = {
     search: sanitizeSearchParam(searchParams.get("search")),
     clientType: searchParams.get("clientType") || undefined,
@@ -138,7 +146,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     endDate: searchParams.get("endDate") || undefined,
     sort: searchParams.get("sort") || CLIENT_SORT_OPTIONS.NEWEST,
     page: searchParams.get("page") || 1,
-    limit: rawLimit ? parseInt(rawLimit, 10) : CLIENT_DEFAULT_PAGE_LIMIT,
+    limit: searchParams.get("limit") || CLIENT_DEFAULT_PAGE_LIMIT,
   };
 
   const parsed = clientQueryFilterSchema.safeParse(rawParams);
@@ -147,6 +155,8 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   }
 
   const { search, clientType, status, startDate, endDate, sort, page, limit } = parsed.data;
+
+  await ConnectDB();
 
   // Build MongoDB query filter (only active, non-deleted clients)
   const filter: Record<string, unknown> = {
@@ -175,7 +185,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     filter.createdAt = dateQuery;
   }
 
-  // Search across name, organizationName, clientNumber, phone, nationalId, email
+  // Search across name, organizationName, clientNumber, phone, alternatePhone, nationalId, email
   if (search) {
     const searchRegex = buildSearchRegex(search);
     if (searchRegex) {
@@ -204,10 +214,17 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   const sortOption = sortMap[sort as ClientSortOption] || { createdAt: -1 };
   const skip = (page - 1) * limit;
 
-  await ConnectDB();
-
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
+
+  // Check if filtering beyond standard active clients is active
+  const isFiltered = Boolean(
+    search ||
+      (clientType && clientType !== "ALL") ||
+      (status && status !== "ALL") ||
+      startDate ||
+      endDate
+  );
 
   // Execute client aggregation (for counts and stats) and paginated find queries in parallel
   const [statsAggResult, clients] = await Promise.all([
@@ -219,7 +236,6 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       individual: number;
       corporate: number;
       newThisMonth: number;
-      matchedIds: mongoose.Types.ObjectId[];
     }>([
       { $match: filter },
       {
@@ -244,7 +260,6 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
           newThisMonth: {
             $sum: { $cond: [{ $gte: ["$createdAt", startOfMonth] }, 1, 0] },
           },
-          matchedIds: { $push: "$_id" },
         },
       },
     ]),
@@ -253,18 +268,83 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
 
   const rawStats = statsAggResult[0];
   const total = rawStats?.total ?? 0;
-  const matchedClientIds = rawStats?.matchedIds ?? [];
 
   const clientIds = clients.map((c) => c._id as mongoose.Types.ObjectId);
+
+  // Prepare cross-collection aggregates without unbounded in-memory ID arrays
+  const fetchGlobalStats = async () => {
+    if (!isFiltered) {
+      const [activeCaseClients, revenueAgg, thisMonthRevenueAgg] = await Promise.all([
+        Case.distinct("clientId", {
+          caseStatus: CASE_STATUSES.ACTIVE,
+          deletedAt: null,
+        }),
+        ClientPayment.aggregate<{ total: number }>([
+          { $group: { _id: null, total: { $sum: "$amount" } } },
+        ]),
+        ClientPayment.aggregate<{ total: number }>([
+          {
+            $match: {
+              paymentDate: { $gte: startOfMonth },
+            },
+          },
+          { $group: { _id: null, total: { $sum: "$amount" } } },
+        ]),
+      ]);
+
+      return {
+        clientsWithActiveCases: activeCaseClients.length,
+        totalRevenueCollected: revenueAgg[0]?.total ?? 0,
+        thisMonthRevenue: thisMonthRevenueAgg[0]?.total ?? 0,
+      };
+    }
+
+    if (total === 0) {
+      return {
+        clientsWithActiveCases: 0,
+        totalRevenueCollected: 0,
+        thisMonthRevenue: 0,
+      };
+    }
+
+    // When filtered, fetch matched client IDs bounded to 500 to prevent oversized $in arrays
+    const matchedDocs = await Client.find(filter, { _id: 1 }).limit(500).lean();
+    const matchedIds = matchedDocs.map((d) => d._id);
+
+    const [activeCaseClients, revenueAgg, thisMonthRevenueAgg] = await Promise.all([
+      Case.distinct("clientId", {
+        clientId: { $in: matchedIds },
+        caseStatus: CASE_STATUSES.ACTIVE,
+        deletedAt: null,
+      }),
+      ClientPayment.aggregate<{ total: number }>([
+        { $match: { clientId: { $in: matchedIds } } },
+        { $group: { _id: null, total: { $sum: "$amount" } } },
+      ]),
+      ClientPayment.aggregate<{ total: number }>([
+        {
+          $match: {
+            clientId: { $in: matchedIds },
+            paymentDate: { $gte: startOfMonth },
+          },
+        },
+        { $group: { _id: null, total: { $sum: "$amount" } } },
+      ]),
+    ]);
+
+    return {
+      clientsWithActiveCases: activeCaseClients.length,
+      totalRevenueCollected: revenueAgg[0]?.total ?? 0,
+      thisMonthRevenue: thisMonthRevenueAgg[0]?.total ?? 0,
+    };
+  };
 
   // In parallel: fetch page item relations AND cross-client aggregate metrics
   const [
     caseAggregations,
     documentCounts,
     paymentAggregations,
-    activeCaseClientIds,
-    revenueAgg,
-    thisMonthRevenueAgg,
+    globalStats,
   ] = await Promise.all([
     clientIds.length > 0
       ? Case.aggregate<{
@@ -288,7 +368,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       : [],
     clientIds.length > 0
       ? ClientDocument.aggregate<{ _id: mongoose.Types.ObjectId; count: number }>([
-          { $match: { clientId: { $in: clientIds } } },
+          { $match: { clientId: { $in: clientIds }, deletedAt: null } },
           { $group: { _id: "$clientId", count: { $sum: 1 } } },
         ])
       : [],
@@ -308,30 +388,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
           },
         ])
       : [],
-    matchedClientIds.length > 0
-      ? Case.distinct("clientId", {
-          clientId: { $in: matchedClientIds },
-          caseStatus: CASE_STATUSES.ACTIVE,
-          deletedAt: null,
-        })
-      : [],
-    matchedClientIds.length > 0
-      ? ClientPayment.aggregate<{ total: number }>([
-          { $match: { clientId: { $in: matchedClientIds } } },
-          { $group: { _id: null, total: { $sum: "$amount" } } },
-        ])
-      : [],
-    matchedClientIds.length > 0
-      ? ClientPayment.aggregate<{ total: number }>([
-          {
-            $match: {
-              clientId: { $in: matchedClientIds },
-              paymentDate: { $gte: startOfMonth },
-            },
-          },
-          { $group: { _id: null, total: { $sum: "$amount" } } },
-        ])
-      : [],
+    fetchGlobalStats(),
   ]);
 
   const caseMap = new Map(
@@ -371,9 +428,9 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     archivedClients: rawStats?.archived ?? 0,
     individualClients: rawStats?.individual ?? 0,
     corporateClients: rawStats?.corporate ?? 0,
-    clientsWithActiveCases: activeCaseClientIds.length,
-    totalRevenueCollected: revenueAgg[0]?.total ?? 0,
-    thisMonthRevenue: thisMonthRevenueAgg[0]?.total ?? 0,
+    clientsWithActiveCases: globalStats.clientsWithActiveCases,
+    totalRevenueCollected: globalStats.totalRevenueCollected,
+    thisMonthRevenue: globalStats.thisMonthRevenue,
     newClientsThisMonth: rawStats?.newThisMonth ?? 0,
   };
 
@@ -393,64 +450,90 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
 /**
  * POST /api/v1/clients
  *
- * Create a new client inside a database transaction with duplicate validation
- * and deterministic clientNumber generation if omitted.
+ * Create a new client inside a database transaction with duplicate validation,
+ * collision retry for auto-generated clientNumber, and comprehensive audit logging.
  */
 export const POST = withErrorHandler(async (req: NextRequest) => {
-  await getUserId();
+  const userId = await getUserId();
 
   const body = await req.json();
   const validated = createClientSchema.parse(body);
 
-  // If clientNumber is provided, check for uniqueness
-  if (validated.clientNumber) {
-    const existingClient = await Client.findOne({
-      clientNumber: validated.clientNumber.trim().toUpperCase(),
-    });
+  await ConnectDB();
+
+  // If clientNumber is provided, check for uniqueness upfront
+  const isAutoGenerated = !validated.clientNumber?.trim();
+  let clientNumber = "";
+
+  if (!isAutoGenerated) {
+    clientNumber = validated.clientNumber!.trim().toUpperCase();
+    const existingClient = await Client.findOne({ clientNumber });
 
     if (existingClient) {
       throw ApiError.conflict(
-        `A client with number "${validated.clientNumber.trim().toUpperCase()}" already exists.`
+        `A client with number "${clientNumber}" already exists.`
       );
     }
   }
 
-  await ConnectDB();
+  // Create client inside transaction with auto-generated clientNumber collision retry
+  const maxAttempts = isAutoGenerated ? 3 : 1;
+  let createdClient: IClientDocument | null = null;
 
-  // Create client inside transaction with auto-generated clientNumber fallback
-  const createdClient = await withTransaction(async (dbSession) => {
-    let clientNumber = validated.clientNumber?.trim().toUpperCase();
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      createdClient = await withTransaction(async (dbSession) => {
+        let num = clientNumber;
+        if (isAutoGenerated) {
+          num = await generateClientNumber(dbSession);
+        }
 
-    if (!clientNumber) {
-      clientNumber = await generateClientNumber(dbSession);
+        const [client] = await Client.create(
+          [
+            {
+              clientNumber: num,
+              clientType: validated.clientType,
+              status: validated.status,
+              name: validated.name.trim(),
+              organizationName: validated.organizationName?.trim() || null,
+              fatherOrSpouseName: validated.fatherOrSpouseName?.trim() || null,
+              motherName: validated.motherName?.trim() || null,
+              dateOfBirth: validated.dateOfBirth ? new Date(validated.dateOfBirth) : null,
+              nationalId: validated.nationalId?.trim() || null,
+              phone: validated.phone?.trim() || null,
+              alternatePhone: validated.alternatePhone?.trim() || null,
+              email: validated.email?.trim() || null,
+              address: validated.address?.trim() || null,
+              permanentAddress: validated.permanentAddress?.trim() || null,
+              notes: validated.notes?.trim() || null,
+              deletedAt: null,
+            },
+          ],
+          { session: dbSession }
+        );
+
+        return client;
+      });
+      break;
+    } catch (err: unknown) {
+      if (
+        isAutoGenerated &&
+        attempt < maxAttempts &&
+        typeof err === "object" &&
+        err !== null &&
+        "code" in err &&
+        (err as { code: number }).code === 11000
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
+        continue;
+      }
+      throw err;
     }
+  }
 
-    const [client] = await Client.create(
-      [
-        {
-          clientNumber,
-          clientType: validated.clientType,
-          status: validated.status,
-          name: validated.name.trim(),
-          organizationName: validated.organizationName?.trim() || null,
-          fatherOrSpouseName: validated.fatherOrSpouseName?.trim() || null,
-          motherName: validated.motherName?.trim() || null,
-          dateOfBirth: validated.dateOfBirth ? new Date(validated.dateOfBirth) : null,
-          nationalId: validated.nationalId?.trim() || null,
-          phone: validated.phone?.trim() || null,
-          alternatePhone: validated.alternatePhone?.trim() || null,
-          email: validated.email?.trim() || null,
-          address: validated.address?.trim() || null,
-          permanentAddress: validated.permanentAddress?.trim() || null,
-          notes: validated.notes?.trim() || null,
-          deletedAt: null,
-        },
-      ],
-      { session: dbSession }
-    );
-
-    return client;
-  });
+  if (!createdClient) {
+    throw ApiError.internal("Failed to generate a unique client number after multiple attempts.");
+  }
 
   const detailDto: ClientDetailDto = {
     id: createdClient._id.toString(),
@@ -463,9 +546,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     organizationName: createdClient.organizationName || null,
     fatherOrSpouseName: createdClient.fatherOrSpouseName || null,
     motherName: createdClient.motherName || null,
-    dateOfBirth: createdClient.dateOfBirth
-      ? new Date(createdClient.dateOfBirth).toISOString()
-      : null,
+    dateOfBirth: formatSafeIsoDate(createdClient.dateOfBirth),
     nationalId: createdClient.nationalId || null,
     phone: createdClient.phone || null,
     alternatePhone: createdClient.alternatePhone || null,
@@ -487,9 +568,21 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     recentCases: [],
     recentDocuments: [],
     recentPayments: [],
-    createdAt: createdClient.createdAt ? new Date(createdClient.createdAt).toISOString() : "",
-    updatedAt: createdClient.updatedAt ? new Date(createdClient.updatedAt).toISOString() : "",
+    createdAt: formatSafeIsoDate(createdClient.createdAt) || new Date().toISOString(),
+    updatedAt: formatSafeIsoDate(createdClient.updatedAt) || new Date().toISOString(),
   };
+
+  // Record audit log for client creation
+  await recordAuditLog({
+    req,
+    userId,
+    action: AUDIT_ACTIONS.CREATE,
+    entityType: AUDIT_ENTITY_TYPES.CLIENT,
+    entityId: createdClient._id,
+    oldValues: null,
+    newValues: createdClient.toObject(),
+    description: `Created client "${createdClient.name}" (${createdClient.clientNumber})`,
+  });
 
   const response: ClientActionResponse = {
     success: true,

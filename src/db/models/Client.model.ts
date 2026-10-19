@@ -114,6 +114,10 @@ const clientSchema = new Schema<IClientDocument>(
 // Compound & text search indexes
 clientSchema.index({ name: "text", organizationName: "text", clientNumber: "text" });
 clientSchema.index({ status: 1, deletedAt: 1 });
+clientSchema.index({ deletedAt: 1, createdAt: -1 });
+clientSchema.index({ deletedAt: 1, clientType: 1 });
+clientSchema.index({ deletedAt: 1, name: 1 });
+clientSchema.index({ deletedAt: 1, status: 1, createdAt: -1 });
 
 export const Client: Model<IClientDocument> =
   (mongoose.models[MODELS.CLIENT] as Model<IClientDocument>) ||

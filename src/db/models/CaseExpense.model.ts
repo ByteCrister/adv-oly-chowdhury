@@ -13,7 +13,6 @@ const caseExpenseSchema = new Schema<ICaseExpenseDocument>(
       type: Schema.Types.ObjectId,
       ref: MODELS.CASE,
       required: [true, "Case ID is required"],
-      index: true,
     },
     expenseDate: {
       type: Date,
@@ -63,7 +62,12 @@ const caseExpenseSchema = new Schema<ICaseExpenseDocument>(
   }
 );
 
+// High-frequency query & sorting indexes
 caseExpenseSchema.index({ caseId: 1, expenseDate: -1 });
+caseExpenseSchema.index({ category: 1, expenseDate: -1 });
+caseExpenseSchema.index({ caseId: 1, category: 1, expenseDate: -1 });
+caseExpenseSchema.index({ amount: -1, expenseDate: -1 });
+caseExpenseSchema.index({ recordedBy: 1, createdAt: -1 });
 
 export const CaseExpense: Model<ICaseExpenseDocument> =
   (mongoose.models[MODELS.CASE_EXPENSE] as Model<ICaseExpenseDocument>) ||

@@ -37,6 +37,50 @@ export interface TaskClientDetails {
 }
 
 /**
+ * Raw or populated case document structure acceptable for formatting
+ */
+export interface RawTaskCaseInput {
+  _id?: unknown;
+  id?: string;
+  title?: string;
+  caseNumber?: string | null;
+  internalReference?: string;
+  caseStatus?: string;
+}
+
+/**
+ * Raw or populated client document structure acceptable for formatting
+ */
+export interface RawTaskClientInput {
+  _id?: unknown;
+  id?: string;
+  name?: string;
+  clientNumber?: string;
+  organizationName?: string | null;
+  phone?: string | null;
+}
+
+/**
+ * Generalized input type accepted by formatTaskItem
+ */
+export interface TaskDocInput {
+  _id?: unknown;
+  id?: string;
+  title?: string;
+  description?: string | null;
+  status?: TaskStatus | string;
+  priority?: TaskPriority | string;
+  dueAt?: Date | string | null;
+  completedAt?: Date | string | null;
+  caseId?: unknown;
+  caseDetails?: RawTaskCaseInput | null;
+  clientId?: unknown;
+  clientDetails?: RawTaskClientInput | null;
+  createdAt?: Date | string;
+  updatedAt?: Date | string;
+}
+
+/**
  * Full Task Item Data Transfer Object for client-side rendering
  */
 export interface TaskItemDto {

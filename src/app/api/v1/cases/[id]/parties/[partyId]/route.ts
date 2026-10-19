@@ -2,9 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
+import { withTransaction } from "@/lib/helpers/withTransaction";
 import ConnectDB from "@/db";
 import { CaseParty } from "@/db/models/CaseParty.model";
 import { Client } from "@/db/models/Client.model";
+import {
+  recordAuditLog,
+  calculateAuditDiff,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
 import { updateCasePartySchema } from "@/utils/zod/case-party.validation";
 import { formatCasePartyItem } from "../route";
 import type {
@@ -65,7 +72,7 @@ export const GET = withErrorHandler(
  */
 export const PATCH = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
 
     const { id, partyId } = await params;
     if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(partyId)) {
@@ -88,6 +95,8 @@ export const PATCH = withErrorHandler(
     if (!partyDoc) {
       throw ApiError.notFound("Party not found for this case.");
     }
+
+    const beforeState = partyDoc.toObject();
 
     if (validated.clientId !== undefined) {
       if (validated.clientId) {
@@ -115,7 +124,24 @@ export const PATCH = withErrorHandler(
       partyDoc.notes = validated.notes?.trim() || null;
     }
 
-    await partyDoc.save();
+    const diff = calculateAuditDiff(beforeState, partyDoc.toObject());
+
+    await withTransaction(async (dbSession) => {
+      await partyDoc.save({ session: dbSession });
+
+      // Record audit log for case party update
+      await recordAuditLog({
+        req,
+        userId,
+        action: AUDIT_ACTIONS.UPDATE,
+        entityType: AUDIT_ENTITY_TYPES.CASE_PARTY,
+        entityId: partyDoc._id,
+        oldValues: diff.oldValues,
+        newValues: diff.newValues,
+        description: `Updated case party "${partyDoc.name}"`,
+        session: dbSession,
+      });
+    });
 
     const updatedDoc = await CaseParty.findById(partyObjectId)
       .populate("clientId", "name clientNumber organizationName clientType phone email")
@@ -150,7 +176,7 @@ export const PUT = PATCH;
  */
 export const DELETE = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
 
     const { id, partyId } = await params;
     if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(partyId)) {
@@ -171,7 +197,24 @@ export const DELETE = withErrorHandler(
       throw ApiError.notFound("Party not found for this case.");
     }
 
-    await partyDoc.deleteOne();
+    const partySnapshot = partyDoc.toObject();
+
+    await withTransaction(async (dbSession) => {
+      await partyDoc.deleteOne({ session: dbSession });
+
+      // Record audit log for case party hard deletion
+      await recordAuditLog({
+        req,
+        userId,
+        action: AUDIT_ACTIONS.DELETE,
+        entityType: AUDIT_ENTITY_TYPES.CASE_PARTY,
+        entityId: partyDoc._id,
+        oldValues: partySnapshot,
+        newValues: null,
+        description: `Removed party "${partyDoc.name}" from case`,
+        session: dbSession,
+      });
+    });
 
     const response: CasePartyDeleteResponse = {
       success: true,

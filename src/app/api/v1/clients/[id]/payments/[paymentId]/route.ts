@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
+import ConnectDB from "@/db";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
@@ -8,12 +9,19 @@ import { Case } from "@/db/models/Case.model";
 import { AssetReference } from "@/db/models/AssetReference.model";
 import { ASSET_OWNER_TYPES } from "@/const/asset-reference.const";
 import {
+  recordAuditLog,
+  calculateAuditDiff,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
+import {
   PAYMENT_METHOD_LABELS,
   PAYMENT_TYPE_LABELS,
   PaymentMethod,
   PaymentType,
 } from "@/const/client-payment.const";
 import { updateClientPaymentSchema } from "@/utils/zod/client-payment.validation";
+import { formatSafeIsoDate } from "@/app/api/v1/clients/route";
 import type {
   ClientPaymentItemDto,
   ClientPaymentActionResponse,
@@ -21,7 +29,6 @@ import type {
 } from "@/types/client-payment.types";
 import type { IAsset } from "@/types/db/asset.type";
 import type { IAssetReferenceDocument } from "@/types/db/asset-reference.type";
-import ConnectDB from "@/db";
 
 interface RouteParams {
   params: Promise<{ id: string; paymentId: string }>;
@@ -50,7 +57,7 @@ function formatClientPaymentItem(
     caseId: payment.caseId ? (payment.caseId as mongoose.Types.ObjectId).toString() : null,
     caseReference: caseRef,
     caseTitle: caseDoc?.title || null,
-    paymentDate: new Date(payment.paymentDate as Date).toISOString(),
+    paymentDate: formatSafeIsoDate(payment.paymentDate) || new Date().toISOString(),
     amount: payment.amount as number,
     currency: (payment.currency as string) || "BDT",
     paymentMethod: method,
@@ -72,8 +79,8 @@ function formatClientPaymentItem(
           email: receivedByUser.email,
         }
       : null,
-    createdAt: payment.createdAt ? new Date(payment.createdAt as Date).toISOString() : "",
-    updatedAt: payment.updatedAt ? new Date(payment.updatedAt as Date).toISOString() : "",
+    createdAt: formatSafeIsoDate(payment.createdAt) || new Date().toISOString(),
+    updatedAt: formatSafeIsoDate(payment.updatedAt) || new Date().toISOString(),
   };
 }
 
@@ -135,11 +142,11 @@ export const GET = withErrorHandler(
 /**
  * PATCH /api/v1/clients/[id]/payments/[paymentId]
  *
- * Update an existing payment record inside a transaction.
+ * Update an existing payment record inside a transaction without default overrides.
  */
 export const PATCH = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
 
     const { id, paymentId } = await params;
     if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(paymentId)) {
@@ -155,7 +162,7 @@ export const PATCH = withErrorHandler(
     await ConnectDB();
 
     // If caseId is provided, enforce relationship integrity:
-    // Case must belong to this specific client!
+    // Case must exist, be active, and belong to this specific client
     let caseObjectId: mongoose.Types.ObjectId | null | undefined = undefined;
     if (validated.caseId !== undefined) {
       if (validated.caseId) {
@@ -185,6 +192,8 @@ export const PATCH = withErrorHandler(
       if (!payment) {
         throw ApiError.notFound("Payment record not found for this client");
       }
+
+      const beforeState = payment.toObject();
 
       // Handle receipt file update / replacement
       if (validated.receiptAssetreferenceId !== undefined) {
@@ -248,6 +257,20 @@ export const PATCH = withErrorHandler(
       }
 
       await payment.save({ session: dbSession });
+
+      // Record audit log for client payment update
+      const diff = calculateAuditDiff(beforeState, payment.toObject());
+      await recordAuditLog({
+        req,
+        userId,
+        action: AUDIT_ACTIONS.UPDATE,
+        entityType: AUDIT_ENTITY_TYPES.CLIENT_PAYMENT,
+        entityId: payment._id,
+        oldValues: diff.oldValues,
+        newValues: diff.newValues,
+        description: `Updated payment record of ${payment.amount} ${payment.currency}`,
+        session: dbSession,
+      });
     });
 
     const populated = await ClientPayment.findById(paymentObjectId)
@@ -292,11 +315,12 @@ export const PUT = PATCH;
 /**
  * DELETE /api/v1/clients/[id]/payments/[paymentId]
  *
- * Delete a payment record. Soft-deletes attached receipt file reference if present.
+ * Delete a payment record. Soft-deletes attached receipt file reference if present,
+ * and records an audit log.
  */
 export const DELETE = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
 
     const { id, paymentId } = await params;
     if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(paymentId)) {
@@ -318,6 +342,8 @@ export const DELETE = withErrorHandler(
     }
 
     await withTransaction(async (dbSession) => {
+      const paymentSnapshot = payment.toObject();
+
       // If payment has a receipt, soft-delete its AssetReference
       if (payment.receiptAssetreferenceId) {
         await AssetReference.findByIdAndUpdate(
@@ -328,6 +354,19 @@ export const DELETE = withErrorHandler(
       }
 
       await payment.deleteOne({ session: dbSession });
+
+      // Record audit log for client payment deletion
+      await recordAuditLog({
+        req,
+        userId,
+        action: AUDIT_ACTIONS.DELETE,
+        entityType: AUDIT_ENTITY_TYPES.CLIENT_PAYMENT,
+        entityId: payment._id,
+        oldValues: paymentSnapshot,
+        newValues: null,
+        description: `Deleted payment record of ${payment.amount} ${payment.currency}`,
+        session: dbSession,
+      });
     });
 
     const response: ClientPaymentDeleteResponse = {

@@ -12,7 +12,6 @@ const clientDocumentSchema = new Schema<IClientDocumentRecord>(
       type: Schema.Types.ObjectId,
       ref: MODELS.CLIENT,
       required: [true, "Client ID is required"],
-      index: true,
     },
     assetReferenceId: {
       type: Schema.Types.ObjectId,
@@ -52,7 +51,6 @@ const clientDocumentSchema = new Schema<IClientDocumentRecord>(
     deletedAt: {
       type: Date,
       default: null,
-      index: true,
     },
   },
   {
@@ -61,11 +59,19 @@ const clientDocumentSchema = new Schema<IClientDocumentRecord>(
   }
 );
 
+// Client-specific scoped indexes
 clientDocumentSchema.index({ clientId: 1, createdAt: -1 });
 clientDocumentSchema.index({ clientId: 1, documentType: 1 });
 clientDocumentSchema.index({ clientId: 1, assetReferenceId: 1 });
+clientDocumentSchema.index({ clientId: 1, deletedAt: 1, createdAt: -1 });
 clientDocumentSchema.index({ clientId: 1, deletedAt: 1 });
+
+// Chamber Documents Vault global query indexes
 clientDocumentSchema.index({ deletedAt: 1, createdAt: -1 });
+clientDocumentSchema.index({ deletedAt: 1, documentType: 1, createdAt: -1 });
+clientDocumentSchema.index({ deletedAt: 1, documentDate: -1, createdAt: -1 });
+clientDocumentSchema.index({ deletedAt: 1, title: 1 });
+clientDocumentSchema.index({ assetReferenceId: 1, deletedAt: 1 });
 
 export const ClientDocument: Model<IClientDocumentRecord> =
   (mongoose.models[MODELS.CLIENT_DOCUMENT] as Model<IClientDocumentRecord>) ||

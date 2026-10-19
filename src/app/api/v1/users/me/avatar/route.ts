@@ -3,7 +3,6 @@ import crypto from "crypto";
 import { UploadApiResponse } from "cloudinary";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
-import ConnectDB from "@/config/db";
 import User from "@/db/models/User.model";
 import { Asset } from "@/db/models/Asset.model";
 import { AssetReference } from "@/db/models/AssetReference.model";
@@ -21,6 +20,11 @@ import {
 } from "@/const/asset-reference.const";
 import { formatUserResponse, RawUserRecord } from "../route";
 import { revalidateLandingCache } from "@/lib/landing";
+import {
+  recordAuditLog,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
 
 const MAX_AVATAR_SIZE_BYTES = 2 * 1024 * 1024; // 2 MB
 const ALLOWED_MIME_TYPES = [
@@ -67,8 +71,6 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
 
   // 3. Compute SHA-256 hash for deduplication
   const fileHash = crypto.createHash("sha256").update(buffer).digest("hex");
-
-  await ConnectDB();
 
   let targetAssetId;
 
@@ -174,6 +176,17 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   // Invalidate landing page cache and prerendered route following avatar upload
   revalidateLandingCache();
 
+  await recordAuditLog({
+    req,
+    userId,
+    action: AUDIT_ACTIONS.UPDATE,
+    entityType: AUDIT_ENTITY_TYPES.USER,
+    entityId: userId,
+    oldValues: { profileAssetReferenceId: existingUser?.profileAssetReferenceId || null },
+    newValues: { profileAssetReferenceId: assetReference._id },
+    description: "Uploaded and linked new profile avatar",
+  });
+
   const formattedData = formatUserResponse(updatedUser);
 
   return NextResponse.json(
@@ -191,21 +204,31 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
  * Removes the advocate profile headshot by unlinking profileAssetReferenceId
  * and soft-deletes the previous AssetReference.
  */
-export const DELETE = withErrorHandler(async () => {
+export const DELETE = withErrorHandler(async (req: NextRequest) => {
   const userId = await getUserId();
-
-  await ConnectDB();
 
   // Find existing profile asset reference and soft-delete it
   const existingUser = await User.findById(userId).select("profileAssetReferenceId");
-  if (existingUser?.profileAssetReferenceId) {
-    await AssetReference.findByIdAndUpdate(existingUser.profileAssetReferenceId, {
+  const prevProfileRefId = existingUser?.profileAssetReferenceId || null;
+  if (prevProfileRefId) {
+    await AssetReference.findByIdAndUpdate(prevProfileRefId, {
       deletedAt: new Date(),
     });
   }
 
   await User.findByIdAndUpdate(userId, {
     $set: { profileAssetReferenceId: null },
+  });
+
+  await recordAuditLog({
+    req,
+    userId,
+    action: AUDIT_ACTIONS.UPDATE,
+    entityType: AUDIT_ENTITY_TYPES.USER,
+    entityId: userId,
+    oldValues: { profileAssetReferenceId: prevProfileRefId },
+    newValues: { profileAssetReferenceId: null },
+    description: "Removed profile avatar and unlinked asset reference",
   });
 
   // Invalidate landing page cache and prerendered route following avatar deletion

@@ -93,6 +93,7 @@ const clientPaymentSchema = new Schema<IClientPaymentDocument>(
 );
 
 clientPaymentSchema.index({ clientId: 1, paymentDate: -1 });
+clientPaymentSchema.index({ clientId: 1, createdAt: -1 });
 clientPaymentSchema.index({ caseId: 1, paymentDate: -1 });
 
 export const ClientPayment: Model<IClientPaymentDocument> =

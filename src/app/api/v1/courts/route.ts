@@ -4,6 +4,11 @@ import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
 import { sanitizeSearchParam, buildSearchRegex, escapeRegex } from "@/lib/helpers/search.helper";
+import {
+  recordAuditLog,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
 import { Court } from "@/db/models/Court.model";
 import { Case } from "@/db/models/Case.model";
 import { Hearing } from "@/db/models/Hearing.model";
@@ -12,50 +17,59 @@ import {
   COURT_DEFAULT_PAGE_LIMIT,
   COURT_PAGE_LIMITS,
   COURT_SORT_OPTIONS,
+  COURT_TYPES,
   COURT_TYPE_LABELS,
   CourtPageLimit,
   CourtSortOption,
   CourtType,
 } from "@/const/court.const";
-
 import { ASSET_OWNER_TYPES } from "@/const/asset-reference.const";
 import { createCourtSchema, courtQueryFilterSchema } from "@/utils/zod/court.validation";
 import type {
+  CourtDocInput,
   CourtListItemDto,
   CourtPaginationResponse,
   CourtActionResponse,
 } from "@/types/court.types";
-import type { ICourtDocument } from "@/types/db/court.type";
 
 /**
- * Format a Court document into a full CourtListItemDto.
+ * Format a Court document or lean object into a strongly-typed CourtListItemDto.
+ * Safely converts ObjectId strings, dates, and relation counters.
  */
-function formatCourtItem(
-  court: ICourtDocument | Record<string, unknown>,
+export function formatCourtItem(
+  court: CourtDocInput,
   counts?: { cases?: number; hearings?: number; assets?: number }
 ): CourtListItemDto {
-  const cType = court.courtType as CourtType;
+  const cType = (court.courtType as CourtType) || COURT_TYPES.DISTRICT_JUDGE_COURT;
   const cases = counts?.cases ?? 0;
   const hearings = counts?.hearings ?? 0;
   const assets = counts?.assets ?? 0;
 
+  const id = court._id ? String(court._id) : court.id ? String(court.id) : "";
+  const createdAtStr = court.createdAt
+    ? new Date(court.createdAt).toISOString()
+    : new Date().toISOString();
+  const updatedAtStr = court.updatedAt
+    ? new Date(court.updatedAt).toISOString()
+    : createdAtStr;
+
   return {
-    id: (court._id as mongoose.Types.ObjectId).toString(),
-    name: court.name as string,
+    id,
+    name: court.name || "Unnamed Court",
     courtType: cType,
-    courtTypeLabel: COURT_TYPE_LABELS[cType] || (court.courtType as string),
-    district: court.district as string,
-    division: (court.division as string) || null,
-    roomOrHall: (court.roomOrHall as string) || null,
-    address: (court.address as string) || null,
-    presidingJudgeTitle: (court.presidingJudgeTitle as string) || null,
-    isActive: Boolean(court.isActive),
+    courtTypeLabel: COURT_TYPE_LABELS[cType] || String(court.courtType || ""),
+    district: court.district || "Sylhet",
+    division: court.division || null,
+    roomOrHall: court.roomOrHall || null,
+    address: court.address || null,
+    presidingJudgeTitle: court.presidingJudgeTitle || null,
+    isActive: court.isActive !== undefined && court.isActive !== null ? Boolean(court.isActive) : true,
     totalCases: cases,
     totalHearings: hearings,
     totalAssets: assets,
     isDeletable: cases === 0 && hearings === 0 && assets === 0,
-    createdAt: court.createdAt ? new Date(court.createdAt as Date).toISOString() : "",
-    updatedAt: court.updatedAt ? new Date(court.updatedAt as Date).toISOString() : "",
+    createdAt: createdAtStr,
+    updatedAt: updatedAtStr,
   };
 }
 
@@ -95,7 +109,6 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     page: searchParams.get("page") || 1,
     limit: rawLimit ? parseInt(rawLimit, 10) : COURT_DEFAULT_PAGE_LIMIT,
   };
-
 
   const parsed = courtQueryFilterSchema.safeParse(rawParams);
   if (!parsed.success) {
@@ -141,7 +154,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     filter.createdAt = dateQuery;
   }
 
-  // Search across multiple fields
+  // Search across multiple fields safely
   if (search) {
     const searchRegex = buildSearchRegex(search);
     if (searchRegex) {
@@ -169,15 +182,35 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   const sortOption = sortMap[sort as CourtSortOption] || { createdAt: -1 };
   const skip = (page - 1) * limit;
 
-  // Execute queries in parallel
+  // Execute queries in parallel with explicit lean projection
   const [total, courts] = await Promise.all([
     Court.countDocuments(filter),
-    Court.find(filter).sort(sortOption).skip(skip).limit(limit).lean(),
+    Court.find(filter)
+      .select(
+        "_id name courtType district division roomOrHall address presidingJudgeTitle isActive createdAt updatedAt"
+      )
+      .sort(sortOption)
+      .skip(skip)
+      .limit(limit)
+      .lean(),
   ]);
+
+  // Performance short-circuit: If no courts match, return early without running aggregations
+  if (courts.length === 0) {
+    const emptyResponse: CourtPaginationResponse = {
+      items: [],
+      total,
+      page,
+      limit: limit as CourtPageLimit,
+      totalPages: Math.ceil(total / limit) || 1,
+      hasMore: false,
+    };
+    return NextResponse.json(emptyResponse);
+  }
 
   const courtIds = courts.map((c) => c._id);
 
-  // Compute relation counts for courts in the current page
+  // Compute relation counts only for courts in the current page
   const [caseCounts, hearingCounts, assetCounts] = await Promise.all([
     Case.aggregate<{ _id: mongoose.Types.ObjectId; count: number }>([
       { $match: { courtId: { $in: courtIds }, deletedAt: null } },
@@ -210,7 +243,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   );
 
   const items: CourtListItemDto[] = courts.map((c) => {
-    const idStr = (c._id as mongoose.Types.ObjectId).toString();
+    const idStr = String(c._id);
     return formatCourtItem(c, {
       cases: caseCountMap.get(idStr) || 0,
       hearings: hearingCountMap.get(idStr) || 0,
@@ -233,35 +266,38 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
 /**
  * POST /api/v1/courts
  *
- * Create a new court record inside a database transaction.
+ * Create a new court record inside a database transaction with audit logging.
  */
 export const POST = withErrorHandler(async (req: NextRequest) => {
-  await getUserId();
+  const userId = await getUserId();
 
-  const body = await req.json();
+  const body = await req.json().catch(() => ({}));
   const validated = createCourtSchema.parse(body);
 
-  // Check if court already exists with identical name and district
+  const trimmedName = validated.name.trim();
+  const trimmedDistrict = validated.district.trim();
+
+  // Check if court already exists with identical name and district (escaped regex to prevent injection)
   const existingCourt = await Court.findOne({
     deletedAt: null,
-    name: { $regex: new RegExp(`^${validated.name.trim()}$`, "i") },
-    district: { $regex: new RegExp(`^${validated.district.trim()}$`, "i") },
-  });
+    name: { $regex: new RegExp(`^${escapeRegex(trimmedName)}$`, "i") },
+    district: { $regex: new RegExp(`^${escapeRegex(trimmedDistrict)}$`, "i") },
+  }).lean();
 
   if (existingCourt) {
     throw ApiError.conflict(
-      `A court named "${validated.name}" already exists in ${validated.district} district.`
+      `A court named "${trimmedName}" already exists in ${trimmedDistrict} district.`
     );
   }
 
-  // Create court inside transaction
+  // Create court and record audit log atomically inside transaction
   const createdCourt = await withTransaction(async (dbSession) => {
     const [court] = await Court.create(
       [
         {
-          name: validated.name.trim(),
+          name: trimmedName,
           courtType: validated.courtType,
-          district: validated.district.trim(),
+          district: trimmedDistrict,
           division: validated.division?.trim() || "Sylhet",
           roomOrHall: validated.roomOrHall?.trim() || null,
           address: validated.address?.trim() || null,
@@ -271,10 +307,24 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
       ],
       { session: dbSession }
     );
+
+    // Record audit log for court creation
+    await recordAuditLog({
+      req,
+      userId,
+      action: AUDIT_ACTIONS.CREATE,
+      entityType: AUDIT_ENTITY_TYPES.COURT,
+      entityId: court._id,
+      oldValues: null,
+      newValues: court.toObject(),
+      description: `Created court "${court.name}" (${court.district})`,
+      session: dbSession,
+    });
+
     return court;
   });
 
-  const dto = formatCourtItem(createdCourt, {
+  const dto = formatCourtItem(createdCourt.toObject(), {
     cases: 0,
     hearings: 0,
     assets: 0,

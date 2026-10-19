@@ -8,6 +8,7 @@ import { usePrepareUploadMutation } from "@/hooks/media/mutations/usePrepareUplo
 import { useUpdateProfileMutation } from "./mutations/useUpdateProfileMutation";
 import { profileKeys } from "./queries/useProfile";
 import { DASHBOARD_QUERY_KEYS } from "@/const/dashboard.const";
+import { AUDIT_QUERY_KEYS } from "@/const/audit-log.const";
 import { ProfileApiResponse, ProfileUpdateDto } from "@/types/profile.ui.type";
 import {
   compressImage,
@@ -272,9 +273,10 @@ export function useProfileAvatar({
       const payload = buildProfilePayload(finalAssetReferenceId);
       await updateProfileMutation.mutateAsync(payload);
 
-      // Refresh profile and dashboard cache everywhere
+      // Refresh profile, dashboard, and audit history cache everywhere
       await queryClient.invalidateQueries({ queryKey: profileKeys.all });
       await queryClient.invalidateQueries({ queryKey: DASHBOARD_QUERY_KEYS.all });
+      await queryClient.invalidateQueries({ queryKey: AUDIT_QUERY_KEYS.all });
 
       setStage("complete");
       setStageMessage("Profile avatar updated successfully!");
@@ -320,6 +322,7 @@ export function useProfileAvatar({
 
       await queryClient.invalidateQueries({ queryKey: profileKeys.all });
       await queryClient.invalidateQueries({ queryKey: DASHBOARD_QUERY_KEYS.all });
+      await queryClient.invalidateQueries({ queryKey: AUDIT_QUERY_KEYS.all });
       clearSelection();
       setStage("complete");
       setStageMessage("Profile avatar removed.");

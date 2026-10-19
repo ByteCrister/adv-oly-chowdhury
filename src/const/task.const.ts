@@ -9,7 +9,12 @@ export const TASK_PRIORITIES = {
   URGENT: "URGENT",
 } as const;
 
-export const TASK_PRIORITY_LIST = Object.values(TASK_PRIORITIES);
+export const TASK_PRIORITY_LIST = [
+  TASK_PRIORITIES.LOW,
+  TASK_PRIORITIES.NORMAL,
+  TASK_PRIORITIES.HIGH,
+  TASK_PRIORITIES.URGENT,
+] as const;
 export type TaskPriority = (typeof TASK_PRIORITIES)[keyof typeof TASK_PRIORITIES];
 
 export const TASK_STATUSES = {
@@ -19,7 +24,12 @@ export const TASK_STATUSES = {
   CANCELLED: "CANCELLED",
 } as const;
 
-export const TASK_STATUS_LIST = Object.values(TASK_STATUSES);
+export const TASK_STATUS_LIST = [
+  TASK_STATUSES.TODO,
+  TASK_STATUSES.IN_PROGRESS,
+  TASK_STATUSES.COMPLETED,
+  TASK_STATUSES.CANCELLED,
+] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[keyof typeof TASK_STATUSES];
 
 export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
@@ -51,7 +61,16 @@ export const TASK_SORT_OPTIONS = {
   TITLE_DESC: "title_desc",
 } as const;
 
-export const TASK_SORT_OPTION_LIST = Object.values(TASK_SORT_OPTIONS);
+export const TASK_SORT_OPTION_LIST = [
+  TASK_SORT_OPTIONS.DUE_DATE_ASC,
+  TASK_SORT_OPTIONS.DUE_DATE_DESC,
+  TASK_SORT_OPTIONS.NEWEST,
+  TASK_SORT_OPTIONS.OLDEST,
+  TASK_SORT_OPTIONS.PRIORITY_DESC,
+  TASK_SORT_OPTIONS.PRIORITY_ASC,
+  TASK_SORT_OPTIONS.TITLE_ASC,
+  TASK_SORT_OPTIONS.TITLE_DESC,
+] as const;
 export type TaskSortOption = (typeof TASK_SORT_OPTIONS)[keyof typeof TASK_SORT_OPTIONS];
 
 export const TASK_SORT_LABELS: Record<TaskSortOption, string> = {
@@ -74,7 +93,14 @@ export const TASK_DUE_FILTERS = {
   NO_DUE_DATE: "NO_DUE_DATE",
 } as const;
 
-export const TASK_DUE_FILTER_LIST = Object.values(TASK_DUE_FILTERS);
+export const TASK_DUE_FILTER_LIST = [
+  TASK_DUE_FILTERS.ALL,
+  TASK_DUE_FILTERS.OVERDUE,
+  TASK_DUE_FILTERS.TODAY,
+  TASK_DUE_FILTERS.THIS_WEEK,
+  TASK_DUE_FILTERS.NEXT_7_DAYS,
+  TASK_DUE_FILTERS.NO_DUE_DATE,
+] as const;
 export type TaskDueFilter = (typeof TASK_DUE_FILTERS)[keyof typeof TASK_DUE_FILTERS];
 
 export const TASK_DUE_FILTER_LABELS: Record<TaskDueFilter, string> = {

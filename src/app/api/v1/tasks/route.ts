@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
-import { sanitizeSearchParam, escapeRegex } from "@/lib/helpers/search.helper";
+import { buildSearchRegex, sanitizeSearchParam } from "@/lib/helpers/search.helper";
+import {
+  recordAuditLog,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
 import Task from "@/db/models/Task.model";
 import Case from "@/db/models/Case.model";
 import Client from "@/db/models/Client.model";
@@ -11,9 +16,9 @@ import {
   TASK_STATUSES,
   TASK_PRIORITIES,
   TASK_SORT_OPTIONS,
-  TASK_DEFAULT_PAGE_LIMIT,
   TASK_DUE_FILTERS,
-  TaskPageLimit,
+  TaskPriority,
+  TaskStatus,
 } from "@/const/task.const";
 import {
   taskQueryFilterSchema,
@@ -23,53 +28,95 @@ import type {
   TaskItemDto,
   TaskPaginationResponse,
   TaskActionResponse,
+  TaskDocInput,
+  RawTaskCaseInput,
+  RawTaskClientInput,
 } from "@/types/task.types";
-import ConnectDB from "@/db";
 
 /**
- * Format raw populated task document into TaskItemDto
+ * Format raw or populated task document into strongly-typed TaskItemDto.
+ * Handles aggregation lookups, populated Mongoose documents, and lean objects.
  */
-function formatTaskItem(doc: Record<string, unknown>): TaskItemDto {
+export function formatTaskItem(doc: TaskDocInput): TaskItemDto {
   const now = new Date();
-  const dueAtDate = doc.dueAt ? new Date(doc.dueAt as Date) : null;
+  const dueAtDate = doc.dueAt ? new Date(doc.dueAt) : null;
   const isCompleted = doc.status === TASK_STATUSES.COMPLETED;
   const isCancelled = doc.status === TASK_STATUSES.CANCELLED;
-  const isOverdue = Boolean(dueAtDate && dueAtDate < now && !isCompleted && !isCancelled);
+  const isOverdue = Boolean(
+    dueAtDate &&
+      !isNaN(dueAtDate.getTime()) &&
+      dueAtDate < now &&
+      !isCompleted &&
+      !isCancelled
+  );
 
-  const rawCase = doc.caseDetails as Record<string, unknown> | null | undefined;
-  const rawClient = doc.clientDetails as Record<string, unknown> | null | undefined;
+  // Extract raw case: check if caseDetails exists (from $lookup) or if caseId is populated object
+  const rawCase: RawTaskCaseInput | null =
+    doc.caseDetails && typeof doc.caseDetails === "object" && "_id" in doc.caseDetails
+      ? doc.caseDetails
+      : doc.caseId && typeof doc.caseId === "object" && "_id" in doc.caseId
+      ? (doc.caseId as RawTaskCaseInput)
+      : null;
+
+  // Extract raw client: check if clientDetails exists (from $lookup) or if clientId is populated object
+  const rawClient: RawTaskClientInput | null =
+    doc.clientDetails && typeof doc.clientDetails === "object" && "_id" in doc.clientDetails
+      ? doc.clientDetails
+      : doc.clientId && typeof doc.clientId === "object" && "_id" in doc.clientId
+      ? (doc.clientId as RawTaskClientInput)
+      : null;
+
+  // Determine scalar caseId string
+  const caseIdStr: string | null = rawCase?._id
+    ? String(rawCase._id)
+    : doc.caseId && typeof doc.caseId !== "object"
+    ? String(doc.caseId)
+    : doc.caseId instanceof mongoose.Types.ObjectId
+    ? doc.caseId.toString()
+    : null;
+
+  // Determine scalar clientId string
+  const clientIdStr: string | null = rawClient?._id
+    ? String(rawClient._id)
+    : doc.clientId && typeof doc.clientId !== "object"
+    ? String(doc.clientId)
+    : doc.clientId instanceof mongoose.Types.ObjectId
+    ? doc.clientId.toString()
+    : null;
+
+  const idStr = doc._id ? String(doc._id) : (doc.id || "");
 
   return {
-    id: (doc._id as mongoose.Types.ObjectId).toString(),
-    title: (doc.title as string) || "Untitled Task",
-    description: (doc.description as string) || null,
-    status: (doc.status as TaskItemDto["status"]) || TASK_STATUSES.TODO,
-    priority: (doc.priority as TaskItemDto["priority"]) || TASK_PRIORITIES.NORMAL,
-    dueAt: dueAtDate ? dueAtDate.toISOString() : null,
-    completedAt: doc.completedAt ? new Date(doc.completedAt as Date).toISOString() : null,
+    id: idStr,
+    title: doc.title || "Untitled Task",
+    description: doc.description || null,
+    status: (doc.status as TaskStatus) || TASK_STATUSES.TODO,
+    priority: (doc.priority as TaskPriority) || TASK_PRIORITIES.NORMAL,
+    dueAt: dueAtDate && !isNaN(dueAtDate.getTime()) ? dueAtDate.toISOString() : null,
+    completedAt: doc.completedAt ? new Date(doc.completedAt).toISOString() : null,
     isOverdue,
-    caseId: doc.caseId ? (doc.caseId as mongoose.Types.ObjectId).toString() : null,
+    caseId: caseIdStr,
     caseDetails: rawCase?._id
       ? {
-          id: (rawCase._id as mongoose.Types.ObjectId).toString(),
-          title: (rawCase.title as string) || "Untitled Case",
-          caseNumber: (rawCase.caseNumber as string) || null,
-          internalReference: (rawCase.internalReference as string) || "",
-          caseStatus: (rawCase.caseStatus as string) || undefined,
+          id: String(rawCase._id),
+          title: rawCase.title || "Untitled Case",
+          caseNumber: rawCase.caseNumber || null,
+          internalReference: rawCase.internalReference || "",
+          caseStatus: rawCase.caseStatus || undefined,
         }
       : null,
-    clientId: doc.clientId ? (doc.clientId as mongoose.Types.ObjectId).toString() : null,
+    clientId: clientIdStr,
     clientDetails: rawClient?._id
       ? {
-          id: (rawClient._id as mongoose.Types.ObjectId).toString(),
-          name: (rawClient.name as string) || "Unknown Client",
-          clientNumber: (rawClient.clientNumber as string) || "",
-          organizationName: (rawClient.organizationName as string) || null,
-          phone: (rawClient.phone as string) || null,
+          id: String(rawClient._id),
+          name: rawClient.name || "Unknown Client",
+          clientNumber: rawClient.clientNumber || "",
+          organizationName: rawClient.organizationName || null,
+          phone: rawClient.phone || null,
         }
       : null,
-    createdAt: doc.createdAt ? new Date(doc.createdAt as Date).toISOString() : "",
-    updatedAt: doc.updatedAt ? new Date(doc.updatedAt as Date).toISOString() : "",
+    createdAt: doc.createdAt ? new Date(doc.createdAt).toISOString() : "",
+    updatedAt: doc.updatedAt ? new Date(doc.updatedAt).toISOString() : "",
   };
 }
 
@@ -82,8 +129,6 @@ function formatTaskItem(doc: Record<string, unknown>): TaskItemDto {
 export const GET = withErrorHandler(async (req: NextRequest) => {
   await getUserId();
 
-  await ConnectDB();
-
   const { searchParams } = new URL(req.url);
 
   const rawParams = {
@@ -95,9 +140,9 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     dueFilter: searchParams.get("dueFilter") || undefined,
     startDate: searchParams.get("startDate") || undefined,
     endDate: searchParams.get("endDate") || undefined,
-    sort: searchParams.get("sort") || TASK_SORT_OPTIONS.DUE_DATE_ASC,
-    page: searchParams.get("page") || 1,
-    limit: searchParams.get("limit") || TASK_DEFAULT_PAGE_LIMIT,
+    sort: searchParams.get("sort") || undefined,
+    page: searchParams.get("page") || undefined,
+    limit: searchParams.get("limit") || undefined,
   };
 
   const parsed = taskQueryFilterSchema.safeParse(rawParams);
@@ -149,7 +194,14 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     switch (dueFilter) {
       case TASK_DUE_FILTERS.OVERDUE:
         filter.dueAt = { $ne: null, $lt: now };
-        filter.status = { $nin: [TASK_STATUSES.COMPLETED, TASK_STATUSES.CANCELLED] };
+        // Ensure overdue filter doesn't override an existing valid status or mismatch completed/cancelled
+        if (filter.status) {
+          if (filter.status === TASK_STATUSES.COMPLETED || filter.status === TASK_STATUSES.CANCELLED) {
+            filter.status = "__UNMATCHABLE__";
+          }
+        } else {
+          filter.status = { $nin: [TASK_STATUSES.COMPLETED, TASK_STATUSES.CANCELLED] };
+        }
         break;
       case TASK_DUE_FILTERS.TODAY: {
         const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
@@ -159,13 +211,31 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       }
       case TASK_DUE_FILTERS.THIS_WEEK: {
         const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-        const endOfWeek = new Date(startOfToday.getTime() + 7 * 24 * 60 * 60 * 1000 - 1);
+        const dayOfWeek = now.getDay(); // 0 is Sunday, 6 is Saturday
+        const daysUntilSaturday = (6 - dayOfWeek + 7) % 7;
+        const endOfWeek = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate() + daysUntilSaturday,
+          23,
+          59,
+          59,
+          999
+        );
         filter.dueAt = { $gte: startOfToday, $lte: endOfWeek };
         break;
       }
       case TASK_DUE_FILTERS.NEXT_7_DAYS: {
         const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-        const next7Days = new Date(startOfToday.getTime() + 7 * 24 * 60 * 60 * 1000 - 1);
+        const next7Days = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate() + 7,
+          23,
+          59,
+          59,
+          999
+        );
         filter.dueAt = { $gte: startOfToday, $lte: next7Days };
         break;
       }
@@ -184,53 +254,63 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     filter.dueAt = dateQuery;
   }
 
-  // Intelligent Contextual Search across Task title, description, and related Case & Client
-  if (search?.trim()) {
-    const regex = new RegExp(escapeRegex(search.trim()), "i");
+  // Safe Contextual Search across Task title, description, and related Case & Client
+  if (search) {
+    const searchRegex = buildSearchRegex(search);
 
-    const [matchingCases, matchingClients] = await Promise.all([
-      Case.find({
-        deletedAt: null,
-        $or: [
-          { title: regex },
-          { caseNumber: regex },
-          { internalReference: regex },
-        ],
-      })
-        .select("_id")
-        .limit(25)
-        .lean(),
-      Client.find({
-        deletedAt: null,
-        $or: [
-          { name: regex },
-          { clientNumber: regex },
-          { organizationName: regex },
-        ],
-      })
-        .select("_id")
-        .limit(25)
-        .lean(),
-    ]);
+    if (searchRegex) {
+      const [matchingCases, matchingClients] = await Promise.all([
+        Case.find(
+          {
+            deletedAt: null,
+            $or: [
+              { title: searchRegex },
+              { caseNumber: searchRegex },
+              { internalReference: searchRegex },
+            ],
+          },
+          { _id: 1 }
+        )
+          .limit(100)
+          .lean(),
+        Client.find(
+          {
+            deletedAt: null,
+            $or: [
+              { name: searchRegex },
+              { clientNumber: searchRegex },
+              { organizationName: searchRegex },
+              { phone: searchRegex },
+            ],
+          },
+          { _id: 1 }
+        )
+          .limit(100)
+          .lean(),
+      ]);
 
-    const caseIds = matchingCases.map((c) => c._id);
-    const clientIds = matchingClients.map((c) => c._id);
+      const caseIds = matchingCases.map((c) => c._id);
+      const clientIds = matchingClients.map((c) => c._id);
 
-    filter.$or = [
-      { title: regex },
-      { description: regex },
-      ...(caseIds.length > 0 ? [{ caseId: { $in: caseIds } }] : []),
-      ...(clientIds.length > 0 ? [{ clientId: { $in: clientIds } }] : []),
-    ];
+      filter.$or = [
+        { title: searchRegex },
+        { description: searchRegex },
+        ...(caseIds.length > 0 ? [{ caseId: { $in: caseIds } }] : []),
+        ...(clientIds.length > 0 ? [{ clientId: { $in: clientIds } }] : []),
+      ];
+    }
   }
 
-  // Sorting definition
+  // Determine sorting strategy and whether computed fields are required
   let sortStage: Record<string, 1 | -1> = { hasDueAt: 1, dueAt: 1, createdAt: -1 };
+  let needsPriorityOrder = false;
+  let needsHasDueAt = false;
 
   switch (sort) {
     case TASK_SORT_OPTIONS.DUE_DATE_ASC:
       // Due soonest first, tasks with no due date placed at the end
       sortStage = { hasDueAt: 1, dueAt: 1, createdAt: -1 };
+      needsHasDueAt = true;
       break;
     case TASK_SORT_OPTIONS.DUE_DATE_DESC:
       sortStage = { dueAt: -1, createdAt: -1 };
@@ -243,9 +323,13 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       break;
     case TASK_SORT_OPTIONS.PRIORITY_DESC:
       sortStage = { priorityOrder: -1, hasDueAt: 1, dueAt: 1 };
+      needsPriorityOrder = true;
+      needsHasDueAt = true;
       break;
     case TASK_SORT_OPTIONS.PRIORITY_ASC:
       sortStage = { priorityOrder: 1, hasDueAt: 1, dueAt: 1 };
+      needsPriorityOrder = true;
+      needsHasDueAt = true;
       break;
     case TASK_SORT_OPTIONS.TITLE_ASC:
       sortStage = { title: 1 };
@@ -257,10 +341,110 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
 
   const skip = (page - 1) * limit;
 
-  // Single MongoDB aggregation pipeline: executes paginated list query
+  // Build items pipeline: computed fields are only injected when required by sorting,
+  // preventing unneeded work on documents and avoiding pre-facet computation overhead.
+  const itemsPipeline: mongoose.PipelineStage.FacetPipelineStage[] = [];
+
+  if (needsPriorityOrder || needsHasDueAt) {
+    const addFieldsStage: Record<string, unknown> = {};
+    if (needsPriorityOrder) {
+      addFieldsStage.priorityOrder = {
+        $switch: {
+          branches: [
+            { case: { $eq: ["$priority", TASK_PRIORITIES.URGENT] }, then: 4 },
+            { case: { $eq: ["$priority", TASK_PRIORITIES.HIGH] }, then: 3 },
+            { case: { $eq: ["$priority", TASK_PRIORITIES.NORMAL] }, then: 2 },
+            { case: { $eq: ["$priority", TASK_PRIORITIES.LOW] }, then: 1 },
+          ],
+          default: 0,
+        },
+      };
+    }
+    if (needsHasDueAt) {
+      addFieldsStage.hasDueAt = {
+        $cond: [{ $eq: ["$dueAt", null] }, 1, 0],
+      };
+    }
+    itemsPipeline.push({ $addFields: addFieldsStage });
+  }
+
+  itemsPipeline.push(
+    { $sort: sortStage },
+    { $skip: skip },
+    { $limit: limit },
+    {
+      $lookup: {
+        from: COLLECTIONS.CASES,
+        localField: "caseId",
+        foreignField: "_id",
+        pipeline: [
+          {
+            $project: {
+              _id: 1,
+              title: 1,
+              caseNumber: 1,
+              internalReference: 1,
+              caseStatus: 1,
+            },
+          },
+        ],
+        as: "caseDetails",
+      },
+    },
+    {
+      $lookup: {
+        from: COLLECTIONS.CLIENTS,
+        localField: "clientId",
+        foreignField: "_id",
+        pipeline: [
+          {
+            $project: {
+              _id: 1,
+              name: 1,
+              clientNumber: 1,
+              organizationName: 1,
+              phone: 1,
+            },
+          },
+        ],
+        as: "clientDetails",
+      },
+    },
+    {
+      $unwind: {
+        path: "$caseDetails",
+        preserveNullAndEmptyArrays: true,
+      },
+    },
+    {
+      $unwind: {
+        path: "$clientDetails",
+        preserveNullAndEmptyArrays: true,
+      },
+    },
+    {
+      $project: {
+        _id: 1,
+        title: 1,
+        description: 1,
+        status: 1,
+        priority: 1,
+        dueAt: 1,
+        completedAt: 1,
+        caseId: 1,
+        clientId: 1,
+        caseDetails: 1,
+        clientDetails: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    }
+  );
+
+  // Single MongoDB aggregation pipeline: executes paginated items query
   // and filter-aware aggregate statistics simultaneously on the filtered dataset.
   const [result] = await Task.aggregate<{
-    items: Array<Record<string, unknown>>;
+    items: TaskDocInput[];
     stats: Array<{
       total: number;
       todo: number;
@@ -273,58 +457,8 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   }>([
     { $match: filter },
     {
-      $addFields: {
-        priorityOrder: {
-          $switch: {
-            branches: [
-              { case: { $eq: ["$priority", TASK_PRIORITIES.URGENT] }, then: 4 },
-              { case: { $eq: ["$priority", TASK_PRIORITIES.HIGH] }, then: 3 },
-              { case: { $eq: ["$priority", TASK_PRIORITIES.NORMAL] }, then: 2 },
-              { case: { $eq: ["$priority", TASK_PRIORITIES.LOW] }, then: 1 },
-            ],
-            default: 0,
-          },
-        },
-        hasDueAt: {
-          $cond: [{ $eq: ["$dueAt", null] }, 1, 0],
-        },
-      },
-    },
-    {
       $facet: {
-        items: [
-          { $sort: sortStage },
-          { $skip: skip },
-          { $limit: limit },
-          {
-            $lookup: {
-              from: COLLECTIONS.CASES,
-              localField: "caseId",
-              foreignField: "_id",
-              as: "caseDetails",
-            },
-          },
-          {
-            $lookup: {
-              from: COLLECTIONS.CLIENTS,
-              localField: "clientId",
-              foreignField: "_id",
-              as: "clientDetails",
-            },
-          },
-          {
-            $unwind: {
-              path: "$caseDetails",
-              preserveNullAndEmptyArrays: true,
-            },
-          },
-          {
-            $unwind: {
-              path: "$clientDetails",
-              preserveNullAndEmptyArrays: true,
-            },
-          },
-        ],
+        items: itemsPipeline,
         stats: [
           {
             $group: {
@@ -395,7 +529,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     items,
     total,
     page,
-    limit: limit as TaskPageLimit,
+    limit,
     totalPages: Math.ceil(total / limit) || 1,
     hasMore: page * limit < total,
     stats: {
@@ -415,12 +549,11 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
 /**
  * POST /api/v1/tasks
  *
- * Create a new task with relationship validation and auto-linking
+ * Create a new task with relationship validation, auto-linking, audit logging,
+ * and zero redundant database queries.
  */
 export const POST = withErrorHandler(async (req: NextRequest) => {
-  await getUserId();
-
-  await ConnectDB();
+  const userId = await getUserId();
 
   const body = await req.json().catch(() => ({}));
   const parsed = createTaskSchema.safeParse(body);
@@ -441,33 +574,44 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   let resolvedClientId = clientId ? new mongoose.Types.ObjectId(clientId) : null;
   const resolvedCaseId = caseId ? new mongoose.Types.ObjectId(caseId) : null;
 
+  let caseDoc: RawTaskCaseInput | null = null;
+  let clientDoc: RawTaskClientInput | null = null;
+
   // Validate Case Relationship
   if (resolvedCaseId) {
-    const caseDoc = await Case.findOne({
+    const fetchedCase = await Case.findOne({
       _id: resolvedCaseId,
       deletedAt: null,
-    }).select("_id clientId title caseNumber internalReference caseStatus");
+    })
+      .select("_id clientId title caseNumber internalReference caseStatus")
+      .lean();
 
-    if (!caseDoc) {
+    if (!fetchedCase) {
       throw ApiError.badRequest("Selected case does not exist or has been deleted");
     }
 
-    // Auto-link or verify Client Relationship
-    if (!resolvedClientId && caseDoc.clientId) {
-      resolvedClientId = caseDoc.clientId as mongoose.Types.ObjectId;
+    caseDoc = fetchedCase;
+
+    // Auto-link Client Relationship if not explicitly specified
+    if (!resolvedClientId && fetchedCase.clientId) {
+      resolvedClientId = fetchedCase.clientId as mongoose.Types.ObjectId;
     }
   }
 
   // Validate Client Relationship
   if (resolvedClientId) {
-    const clientDoc = await Client.findOne({
+    const fetchedClient = await Client.findOne({
       _id: resolvedClientId,
       deletedAt: null,
-    }).select("_id name clientNumber organizationName phone");
+    })
+      .select("_id name clientNumber organizationName phone")
+      .lean();
 
-    if (!clientDoc) {
+    if (!fetchedClient) {
       throw ApiError.badRequest("Selected client does not exist or has been deleted");
     }
+
+    clientDoc = fetchedClient;
   }
 
   const completedAt = status === TASK_STATUSES.COMPLETED ? new Date() : null;
@@ -484,32 +628,28 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     deletedAt: null,
   });
 
-  // Populate related fields for immediate return
-  const populatedTask = await Task.findById(newTask._id)
-    .populate("caseId", "title caseNumber internalReference caseStatus")
-    .populate("clientId", "name clientNumber organizationName phone")
-    .lean();
+  // Record audit log for task creation
+  await recordAuditLog({
+    req,
+    userId,
+    action: AUDIT_ACTIONS.CREATE,
+    entityType: AUDIT_ENTITY_TYPES.TASK,
+    entityId: newTask._id,
+    newValues: newTask.toObject(),
+    description: `Created task "${newTask.title}"`,
+  });
 
-  if (!populatedTask) {
-    throw ApiError.internal("Failed to retrieve created task");
-  }
-
-  const formattedDoc = {
-    ...populatedTask,
-    caseDetails: populatedTask.caseId,
-    clientDetails: populatedTask.clientId,
-    caseId: populatedTask.caseId
-      ? ((populatedTask.caseId as unknown as Record<string, unknown>)._id as mongoose.Types.ObjectId)
-      : null,
-    clientId: populatedTask.clientId
-      ? ((populatedTask.clientId as unknown as Record<string, unknown>)._id as mongoose.Types.ObjectId)
-      : null,
-  };
+  // Construct response directly without redundant database queries
+  const taskDto = formatTaskItem({
+    ...newTask.toObject(),
+    caseDetails: caseDoc,
+    clientDetails: clientDoc,
+  });
 
   const response: TaskActionResponse = {
     success: true,
     message: "Task created successfully",
-    data: formatTaskItem(formattedDoc as unknown as Record<string, unknown>),
+    data: taskDto,
   };
 
   return NextResponse.json(response, { status: 201 });

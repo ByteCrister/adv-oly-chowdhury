@@ -7,157 +7,77 @@ import { CaseDocument } from "@/db/models/CaseDocument.model";
 import { ClientDocument } from "@/db/models/ClientDocument.model";
 import { AssetReference } from "@/db/models/AssetReference.model";
 import { ASSET_OWNER_TYPES } from "@/const/asset-reference.const";
-import { DOCUMENT_ENTITY_TYPES } from "@/const/document.const";
+import { DOCUMENT_ENTITY_TYPES, DOCUMENT_ENTITY_TYPE_LIST } from "@/const/document.const";
+import { CaseDocumentType } from "@/const/case-document.const";
+import { ClientDocumentType } from "@/const/client-document.const";
 import {
-  CASE_DOCUMENT_TYPE_LABELS,
-  CaseDocumentType,
-} from "@/const/case-document.const";
+  updateUnifiedDocumentSchema,
+  documentObjectIdValidator,
+} from "@/utils/zod/document.validation";
 import {
-  CLIENT_DOCUMENT_TYPE_LABELS,
-  ClientDocumentType,
-} from "@/const/client-document.const";
-import { updateUnifiedDocumentSchema } from "@/utils/zod/document.validation";
+  formatCaseDocumentItem,
+  formatClientDocumentItem,
+  CASE_POPULATE_SELECT,
+  CLIENT_POPULATE_SELECT,
+  ASSET_REF_POPULATE_SELECT,
+  ASSET_POPULATE_SELECT,
+} from "@/lib/helpers/document.helper";
 import type {
-  UnifiedDocumentItemDto,
   DocumentActionResponse,
   DocumentDeleteResponse,
 } from "@/types/document.types";
 import type { IAsset } from "@/types/db/asset.type";
 import type { IAssetReferenceDocument } from "@/types/db/asset-reference.type";
-import ConnectDB from "@/db";
+import {
+  recordAuditLog,
+  calculateAuditDiff,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
-function formatCaseDocumentItem(
-  doc: Record<string, unknown>,
-  assetRef?: (IAssetReferenceDocument & { assetId?: IAsset }) | null,
-  caseInfo?: Record<string, unknown> | null
-): UnifiedDocumentItemDto {
-  const asset = assetRef?.assetId;
-  const docType = doc.documentType as CaseDocumentType;
-
-  return {
-    id: (doc._id as mongoose.Types.ObjectId).toString(),
-    entityType: DOCUMENT_ENTITY_TYPES.CASE,
-    assetReferenceId: assetRef?._id
-      ? assetRef._id.toString()
-      : (doc.assetReferenceId as mongoose.Types.ObjectId).toString(),
-    assetId: asset?._id ? asset._id.toString() : "",
-    documentType: docType,
-    documentTypeLabel: CASE_DOCUMENT_TYPE_LABELS[docType] || String(doc.documentType),
-    title: doc.title as string,
-    documentDate: doc.documentDate ? new Date(doc.documentDate as Date).toISOString() : null,
-    createdAt: doc.createdAt ? new Date(doc.createdAt as Date).toISOString() : "",
-    updatedAt: doc.updatedAt ? new Date(doc.updatedAt as Date).toISOString() : "",
-    originalFileName: assetRef?.originalFileName || asset?.originalFilename || (doc.title as string),
-    fileUrl: asset?.secureUrl || "",
-    publicId: asset?.publicId || "",
-    mimeType: asset?.mimeType || "application/octet-stream",
-    sizeBytes: asset?.bytes || 0,
-    format: asset?.format || null,
-    width: asset?.width || null,
-    height: asset?.height || null,
-    pages: asset?.pages || null,
-    caseId: caseInfo?._id
-      ? (caseInfo._id as mongoose.Types.ObjectId).toString()
-      : doc.caseId
-      ? (doc.caseId as mongoose.Types.ObjectId).toString()
-      : null,
-    caseDetails: caseInfo
-      ? {
-          id: (caseInfo._id as mongoose.Types.ObjectId).toString(),
-          title: (caseInfo.title as string) || "Untitled Case",
-          caseNumber: (caseInfo.caseNumber as string) || "",
-          internalReference: (caseInfo.internalReference as string) || "",
-          caseStatus: (caseInfo.caseStatus as string) || undefined,
-        }
-      : null,
-    description: (doc.description as string) || null,
-    exhibitNumber: (doc.exhibitNumber as string) || null,
-    isConfidential: Boolean(doc.isConfidential),
-  };
-}
-
-function formatClientDocumentItem(
-  doc: Record<string, unknown>,
-  assetRef?: (IAssetReferenceDocument & { assetId?: IAsset }) | null,
-  clientInfo?: Record<string, unknown> | null
-): UnifiedDocumentItemDto {
-  const asset = assetRef?.assetId;
-  const docType = doc.documentType as ClientDocumentType;
-
-  return {
-    id: (doc._id as mongoose.Types.ObjectId).toString(),
-    entityType: DOCUMENT_ENTITY_TYPES.CLIENT,
-    assetReferenceId: assetRef?._id
-      ? assetRef._id.toString()
-      : (doc.assetReferenceId as mongoose.Types.ObjectId).toString(),
-    assetId: asset?._id ? asset._id.toString() : "",
-    documentType: docType,
-    documentTypeLabel: CLIENT_DOCUMENT_TYPE_LABELS[docType] || String(doc.documentType),
-    title: doc.title as string,
-    documentDate: doc.documentDate ? new Date(doc.documentDate as Date).toISOString() : null,
-    createdAt: doc.createdAt ? new Date(doc.createdAt as Date).toISOString() : "",
-    updatedAt: doc.updatedAt ? new Date(doc.updatedAt as Date).toISOString() : "",
-    originalFileName: assetRef?.originalFileName || asset?.originalFilename || (doc.title as string),
-    fileUrl: asset?.secureUrl || "",
-    publicId: asset?.publicId || "",
-    mimeType: asset?.mimeType || "application/octet-stream",
-    sizeBytes: asset?.bytes || 0,
-    format: asset?.format || null,
-    width: asset?.width || null,
-    height: asset?.height || null,
-    pages: asset?.pages || null,
-    clientId: clientInfo?._id
-      ? (clientInfo._id as mongoose.Types.ObjectId).toString()
-      : doc.clientId
-      ? (doc.clientId as mongoose.Types.ObjectId).toString()
-      : null,
-    clientDetails: clientInfo
-      ? {
-          id: (clientInfo._id as mongoose.Types.ObjectId).toString(),
-          name: (clientInfo.name as string) || "Unnamed Client",
-          clientNumber: (clientInfo.clientNumber as string) || "",
-          organizationName: (clientInfo.organizationName as string) || null,
-          phone: (clientInfo.phone as string) || null,
-        }
-      : null,
-    expiryDate: doc.expiryDate ? new Date(doc.expiryDate as Date).toISOString() : null,
-    notes: (doc.notes as string) || null,
-  };
-}
-
 /**
  * GET /api/v1/documents/[id]
  *
- * Retrieve document details by ID. Checks CaseDocument or ClientDocument.
+ * Retrieve document details by ID from either CaseDocument or ClientDocument.
+ * Validates entityType parameter when provided and uses targeted projections.
  */
 export const GET = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
     await getUserId();
 
     const { id } = await params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    const parsedId = documentObjectIdValidator.safeParse(id);
+    if (!parsedId.success) {
       throw ApiError.badRequest("Invalid document ID format");
     }
-
-    await ConnectDB();
 
     const objectId = new mongoose.Types.ObjectId(id);
     const { searchParams } = new URL(req.url);
     const entityTypeParam = searchParams.get("entityType");
 
+    if (
+      entityTypeParam &&
+      !DOCUMENT_ENTITY_TYPE_LIST.includes(entityTypeParam as (typeof DOCUMENT_ENTITY_TYPE_LIST)[number])
+    ) {
+      throw ApiError.badRequest(
+        `Invalid entityType parameter "${entityTypeParam}". Must be one of: ${DOCUMENT_ENTITY_TYPE_LIST.join(", ")}`
+      );
+    }
+
     // Check CaseDocument first if entityType is CASE or omitted
     if (!entityTypeParam || entityTypeParam === DOCUMENT_ENTITY_TYPES.CASE) {
       const caseDoc = await CaseDocument.findOne({ _id: objectId, deletedAt: null })
-        .populate<{ caseId: Record<string, unknown> }>("caseId", "title caseNumber internalReference caseStatus")
+        .populate<{ caseId: Record<string, unknown> }>("caseId", CASE_POPULATE_SELECT)
         .populate<{
           assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
         }>({
           path: "assetReferenceId",
-          populate: { path: "assetId" },
+          select: ASSET_REF_POPULATE_SELECT,
+          populate: { path: "assetId", select: ASSET_POPULATE_SELECT },
         })
         .lean();
 
@@ -174,12 +94,13 @@ export const GET = withErrorHandler(
     // Check ClientDocument
     if (!entityTypeParam || entityTypeParam === DOCUMENT_ENTITY_TYPES.CLIENT) {
       const clientDoc = await ClientDocument.findOne({ _id: objectId, deletedAt: null })
-        .populate<{ clientId: Record<string, unknown> }>("clientId", "name clientNumber organizationName phone")
+        .populate<{ clientId: Record<string, unknown> }>("clientId", CLIENT_POPULATE_SELECT)
         .populate<{
           assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
         }>({
           path: "assetReferenceId",
-          populate: { path: "assetId" },
+          select: ASSET_REF_POPULATE_SELECT,
+          populate: { path: "assetId", select: ASSET_POPULATE_SELECT },
         })
         .lean();
 
@@ -193,7 +114,7 @@ export const GET = withErrorHandler(
       }
     }
 
-    throw ApiError.notFound("Document not found");
+    throw ApiError.notFound("Document not found or has already been deleted.");
   }
 );
 
@@ -201,23 +122,43 @@ export const GET = withErrorHandler(
  * PATCH /api/v1/documents/[id]
  *
  * Update document metadata or safely replace its physical asset reference.
+ * Prevents accidental self-deletion of media files and ensures transactional consistency.
  */
 export const PATCH = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
 
     const { id } = await params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    const parsedId = documentObjectIdValidator.safeParse(id);
+    if (!parsedId.success) {
       throw ApiError.badRequest("Invalid document ID format");
     }
 
     const objectId = new mongoose.Types.ObjectId(id);
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
+    if (!body) {
+      throw ApiError.badRequest("Invalid or missing JSON request body");
+    }
+
     const validated = updateUnifiedDocumentSchema.parse(body);
 
-    await ConnectDB();
+    // If entityType is not provided, resolve whether target document is Case or Client
+    let targetEntityType = validated.entityType;
+    if (!targetEntityType) {
+      const isCase = await CaseDocument.exists({ _id: objectId, deletedAt: null });
+      if (isCase) {
+        targetEntityType = DOCUMENT_ENTITY_TYPES.CASE;
+      } else {
+        const isClient = await ClientDocument.exists({ _id: objectId, deletedAt: null });
+        if (isClient) {
+          targetEntityType = DOCUMENT_ENTITY_TYPES.CLIENT;
+        } else {
+          throw ApiError.notFound("Document not found or has already been deleted.");
+        }
+      }
+    }
 
-    if (validated.entityType === DOCUMENT_ENTITY_TYPES.CASE) {
+    if (targetEntityType === DOCUMENT_ENTITY_TYPES.CASE) {
       await withTransaction(async (dbSession) => {
         const doc = await CaseDocument.findOne({
           _id: objectId,
@@ -228,8 +169,13 @@ export const PATCH = withErrorHandler(
           throw ApiError.notFound("Case document not found or has already been deleted.");
         }
 
+        const beforeState = doc.toObject();
+
         // File replacement handling
-        if (validated.assetReferenceId) {
+        if (
+          validated.assetReferenceId &&
+          validated.assetReferenceId !== doc.assetReferenceId?.toString()
+        ) {
           const newAssetRefId = new mongoose.Types.ObjectId(validated.assetReferenceId);
 
           const newRef = await AssetReference.findOne({
@@ -243,13 +189,48 @@ export const PATCH = withErrorHandler(
             );
           }
 
-          // Soft-delete previous AssetReference
-          if (doc.assetReferenceId) {
-            await AssetReference.findByIdAndUpdate(
-              doc.assetReferenceId,
-              { deletedAt: new Date() },
-              { session: dbSession }
+          // Check if new asset reference is already attached elsewhere
+          const [usedInCase, usedInClient] = await Promise.all([
+            CaseDocument.exists({
+              _id: { $ne: doc._id },
+              assetReferenceId: newAssetRefId,
+              deletedAt: null,
+            }).session(dbSession),
+            ClientDocument.exists({
+              _id: { $ne: doc._id },
+              assetReferenceId: newAssetRefId,
+              deletedAt: null,
+            }).session(dbSession),
+          ]);
+
+          if (usedInCase || usedInClient) {
+            throw ApiError.conflict(
+              "The replacement media file is already attached to another active document."
             );
+          }
+
+          // Soft-delete previous AssetReference only if not referenced by any other document
+          if (doc.assetReferenceId) {
+            const [otherCase, otherClient] = await Promise.all([
+              CaseDocument.exists({
+                _id: { $ne: doc._id },
+                assetReferenceId: doc.assetReferenceId,
+                deletedAt: null,
+              }).session(dbSession),
+              ClientDocument.exists({
+                _id: { $ne: doc._id },
+                assetReferenceId: doc.assetReferenceId,
+                deletedAt: null,
+              }).session(dbSession),
+            ]);
+
+            if (!otherCase && !otherClient) {
+              await AssetReference.findByIdAndUpdate(
+                doc.assetReferenceId,
+                { deletedAt: new Date() },
+                { session: dbSession }
+              );
+            }
           }
 
           // Bind new AssetReference
@@ -279,22 +260,42 @@ export const PATCH = withErrorHandler(
         }
 
         await doc.save({ session: dbSession });
+
+        const diff = calculateAuditDiff(beforeState, doc.toObject());
+        if (diff.oldValues || diff.newValues) {
+          await recordAuditLog({
+            req,
+            userId,
+            action: AUDIT_ACTIONS.UPDATE,
+            entityType: AUDIT_ENTITY_TYPES.CASE_DOCUMENT,
+            entityId: doc._id,
+            oldValues: diff.oldValues,
+            newValues: diff.newValues,
+            description: `Updated case document "${doc.title}"`,
+            session: dbSession,
+          });
+        }
       });
 
       const updated = await CaseDocument.findById(objectId)
-        .populate<{ caseId: Record<string, unknown> }>("caseId", "title caseNumber internalReference caseStatus")
+        .populate<{ caseId: Record<string, unknown> }>("caseId", CASE_POPULATE_SELECT)
         .populate<{
           assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
         }>({
           path: "assetReferenceId",
-          populate: { path: "assetId" },
+          select: ASSET_REF_POPULATE_SELECT,
+          populate: { path: "assetId", select: ASSET_POPULATE_SELECT },
         })
         .lean();
 
+      if (!updated) {
+        throw ApiError.notFound("Case document not found after update.");
+      }
+
       const itemDto = formatCaseDocumentItem(
-        updated!,
-        updated!.assetReferenceId as unknown as (IAssetReferenceDocument & { assetId: IAsset }),
-        updated!.caseId as unknown as Record<string, unknown>
+        updated,
+        updated.assetReferenceId as unknown as (IAssetReferenceDocument & { assetId: IAsset }),
+        updated.caseId as unknown as Record<string, unknown>
       );
 
       const response: DocumentActionResponse = {
@@ -316,8 +317,13 @@ export const PATCH = withErrorHandler(
           throw ApiError.notFound("Client document not found or has already been deleted.");
         }
 
+        const beforeState = doc.toObject();
+
         // File replacement handling
-        if (validated.assetReferenceId) {
+        if (
+          validated.assetReferenceId &&
+          validated.assetReferenceId !== doc.assetReferenceId?.toString()
+        ) {
           const newAssetRefId = new mongoose.Types.ObjectId(validated.assetReferenceId);
 
           const newRef = await AssetReference.findOne({
@@ -331,13 +337,48 @@ export const PATCH = withErrorHandler(
             );
           }
 
-          // Soft-delete previous AssetReference
-          if (doc.assetReferenceId) {
-            await AssetReference.findByIdAndUpdate(
-              doc.assetReferenceId,
-              { deletedAt: new Date() },
-              { session: dbSession }
+          // Check if new asset reference is already attached elsewhere
+          const [usedInCase, usedInClient] = await Promise.all([
+            CaseDocument.exists({
+              _id: { $ne: doc._id },
+              assetReferenceId: newAssetRefId,
+              deletedAt: null,
+            }).session(dbSession),
+            ClientDocument.exists({
+              _id: { $ne: doc._id },
+              assetReferenceId: newAssetRefId,
+              deletedAt: null,
+            }).session(dbSession),
+          ]);
+
+          if (usedInCase || usedInClient) {
+            throw ApiError.conflict(
+              "The replacement media file is already attached to another active document."
             );
+          }
+
+          // Soft-delete previous AssetReference only if not referenced by any other document
+          if (doc.assetReferenceId) {
+            const [otherCase, otherClient] = await Promise.all([
+              CaseDocument.exists({
+                _id: { $ne: doc._id },
+                assetReferenceId: doc.assetReferenceId,
+                deletedAt: null,
+              }).session(dbSession),
+              ClientDocument.exists({
+                _id: { $ne: doc._id },
+                assetReferenceId: doc.assetReferenceId,
+                deletedAt: null,
+              }).session(dbSession),
+            ]);
+
+            if (!otherCase && !otherClient) {
+              await AssetReference.findByIdAndUpdate(
+                doc.assetReferenceId,
+                { deletedAt: new Date() },
+                { session: dbSession }
+              );
+            }
           }
 
           // Bind new AssetReference
@@ -364,22 +405,42 @@ export const PATCH = withErrorHandler(
         }
 
         await doc.save({ session: dbSession });
+
+        const diff = calculateAuditDiff(beforeState, doc.toObject());
+        if (diff.oldValues || diff.newValues) {
+          await recordAuditLog({
+            req,
+            userId,
+            action: AUDIT_ACTIONS.UPDATE,
+            entityType: AUDIT_ENTITY_TYPES.CLIENT_DOCUMENT,
+            entityId: doc._id,
+            oldValues: diff.oldValues,
+            newValues: diff.newValues,
+            description: `Updated client document "${doc.title}"`,
+            session: dbSession,
+          });
+        }
       });
 
       const updated = await ClientDocument.findById(objectId)
-        .populate<{ clientId: Record<string, unknown> }>("clientId", "name clientNumber organizationName phone")
+        .populate<{ clientId: Record<string, unknown> }>("clientId", CLIENT_POPULATE_SELECT)
         .populate<{
           assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
         }>({
           path: "assetReferenceId",
-          populate: { path: "assetId" },
+          select: ASSET_REF_POPULATE_SELECT,
+          populate: { path: "assetId", select: ASSET_POPULATE_SELECT },
         })
         .lean();
 
+      if (!updated) {
+        throw ApiError.notFound("Client document not found after update.");
+      }
+
       const itemDto = formatClientDocumentItem(
-        updated!,
-        updated!.assetReferenceId as unknown as (IAssetReferenceDocument & { assetId: IAsset }),
-        updated!.clientId as unknown as Record<string, unknown>
+        updated,
+        updated.assetReferenceId as unknown as (IAssetReferenceDocument & { assetId: IAsset }),
+        updated.clientId as unknown as Record<string, unknown>
       );
 
       const response: DocumentActionResponse = {
@@ -397,15 +458,16 @@ export const PATCH = withErrorHandler(
  * DELETE /api/v1/documents/[id]
  *
  * Safely soft-delete a document (Case or Client document).
- * Marks the document with deletedAt: new Date() and marks its AssetReference
- * with deletedAt: new Date() to preserve physical asset deduplication.
+ * Marks the document with deletedAt: new Date() and soft-deletes its AssetReference
+ * only if no other active document references the same physical asset reference.
  */
 export const DELETE = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
 
     const { id } = await params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    const parsedId = documentObjectIdValidator.safeParse(id);
+    if (!parsedId.success) {
       throw ApiError.badRequest("Invalid document ID format");
     }
 
@@ -413,34 +475,75 @@ export const DELETE = withErrorHandler(
     const { searchParams } = new URL(req.url);
     const entityTypeParam = searchParams.get("entityType");
 
-    await ConnectDB();
+    if (
+      entityTypeParam &&
+      !DOCUMENT_ENTITY_TYPE_LIST.includes(entityTypeParam as (typeof DOCUMENT_ENTITY_TYPE_LIST)[number])
+    ) {
+      throw ApiError.badRequest(
+        `Invalid entityType parameter "${entityTypeParam}". Must be one of: ${DOCUMENT_ENTITY_TYPE_LIST.join(", ")}`
+      );
+    }
 
-    // Try finding CaseDocument first if entityType is CASE or not specified
+    const deleteDate = new Date();
+
+    // Check CaseDocument inside transaction
     if (!entityTypeParam || entityTypeParam === DOCUMENT_ENTITY_TYPES.CASE) {
-      const caseDoc = await CaseDocument.findOne({
-        _id: objectId,
-        deletedAt: null,
-      });
+      const caseResult = await withTransaction(async (dbSession) => {
+        const caseDoc = await CaseDocument.findOne({
+          _id: objectId,
+          deletedAt: null,
+        }).session(dbSession);
 
-      if (caseDoc) {
-        await withTransaction(async (dbSession) => {
-          // 1. Soft-delete the CaseDocument record
-          caseDoc.deletedAt = new Date();
-          await caseDoc.save({ session: dbSession });
+        if (!caseDoc) return null;
 
-          // 2. Soft-delete the logical AssetReference
-          if (caseDoc.assetReferenceId) {
+        // 1. Soft-delete the CaseDocument record
+        caseDoc.deletedAt = deleteDate;
+        await caseDoc.save({ session: dbSession });
+
+        // 2. Soft-delete the logical AssetReference only if not referenced by another active document
+        if (caseDoc.assetReferenceId) {
+          const [otherCase, otherClient] = await Promise.all([
+            CaseDocument.exists({
+              _id: { $ne: caseDoc._id },
+              assetReferenceId: caseDoc.assetReferenceId,
+              deletedAt: null,
+            }).session(dbSession),
+            ClientDocument.exists({
+              _id: { $ne: caseDoc._id },
+              assetReferenceId: caseDoc.assetReferenceId,
+              deletedAt: null,
+            }).session(dbSession),
+          ]);
+
+          if (!otherCase && !otherClient) {
             await AssetReference.findByIdAndUpdate(
               caseDoc.assetReferenceId,
-              { deletedAt: new Date() },
+              { deletedAt: deleteDate },
               { session: dbSession }
             );
           }
+        }
+
+        // 3. Record audit log
+        await recordAuditLog({
+          req,
+          userId,
+          action: AUDIT_ACTIONS.SOFT_DELETE,
+          entityType: AUDIT_ENTITY_TYPES.CASE_DOCUMENT,
+          entityId: caseDoc._id,
+          oldValues: { deletedAt: null },
+          newValues: { deletedAt: deleteDate },
+          description: `Soft deleted case document "${caseDoc.title}"`,
+          session: dbSession,
         });
 
+        return caseDoc;
+      });
+
+      if (caseResult) {
         const response: DocumentDeleteResponse = {
           success: true,
-          message: `Case document "${caseDoc.title}" moved to archive successfully.`,
+          message: `Case document "${caseResult.title}" moved to archive successfully.`,
           id,
           entityType: DOCUMENT_ENTITY_TYPES.CASE,
         };
@@ -449,32 +552,64 @@ export const DELETE = withErrorHandler(
       }
     }
 
-    // Try finding ClientDocument
+    // Check ClientDocument inside transaction
     if (!entityTypeParam || entityTypeParam === DOCUMENT_ENTITY_TYPES.CLIENT) {
-      const clientDoc = await ClientDocument.findOne({
-        _id: objectId,
-        deletedAt: null,
-      });
+      const clientResult = await withTransaction(async (dbSession) => {
+        const clientDoc = await ClientDocument.findOne({
+          _id: objectId,
+          deletedAt: null,
+        }).session(dbSession);
 
-      if (clientDoc) {
-        await withTransaction(async (dbSession) => {
-          // 1. Soft-delete the ClientDocument record
-          clientDoc.deletedAt = new Date();
-          await clientDoc.save({ session: dbSession });
+        if (!clientDoc) return null;
 
-          // 2. Soft-delete the logical AssetReference
-          if (clientDoc.assetReferenceId) {
+        // 1. Soft-delete the ClientDocument record
+        clientDoc.deletedAt = deleteDate;
+        await clientDoc.save({ session: dbSession });
+
+        // 2. Soft-delete the logical AssetReference only if not referenced by another active document
+        if (clientDoc.assetReferenceId) {
+          const [otherCase, otherClient] = await Promise.all([
+            CaseDocument.exists({
+              _id: { $ne: clientDoc._id },
+              assetReferenceId: clientDoc.assetReferenceId,
+              deletedAt: null,
+            }).session(dbSession),
+            ClientDocument.exists({
+              _id: { $ne: clientDoc._id },
+              assetReferenceId: clientDoc.assetReferenceId,
+              deletedAt: null,
+            }).session(dbSession),
+          ]);
+
+          if (!otherCase && !otherClient) {
             await AssetReference.findByIdAndUpdate(
               clientDoc.assetReferenceId,
-              { deletedAt: new Date() },
+              { deletedAt: deleteDate },
               { session: dbSession }
             );
           }
+        }
+
+        // 3. Record audit log
+        await recordAuditLog({
+          req,
+          userId,
+          action: AUDIT_ACTIONS.SOFT_DELETE,
+          entityType: AUDIT_ENTITY_TYPES.CLIENT_DOCUMENT,
+          entityId: clientDoc._id,
+          oldValues: { deletedAt: null },
+          newValues: { deletedAt: deleteDate },
+          description: `Soft deleted client document "${clientDoc.title}"`,
+          session: dbSession,
         });
 
+        return clientDoc;
+      });
+
+      if (clientResult) {
         const response: DocumentDeleteResponse = {
           success: true,
-          message: `Client document "${clientDoc.title}" moved to archive successfully.`,
+          message: `Client document "${clientResult.title}" moved to archive successfully.`,
           id,
           entityType: DOCUMENT_ENTITY_TYPES.CLIENT,
         };

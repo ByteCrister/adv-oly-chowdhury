@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
+import { withTransaction } from "@/lib/helpers/withTransaction";
+import {
+  recordAuditLog,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
 import { sanitizeSearchParam, buildSearchRegex } from "@/lib/helpers/search.helper";
 import ConnectDB from "@/db";
 import { Case } from "@/db/models/Case.model";
@@ -24,6 +30,7 @@ import {
   createCasePartySchema,
   casePartyQueryFilterSchema,
 } from "@/utils/zod/case-party.validation";
+import { extractIdString, formatSafeIsoDate } from "@/app/api/v1/cases/route";
 import type {
   CasePartyItemDto,
   CasePartyPaginationResponse,
@@ -52,24 +59,20 @@ export function formatCasePartyItem(
 ): CasePartyItemDto {
   const rawDoc = doc as Record<string, unknown>;
   const rawId = (doc as { _id?: unknown })._id;
-  const id = rawId ? (rawId as mongoose.Types.ObjectId).toString() : "";
-  const rawCaseId = rawDoc.caseId;
-  const caseId = rawCaseId ? (rawCaseId as mongoose.Types.ObjectId).toString() : "";
+  const id = rawId ? extractIdString(rawId) : "";
+  const caseId = extractIdString(rawDoc.caseId);
   const partyType = (rawDoc.partyType as PartyType) || PARTY_TYPES.INDIVIDUAL;
   const role = (rawDoc.role as PartyRole) || PARTY_ROLES.PLAINTIFF;
+
+  const clientId = extractIdString(rawDoc.clientId) || null;
 
   return {
     id,
     caseId,
-    clientId: rawDoc.clientId
-      ? typeof rawDoc.clientId === "object" && "_id" in (rawDoc.clientId as Record<string, unknown>)
-        ? ((rawDoc.clientId as Record<string, unknown>)._id as mongoose.Types.ObjectId).toString()
-        : (rawDoc.clientId as mongoose.Types.ObjectId).toString()
-      : null,
-
-    client: clientDoc
+    clientId,
+    client: clientDoc && clientDoc._id
       ? {
-          id: (clientDoc._id as mongoose.Types.ObjectId).toString(),
+          id: extractIdString(clientDoc._id),
           clientNumber: (clientDoc.clientNumber as string) || "",
           name: (clientDoc.name as string) || "",
           organizationName: (clientDoc.organizationName as string) || null,
@@ -78,16 +81,16 @@ export function formatCasePartyItem(
           email: (clientDoc.email as string) || null,
         }
       : null,
-    name: doc.name as string,
+    name: (doc as Record<string, unknown>).name as string,
     partyType,
     partyTypeLabel: CASE_PARTY_TYPE_LABELS[partyType] || partyType,
     role,
     roleLabel: CASE_PARTY_ROLE_LABELS[role] || role,
-    address: (doc.address as string) || null,
-    phone: (doc.phone as string) || null,
-    notes: (doc.notes as string) || null,
-    createdAt: doc.createdAt ? new Date(doc.createdAt as Date).toISOString() : new Date().toISOString(),
-    updatedAt: doc.updatedAt ? new Date(doc.updatedAt as Date).toISOString() : new Date().toISOString(),
+    address: (rawDoc.address as string) || null,
+    phone: (rawDoc.phone as string) || null,
+    notes: (rawDoc.notes as string) || null,
+    createdAt: formatSafeIsoDate(rawDoc.createdAt) || new Date().toISOString(),
+    updatedAt: formatSafeIsoDate(rawDoc.updatedAt) || new Date().toISOString(),
   };
 }
 
@@ -288,7 +291,7 @@ export const GET = withErrorHandler(
  */
 export const POST = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
 
     const { id } = await params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -320,15 +323,37 @@ export const POST = withErrorHandler(
       }
     }
 
-    const createdParty = await CaseParty.create({
-      caseId: caseObjectId,
-      clientId: clientObjectId,
-      name: validated.name.trim(),
-      partyType: validated.partyType,
-      role: validated.role,
-      address: validated.address?.trim() || null,
-      phone: validated.phone?.trim() || null,
-      notes: validated.notes?.trim() || null,
+    const createdParty = await withTransaction(async (dbSession) => {
+      const [partyDoc] = await CaseParty.create(
+        [
+          {
+            caseId: caseObjectId,
+            clientId: clientObjectId,
+            name: validated.name.trim(),
+            partyType: validated.partyType,
+            role: validated.role,
+            address: validated.address?.trim() || null,
+            phone: validated.phone?.trim() || null,
+            notes: validated.notes?.trim() || null,
+          },
+        ],
+        { session: dbSession }
+      );
+
+      // Record audit log for case party creation
+      await recordAuditLog({
+        req,
+        userId,
+        action: AUDIT_ACTIONS.CREATE,
+        entityType: AUDIT_ENTITY_TYPES.CASE_PARTY,
+        entityId: partyDoc._id,
+        oldValues: null,
+        newValues: partyDoc.toObject(),
+        description: `Added party "${partyDoc.name}" (${partyDoc.role}) to case`,
+        session: dbSession,
+      });
+
+      return partyDoc;
     });
 
     const populated = await CaseParty.findById(createdParty._id)

@@ -13,6 +13,7 @@ import { ProfileTabsNav } from "./ProfileTabsNav";
 import { ProfileInfoView } from "./ProfileInfoView";
 import { ProfileEditForm } from "./ProfileEditForm";
 import { ProfileAvatarDialog } from "./ProfileAvatarDialog";
+import { AuditHistorySection } from "./AuditHistorySection";
 
 export function ProfilePage() {
   const { data: profileResponse, isLoading, isError, error, refetch, isRefetching } =
@@ -137,7 +138,12 @@ export function ProfilePage() {
         )}
       </FadeInUp>
 
-      {/* 5. Avatar Management Dialog */}
+      {/* 5. Audit History & Compliance Activity Section */}
+      <FadeInUp duration={0.45} delay={0.2}>
+        <AuditHistorySection />
+      </FadeInUp>
+
+      {/* 6. Avatar Management Dialog */}
       <ProfileAvatarDialog
         open={avatarDialogOpen}
         onOpenChange={setAvatarDialogOpen}

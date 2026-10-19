@@ -2,9 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
-import ConnectDB from "@/config/db";
 import User from "@/db/models/User.model";
 import { passwordUpdateSchema } from "@/utils/zod";
+import {
+  recordAuditLog,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
 
 /**
  * PATCH /api/v1/users/me/password
@@ -16,8 +20,6 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
 
   const body = await req.json();
   const { currentPassword, newPassword } = passwordUpdateSchema.parse(body);
-
-  await ConnectDB();
 
   // Query user including passwordHash (which is select: false by default)
   const user = await User.findById(userId).select("+passwordHash");
@@ -40,6 +42,17 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
   // Update password in database
   await User.findByIdAndUpdate(userId, {
     $set: { passwordHash },
+  });
+
+  await recordAuditLog({
+    req,
+    userId,
+    action: AUDIT_ACTIONS.UPDATE,
+    entityType: AUDIT_ENTITY_TYPES.USER,
+    entityId: userId,
+    oldValues: { passwordUpdated: false },
+    newValues: { passwordUpdated: true },
+    description: "User updated account password",
   });
 
   return NextResponse.json(

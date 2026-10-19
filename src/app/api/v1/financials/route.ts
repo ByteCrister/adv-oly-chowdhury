@@ -4,9 +4,9 @@ import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { sanitizeSearchParam, buildSearchRegex } from "@/lib/helpers/search.helper";
 import { ClientPayment } from "@/db/models/ClientPayment.model";
+import { COLLECTIONS } from "@/const/collection.const";
 import {
   FINANCIAL_DEFAULT_PAGE_LIMIT,
-  FINANCIAL_PAGE_LIMITS,
   FINANCIAL_RECORD_TYPES,
   FINANCIAL_SORT_OPTIONS,
   FinancialPageLimit,
@@ -28,11 +28,10 @@ import type {
   FinancialPaginationResponse,
   FinancialSummaryStats,
 } from "@/types/financial.types";
-import ConnectDB from "@/db";
 
 interface RawAggregatedRecord {
   _id: mongoose.Types.ObjectId;
-  recordType: "PAYMENT" | "EXPENSE";
+  recordType: typeof FINANCIAL_RECORD_TYPES.PAYMENT | typeof FINANCIAL_RECORD_TYPES.EXPENSE;
   transactionDate: Date;
   amount: number;
   currency: string;
@@ -49,7 +48,8 @@ interface RawAggregatedRecord {
   moneyReceiptNumber?: string | null;
   description?: string | null;
   receiptAssetId?: mongoose.Types.ObjectId | null;
-  receiptDoc?: { originalFileName?: string; assetDoc?: { secureUrl?: string; originalFilename?: string } }[];
+  /** Single object produced by $arrayElemAt in the items facet pipeline. */
+  receiptDoc?: { originalFileName?: string; assetDoc?: { secureUrl?: string; originalFilename?: string } };
   userDoc?: { _id: mongoose.Types.ObjectId; name: string; email: string }[];
   createdAt: Date;
   updatedAt: Date;
@@ -65,19 +65,7 @@ interface RawAggregatedRecord {
 export const GET = withErrorHandler(async (req: NextRequest) => {
   await getUserId();
 
-  await ConnectDB();
-
   const { searchParams } = new URL(req.url);
-
-  const rawLimit = searchParams.get("limit");
-  if (rawLimit !== null) {
-    const parsedLimit = parseInt(rawLimit, 10);
-    if (!FINANCIAL_PAGE_LIMITS.includes(parsedLimit as FinancialPageLimit)) {
-      throw ApiError.badRequest(
-        `Invalid page limit "${rawLimit}". Allowed limits are: ${FINANCIAL_PAGE_LIMITS.join(", ")}`
-      );
-    }
-  }
 
   const rawParams = {
     search: sanitizeSearchParam(searchParams.get("search")),
@@ -90,7 +78,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     endDate: searchParams.get("endDate") || undefined,
     sort: searchParams.get("sort") || FINANCIAL_SORT_OPTIONS.NEWEST_DATE,
     page: searchParams.get("page") || 1,
-    limit: rawLimit ? parseInt(rawLimit, 10) : FINANCIAL_DEFAULT_PAGE_LIMIT,
+    limit: searchParams.get("limit") ? parseInt(searchParams.get("limit")!, 10) : FINANCIAL_DEFAULT_PAGE_LIMIT,
   };
 
   const parsed = financialQueryFilterSchema.safeParse(rawParams);
@@ -163,7 +151,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     paymentProjectStage,
     {
       $unionWith: {
-        coll: "case_expenses",
+        coll: COLLECTIONS.CASE_EXPENSES,
         pipeline: [expenseProjectStage],
       },
     },
@@ -289,7 +277,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     [FINANCIAL_SORT_OPTIONS.NEWEST_CREATED]: { createdAt: -1 },
   };
 
-  const sortOption = sortMap[sort as FinancialSortOption] || { transactionDate: -1, _id: -1 };
+  const sortOption = sortMap[sort];
   const skip = (page - 1) * limit;
 
   // Facet pipeline for items, totalCount, and financial statistics
@@ -440,7 +428,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   };
 
   const items: UnifiedFinancialRecordDto[] = rawItems.map((record) => {
-    const receiptRef = record.receiptDoc && Array.isArray(record.receiptDoc) ? record.receiptDoc[0] : (record.receiptDoc as unknown as { originalFileName?: string; assetDoc?: { secureUrl?: string; originalFilename?: string } });
+    const receiptRef = record.receiptDoc;
     const user = record.userDoc && Array.isArray(record.userDoc) ? record.userDoc[0] : null;
 
     const pMethod = record.paymentMethod as PaymentMethod | null;

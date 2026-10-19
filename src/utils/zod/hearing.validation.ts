@@ -11,9 +11,9 @@ import {
 const isValidObjectId = (val: string) => /^[0-9a-fA-F]{24}$/.test(val);
 
 /**
- * Validation schema for creating a new hearing record.
+ * Base schema definition for hearing records.
  */
-export const createHearingSchema = z.object({
+const baseHearingSchema = z.object({
   caseId: z
     .string()
     .trim()
@@ -88,62 +88,111 @@ export const createHearingSchema = z.object({
 });
 
 /**
+ * Validation schema for creating a new hearing record.
+ */
+export const createHearingSchema = baseHearingSchema.refine(
+  (data) => {
+    if (data.nextDate && data.hearingDate) {
+      return new Date(data.nextDate) >= new Date(data.hearingDate);
+    }
+    return true;
+  },
+  {
+    message: "Next hearing date cannot be earlier than the current hearing date",
+    path: ["nextDate"],
+  }
+);
+
+/**
  * Validation schema for updating an existing hearing record.
  */
-export const updateHearingSchema = createHearingSchema.partial();
+export const updateHearingSchema = baseHearingSchema.partial().refine(
+  (data) => {
+    if (data.nextDate && data.hearingDate) {
+      return new Date(data.nextDate) >= new Date(data.hearingDate);
+    }
+    return true;
+  },
+  {
+    message: "Next hearing date cannot be earlier than the current hearing date",
+    path: ["nextDate"],
+  }
+);
 
 /**
  * Validation schema for hearing listing and statistics query parameters.
  */
-export const hearingQueryFilterSchema = z.object({
-  search: z.string().trim().optional(),
-  status: z.string().trim().optional(),
-  courtId: z
-    .string()
-    .trim()
-    .optional()
-    .refine((val) => !val || val === "ALL" || isValidObjectId(val), {
-      message: "Invalid Court ID format",
-    }),
-  caseId: z
-    .string()
-    .trim()
-    .optional()
-    .refine((val) => !val || isValidObjectId(val), {
-      message: "Invalid Case ID format",
-    }),
-  clientId: z
-    .string()
-    .trim()
-    .optional()
-    .refine((val) => !val || isValidObjectId(val), {
-      message: "Invalid Client ID format",
-    }),
-  hearingType: z.string().trim().optional(),
-  startDate: z
-    .string()
-    .optional()
-    .refine((val) => !val || !isNaN(Date.parse(val)), {
-      message: "Invalid startDate format",
-    }),
-  endDate: z
-    .string()
-    .optional()
-    .refine((val) => !val || !isNaN(Date.parse(val)), {
-      message: "Invalid endDate format",
-    }),
-  sort: z
-    .enum(Object.values(HEARING_SORT_OPTIONS) as [string, ...string[]])
-    .default(HEARING_SORT_OPTIONS.UPCOMING_FIRST),
-  page: z.coerce.number().int().min(1).default(1),
-  limit: z.coerce
-    .number()
-    .int()
-    .refine(
-      (val) => (HEARING_PAGE_LIMITS as readonly number[]).includes(val),
-      {
-        message: `Limit must be one of: ${HEARING_PAGE_LIMITS.join(", ")}`,
+export const hearingQueryFilterSchema = z
+  .object({
+    search: z.string().trim().optional(),
+    status: z
+      .string()
+      .trim()
+      .optional()
+      .refine(
+        (val) => !val || val === "ALL" || (HEARING_STATUS_LIST as readonly string[]).includes(val),
+        {
+          message: "Invalid hearing status",
+        }
+      ),
+    courtId: z
+      .string()
+      .trim()
+      .optional()
+      .refine((val) => !val || val === "ALL" || isValidObjectId(val), {
+        message: "Invalid Court ID format",
+      }),
+    caseId: z
+      .string()
+      .trim()
+      .optional()
+      .refine((val) => !val || isValidObjectId(val), {
+        message: "Invalid Case ID format",
+      }),
+    clientId: z
+      .string()
+      .trim()
+      .optional()
+      .refine((val) => !val || isValidObjectId(val), {
+        message: "Invalid Client ID format",
+      }),
+    hearingType: z.string().trim().max(150, "Hearing type cannot exceed 150 characters").optional(),
+    startDate: z
+      .string()
+      .optional()
+      .refine((val) => !val || !isNaN(Date.parse(val)), {
+        message: "Invalid startDate format",
+      }),
+    endDate: z
+      .string()
+      .optional()
+      .refine((val) => !val || !isNaN(Date.parse(val)), {
+        message: "Invalid endDate format",
+      }),
+    sort: z
+      .enum(Object.values(HEARING_SORT_OPTIONS) as [string, ...string[]])
+      .default(HEARING_SORT_OPTIONS.UPCOMING_FIRST),
+    page: z.coerce.number().int().min(1).default(1),
+    limit: z.coerce
+      .number()
+      .int()
+      .refine(
+        (val) => (HEARING_PAGE_LIMITS as readonly number[]).includes(val),
+        {
+          message: `Limit must be one of: ${HEARING_PAGE_LIMITS.join(", ")}`,
+        }
+      )
+      .default(HEARING_DEFAULT_PAGE_LIMIT),
+  })
+  .refine(
+    (data) => {
+      if (data.startDate && data.endDate) {
+        return new Date(data.startDate) <= new Date(data.endDate);
       }
-    )
-    .default(HEARING_DEFAULT_PAGE_LIMIT),
-});
+      return true;
+    },
+    {
+      message: "startDate cannot be after endDate",
+      path: ["startDate"],
+    }
+  );

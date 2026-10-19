@@ -3,7 +3,20 @@ import mongoose from "mongoose";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
+import {
+  recordAuditLog,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
 import { sanitizeSearchParam, buildSearchRegex } from "@/lib/helpers/search.helper";
+import {
+  formatCaseDocumentItem,
+  formatClientDocumentItem,
+  CASE_POPULATE_SELECT,
+  CLIENT_POPULATE_SELECT,
+  ASSET_REF_POPULATE_SELECT,
+  ASSET_POPULATE_SELECT,
+} from "@/lib/helpers/document.helper";
 import { Case } from "@/db/models/Case.model";
 import { Client } from "@/db/models/Client.model";
 import { CaseDocument } from "@/db/models/CaseDocument.model";
@@ -16,18 +29,11 @@ import {
   DOCUMENT_ENTITY_TYPES,
   DOCUMENT_SORT_OPTIONS,
   DOCUMENT_DEFAULT_PAGE_LIMIT,
-  DOCUMENT_PAGE_LIMITS,
   DocumentPageLimit,
   DocumentSortOption,
 } from "@/const/document.const";
-import {
-  CASE_DOCUMENT_TYPE_LABELS,
-  CaseDocumentType,
-} from "@/const/case-document.const";
-import {
-  CLIENT_DOCUMENT_TYPE_LABELS,
-  ClientDocumentType,
-} from "@/const/client-document.const";
+import { CaseDocumentType } from "@/const/case-document.const";
+import { ClientDocumentType } from "@/const/client-document.const";
 import {
   documentQueryFilterSchema,
   createUnifiedDocumentSchema,
@@ -40,137 +46,17 @@ import type {
 } from "@/types/document.types";
 import type { IAsset } from "@/types/db/asset.type";
 import type { IAssetReferenceDocument } from "@/types/db/asset-reference.type";
-import ConnectDB from "@/db";
-
-/**
- * Format a CaseDocument record into UnifiedDocumentItemDto.
- */
-function formatCaseDocumentItem(
-  doc: Record<string, unknown>,
-  assetRef?: (IAssetReferenceDocument & { assetId?: IAsset }) | null,
-  caseInfo?: Record<string, unknown> | null
-): UnifiedDocumentItemDto {
-  const asset = assetRef?.assetId;
-  const docType = doc.documentType as CaseDocumentType;
-
-  return {
-    id: (doc._id as mongoose.Types.ObjectId).toString(),
-    entityType: DOCUMENT_ENTITY_TYPES.CASE,
-    assetReferenceId: assetRef?._id
-      ? assetRef._id.toString()
-      : (doc.assetReferenceId as mongoose.Types.ObjectId).toString(),
-    assetId: asset?._id ? asset._id.toString() : "",
-    documentType: docType,
-    documentTypeLabel: CASE_DOCUMENT_TYPE_LABELS[docType] || String(doc.documentType),
-    title: doc.title as string,
-    documentDate: doc.documentDate ? new Date(doc.documentDate as Date).toISOString() : null,
-    createdAt: doc.createdAt ? new Date(doc.createdAt as Date).toISOString() : "",
-    updatedAt: doc.updatedAt ? new Date(doc.updatedAt as Date).toISOString() : "",
-    originalFileName: assetRef?.originalFileName || asset?.originalFilename || (doc.title as string),
-    fileUrl: asset?.secureUrl || "",
-    publicId: asset?.publicId || "",
-    mimeType: asset?.mimeType || "application/octet-stream",
-    sizeBytes: asset?.bytes || 0,
-    format: asset?.format || null,
-    width: asset?.width || null,
-    height: asset?.height || null,
-    pages: asset?.pages || null,
-    // Case-specific fields
-    caseId: caseInfo?._id
-      ? (caseInfo._id as mongoose.Types.ObjectId).toString()
-      : doc.caseId
-      ? (doc.caseId as mongoose.Types.ObjectId).toString()
-      : null,
-    caseDetails: caseInfo
-      ? {
-          id: (caseInfo._id as mongoose.Types.ObjectId).toString(),
-          title: (caseInfo.title as string) || "Untitled Case",
-          caseNumber: (caseInfo.caseNumber as string) || "",
-          internalReference: (caseInfo.internalReference as string) || "",
-          caseStatus: (caseInfo.caseStatus as string) || undefined,
-        }
-      : null,
-    description: (doc.description as string) || null,
-    exhibitNumber: (doc.exhibitNumber as string) || null,
-    isConfidential: Boolean(doc.isConfidential),
-  };
-}
-
-/**
- * Format a ClientDocument record into UnifiedDocumentItemDto.
- */
-function formatClientDocumentItem(
-  doc: Record<string, unknown>,
-  assetRef?: (IAssetReferenceDocument & { assetId?: IAsset }) | null,
-  clientInfo?: Record<string, unknown> | null
-): UnifiedDocumentItemDto {
-  const asset = assetRef?.assetId;
-  const docType = doc.documentType as ClientDocumentType;
-
-  return {
-    id: (doc._id as mongoose.Types.ObjectId).toString(),
-    entityType: DOCUMENT_ENTITY_TYPES.CLIENT,
-    assetReferenceId: assetRef?._id
-      ? assetRef._id.toString()
-      : (doc.assetReferenceId as mongoose.Types.ObjectId).toString(),
-    assetId: asset?._id ? asset._id.toString() : "",
-    documentType: docType,
-    documentTypeLabel: CLIENT_DOCUMENT_TYPE_LABELS[docType] || String(doc.documentType),
-    title: doc.title as string,
-    documentDate: doc.documentDate ? new Date(doc.documentDate as Date).toISOString() : null,
-    createdAt: doc.createdAt ? new Date(doc.createdAt as Date).toISOString() : "",
-    updatedAt: doc.updatedAt ? new Date(doc.updatedAt as Date).toISOString() : "",
-    originalFileName: assetRef?.originalFileName || asset?.originalFilename || (doc.title as string),
-    fileUrl: asset?.secureUrl || "",
-    publicId: asset?.publicId || "",
-    mimeType: asset?.mimeType || "application/octet-stream",
-    sizeBytes: asset?.bytes || 0,
-    format: asset?.format || null,
-    width: asset?.width || null,
-    height: asset?.height || null,
-    pages: asset?.pages || null,
-    // Client-specific fields
-    clientId: clientInfo?._id
-      ? (clientInfo._id as mongoose.Types.ObjectId).toString()
-      : doc.clientId
-      ? (doc.clientId as mongoose.Types.ObjectId).toString()
-      : null,
-    clientDetails: clientInfo
-      ? {
-          id: (clientInfo._id as mongoose.Types.ObjectId).toString(),
-          name: (clientInfo.name as string) || "Unnamed Client",
-          clientNumber: (clientInfo.clientNumber as string) || "",
-          organizationName: (clientInfo.organizationName as string) || null,
-          phone: (clientInfo.phone as string) || null,
-        }
-      : null,
-    expiryDate: doc.expiryDate ? new Date(doc.expiryDate as Date).toISOString() : null,
-    notes: (doc.notes as string) || null,
-  };
-}
 
 /**
  * GET /api/v1/documents
  *
  * Query unified documents list supporting scope (all | case | client), search,
- * filtering, sorting, and server-side pagination.
+ * filtering, sorting, and server-side pagination with optimized projections and indexes.
  */
 export const GET = withErrorHandler(async (req: NextRequest) => {
   await getUserId();
 
-  await ConnectDB();
-
   const { searchParams } = new URL(req.url);
-
-  const rawLimit = searchParams.get("limit");
-  if (rawLimit !== null) {
-    const parsedLimit = parseInt(rawLimit, 10);
-    if (!DOCUMENT_PAGE_LIMITS.includes(parsedLimit as DocumentPageLimit)) {
-      throw ApiError.badRequest(
-        `Invalid page limit "${rawLimit}". Allowed page limits are: ${DOCUMENT_PAGE_LIMITS.join(", ")}`
-      );
-    }
-  }
 
   const rawParams = {
     scope: searchParams.get("scope") || DOCUMENT_SCOPES.ALL,
@@ -183,7 +69,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     endDate: searchParams.get("endDate") || undefined,
     sort: searchParams.get("sort") || DOCUMENT_SORT_OPTIONS.NEWEST,
     page: searchParams.get("page") || 1,
-    limit: rawLimit ? parseInt(rawLimit, 10) : DOCUMENT_DEFAULT_PAGE_LIMIT,
+    limit: searchParams.get("limit") || DOCUMENT_DEFAULT_PAGE_LIMIT,
   };
 
   const parsed = documentQueryFilterSchema.safeParse(rawParams);
@@ -217,12 +103,16 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   const sortOption = sortMap[sort as DocumentSortOption] || { createdAt: -1 };
   const skip = (page - 1) * limit;
 
+  // Determine query applicability based on scope and entity-specific parameters
+  const canSearchCase = scope !== DOCUMENT_SCOPES.CLIENT && !clientId;
+  const canSearchClient = scope !== DOCUMENT_SCOPES.CASE && !caseId && isConfidential === undefined;
+
   // Build Case filter
   const caseFilter: Record<string, unknown> = { deletedAt: null };
   // Build Client filter
   const clientFilter: Record<string, unknown> = { deletedAt: null };
 
-  if (documentType && documentType !== "ALL") {
+  if (documentType) {
     caseFilter.documentType = documentType;
     clientFilter.documentType = documentType;
   }
@@ -251,61 +141,68 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     clientFilter.documentDate = dateQuery;
   }
 
-  // Handle Search across document attributes and relational entities
+  // Handle Search across document attributes and relational entities (bounded & parallelized)
   if (search) {
     const searchRegex = buildSearchRegex(search);
     if (searchRegex) {
-      // Find matching cases
-      const matchingCases = await Case.find({
-        $or: [
-          { title: searchRegex },
-          { caseNumber: searchRegex },
-          { internalReference: searchRegex },
-        ],
-        deletedAt: null,
-      })
-        .select("_id")
-        .lean();
-      const matchingCaseIds = matchingCases.map((c) => c._id);
+      const [matchingCases, matchingClients] = await Promise.all([
+        canSearchCase
+          ? Case.find({
+              $or: [
+                { title: searchRegex },
+                { caseNumber: searchRegex },
+                { internalReference: searchRegex },
+              ],
+              deletedAt: null,
+            })
+              .select("_id")
+              .limit(100)
+              .lean()
+          : Promise.resolve([]),
+        canSearchClient
+          ? Client.find({
+              $or: [
+                { name: searchRegex },
+                { clientNumber: searchRegex },
+                { organizationName: searchRegex },
+                { phone: searchRegex },
+              ],
+              deletedAt: null,
+            })
+              .select("_id")
+              .limit(100)
+              .lean()
+          : Promise.resolve([]),
+      ]);
 
-      // Find matching clients
-      const matchingClients = await Client.find({
-        $or: [
-          { name: searchRegex },
-          { clientNumber: searchRegex },
-          { organizationName: searchRegex },
-          { phone: searchRegex },
-        ],
-        deletedAt: null,
-      })
-        .select("_id")
-        .lean();
+      const matchingCaseIds = matchingCases.map((c) => c._id);
       const matchingClientIds = matchingClients.map((c) => c._id);
 
-      caseFilter.$or = [
-        { title: searchRegex },
-        { description: searchRegex },
-        { exhibitNumber: searchRegex },
-        ...(matchingCaseIds.length > 0 ? [{ caseId: { $in: matchingCaseIds } }] : []),
-      ];
+      if (canSearchCase) {
+        caseFilter.$or = [
+          { title: searchRegex },
+          { description: searchRegex },
+          { exhibitNumber: searchRegex },
+          ...(matchingCaseIds.length > 0 ? [{ caseId: { $in: matchingCaseIds } }] : []),
+        ];
+      }
 
-      clientFilter.$or = [
-        { title: searchRegex },
-        { notes: searchRegex },
-        ...(matchingClientIds.length > 0 ? [{ clientId: { $in: matchingClientIds } }] : []),
-      ];
+      if (canSearchClient) {
+        clientFilter.$or = [
+          { title: searchRegex },
+          { notes: searchRegex },
+          ...(matchingClientIds.length > 0 ? [{ clientId: { $in: matchingClientIds } }] : []),
+        ];
+      }
     }
   }
-
-  const searchOnlyCase = Boolean(caseId || isConfidential !== undefined);
-  const searchOnlyClient = Boolean(clientId);
 
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-  // Compute stats across both collections matching active filters
+  // Compute stats in parallel only for relevant entity scopes
   const [caseStatsAgg, clientStatsAgg] = await Promise.all([
-    !searchOnlyClient
+    canSearchCase
       ? CaseDocument.aggregate<{
           total: number;
           recent: number;
@@ -330,7 +227,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
           },
         ])
       : Promise.resolve([]),
-    !searchOnlyCase
+    canSearchClient
       ? ClientDocument.aggregate<{
           total: number;
           recent: number;
@@ -367,18 +264,19 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   };
 
   // Scope: CASE ONLY
-  if (scope === DOCUMENT_SCOPES.CASE) {
+  if (scope === DOCUMENT_SCOPES.CASE || (canSearchCase && !canSearchClient)) {
     const total = activeCaseDocs;
     const documents = await CaseDocument.find(caseFilter)
       .sort(sortOption)
       .skip(skip)
       .limit(limit)
-      .populate<{ caseId: Record<string, unknown> }>("caseId", "title caseNumber internalReference caseStatus")
+      .populate<{ caseId: Record<string, unknown> }>("caseId", CASE_POPULATE_SELECT)
       .populate<{
         assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
       }>({
         path: "assetReferenceId",
-        populate: { path: "assetId" },
+        select: ASSET_REF_POPULATE_SELECT,
+        populate: { path: "assetId", select: ASSET_POPULATE_SELECT },
       })
       .lean();
 
@@ -404,18 +302,19 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   }
 
   // Scope: CLIENT ONLY
-  if (scope === DOCUMENT_SCOPES.CLIENT) {
+  if (scope === DOCUMENT_SCOPES.CLIENT || (canSearchClient && !canSearchCase)) {
     const total = activeClientDocs;
     const documents = await ClientDocument.find(clientFilter)
       .sort(sortOption)
       .skip(skip)
       .limit(limit)
-      .populate<{ clientId: Record<string, unknown> }>("clientId", "name clientNumber organizationName phone")
+      .populate<{ clientId: Record<string, unknown> }>("clientId", CLIENT_POPULATE_SELECT)
       .populate<{
         assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
       }>({
         path: "assetReferenceId",
-        populate: { path: "assetId" },
+        select: ASSET_REF_POPULATE_SELECT,
+        populate: { path: "assetId", select: ASSET_POPULATE_SELECT },
       })
       .lean();
 
@@ -440,39 +339,57 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     return NextResponse.json(response);
   }
 
-  // Scope: ALL (Unified View across both collections using $unionWith)
+  // Scope: ALL (Unified View across both collections using $unionWith with projected fields)
   const total = activeCaseDocs + activeClientDocs;
 
   // Build aggregation pipeline for unified sorted slice
-  const pipeline: mongoose.PipelineStage[] = [];
+  const pipeline: mongoose.PipelineStage[] = [
+    { $match: caseFilter },
+    {
+      $project: {
+        _id: 1,
+        caseId: 1,
+        assetReferenceId: 1,
+        documentType: 1,
+        title: 1,
+        documentDate: 1,
+        description: 1,
+        exhibitNumber: 1,
+        isConfidential: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        entityType: { $literal: DOCUMENT_ENTITY_TYPES.CASE },
+      },
+    },
+    {
+      $unionWith: {
+        coll: COLLECTIONS.CLIENT_DOCUMENTS,
+        pipeline: [
+          { $match: clientFilter },
+          {
+            $project: {
+              _id: 1,
+              clientId: 1,
+              assetReferenceId: 1,
+              documentType: 1,
+              title: 1,
+              documentDate: 1,
+              expiryDate: 1,
+              notes: 1,
+              createdAt: 1,
+              updatedAt: 1,
+              entityType: { $literal: DOCUMENT_ENTITY_TYPES.CLIENT },
+            },
+          },
+        ],
+      },
+    },
+    { $sort: sortOption },
+    { $skip: skip },
+    { $limit: limit },
+  ];
 
-  if (searchOnlyClient) {
-    pipeline.push({ $match: clientFilter });
-    pipeline.push({ $addFields: { entityType: DOCUMENT_ENTITY_TYPES.CLIENT } });
-  } else {
-    pipeline.push({ $match: caseFilter });
-    pipeline.push({ $addFields: { entityType: DOCUMENT_ENTITY_TYPES.CASE } });
-
-    if (!searchOnlyCase) {
-      pipeline.push({
-        $unionWith: {
-          coll: COLLECTIONS.CLIENT_DOCUMENTS,
-          pipeline: [
-            { $match: clientFilter },
-            { $addFields: { entityType: DOCUMENT_ENTITY_TYPES.CLIENT } },
-          ],
-        },
-      });
-    }
-  }
-
-  pipeline.push({ $sort: sortOption });
-  pipeline.push({ $skip: skip });
-  pipeline.push({ $limit: limit });
-
-  const rawDocs = searchOnlyClient
-    ? await ClientDocument.aggregate(pipeline)
-    : await CaseDocument.aggregate(pipeline);
+  const rawDocs = await CaseDocument.aggregate(pipeline).allowDiskUse(true);
 
   // Extract relational IDs for efficient batch population
   const caseIdsToFetch: mongoose.Types.ObjectId[] = [];
@@ -491,21 +408,25 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     }
   }
 
-  // Fetch relations in parallel
+  // Fetch relations in parallel with explicit projections
   const [casesList, clientsList, assetRefsList] = await Promise.all([
     caseIdsToFetch.length > 0
       ? Case.find({ _id: { $in: caseIdsToFetch } })
-          .select("_id title caseNumber internalReference caseStatus")
+          .select(CASE_POPULATE_SELECT)
           .lean()
       : [],
     clientIdsToFetch.length > 0
       ? Client.find({ _id: { $in: clientIdsToFetch } })
-          .select("_id name clientNumber organizationName phone")
+          .select(CLIENT_POPULATE_SELECT)
           .lean()
       : [],
     assetRefIdsToFetch.length > 0
       ? AssetReference.find({ _id: { $in: assetRefIdsToFetch } })
-          .populate<{ assetId: IAsset }>("assetId")
+          .select(ASSET_REF_POPULATE_SELECT)
+          .populate<{ assetId: IAsset }>({
+            path: "assetId",
+            select: ASSET_POPULATE_SELECT,
+          })
           .lean()
       : [],
   ]);
@@ -563,15 +484,17 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
  *
  * Unified document creation endpoint.
  * Accepts either a Case Document or a Client Document payload.
+ * Fully transaction-safe with audit logging and deduplication checks.
  */
 export const POST = withErrorHandler(async (req: NextRequest) => {
-  await getUserId();
+  const userId = await getUserId();
 
-  await ConnectDB();
+  const body = await req.json().catch(() => null);
+  if (!body) {
+    throw ApiError.badRequest("Invalid or missing JSON request body");
+  }
 
-  const body = await req.json();
   const validated = createUnifiedDocumentSchema.parse(body);
-
   const assetRefId = new mongoose.Types.ObjectId(validated.assetReferenceId);
 
   // Verify asset reference exists and is not soft-deleted
@@ -583,6 +506,22 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   if (!existingRef) {
     throw ApiError.badRequest(
       "Referenced media file does not exist or has already been deleted."
+    );
+  }
+
+  // Prevent attaching the same asset reference to multiple active documents
+  const [existingCaseDoc, existingClientDoc] = await Promise.all([
+    CaseDocument.findOne({ assetReferenceId: assetRefId, deletedAt: null })
+      .select("_id")
+      .lean(),
+    ClientDocument.findOne({ assetReferenceId: assetRefId, deletedAt: null })
+      .select("_id")
+      .lean(),
+  ]);
+
+  if (existingCaseDoc || existingClientDoc) {
+    throw ApiError.conflict(
+      "The referenced media file is already attached to an active legal or client document."
     );
   }
 
@@ -612,25 +551,42 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
       });
       await doc.save({ session: dbSession });
 
+      // 3. Record compliance audit log
+      await recordAuditLog({
+        req,
+        userId,
+        action: AUDIT_ACTIONS.CREATE,
+        entityType: AUDIT_ENTITY_TYPES.CASE_DOCUMENT,
+        entityId: doc._id,
+        newValues: doc.toObject(),
+        description: `Created case document "${doc.title}" for case "${caseDoc.title}"`,
+        session: dbSession,
+      });
+
       return doc;
     });
 
     const populated = await CaseDocument.findById(createdDoc._id)
-      .populate<{ caseId: Record<string, unknown> }>("caseId", "title caseNumber internalReference caseStatus")
+      .populate<{ caseId: Record<string, unknown> }>("caseId", CASE_POPULATE_SELECT)
       .populate<{
         assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
       }>({
         path: "assetReferenceId",
-        populate: { path: "assetId" },
+        select: ASSET_REF_POPULATE_SELECT,
+        populate: { path: "assetId", select: ASSET_POPULATE_SELECT },
       })
       .lean();
 
+    if (!populated) {
+      throw ApiError.internal("Failed to retrieve created case document record.");
+    }
+
     const itemDto = formatCaseDocumentItem(
-      populated!,
-      populated!.assetReferenceId as unknown as (IAssetReferenceDocument & {
+      populated,
+      populated.assetReferenceId as unknown as (IAssetReferenceDocument & {
         assetId: IAsset;
       }),
-      populated!.caseId as unknown as Record<string, unknown>
+      populated.caseId as unknown as Record<string, unknown>
     );
 
     const response: DocumentActionResponse = {
@@ -666,25 +622,42 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
       });
       await doc.save({ session: dbSession });
 
+      // 3. Record compliance audit log
+      await recordAuditLog({
+        req,
+        userId,
+        action: AUDIT_ACTIONS.CREATE,
+        entityType: AUDIT_ENTITY_TYPES.CLIENT_DOCUMENT,
+        entityId: doc._id,
+        newValues: doc.toObject(),
+        description: `Created client document "${doc.title}" for client "${client.name}"`,
+        session: dbSession,
+      });
+
       return doc;
     });
 
     const populated = await ClientDocument.findById(createdDoc._id)
-      .populate<{ clientId: Record<string, unknown> }>("clientId", "name clientNumber organizationName phone")
+      .populate<{ clientId: Record<string, unknown> }>("clientId", CLIENT_POPULATE_SELECT)
       .populate<{
         assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
       }>({
         path: "assetReferenceId",
-        populate: { path: "assetId" },
+        select: ASSET_REF_POPULATE_SELECT,
+        populate: { path: "assetId", select: ASSET_POPULATE_SELECT },
       })
       .lean();
 
+    if (!populated) {
+      throw ApiError.internal("Failed to retrieve created client document record.");
+    }
+
     const itemDto = formatClientDocumentItem(
-      populated!,
-      populated!.assetReferenceId as unknown as (IAssetReferenceDocument & {
+      populated,
+      populated.assetReferenceId as unknown as (IAssetReferenceDocument & {
         assetId: IAsset;
       }),
-      populated!.clientId as unknown as Record<string, unknown>
+      populated.clientId as unknown as Record<string, unknown>
     );
 
     const response: DocumentActionResponse = {

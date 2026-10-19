@@ -8,6 +8,12 @@ import { Case } from "@/db/models/Case.model";
 import { CaseDocument } from "@/db/models/CaseDocument.model";
 import { AssetReference } from "@/db/models/AssetReference.model";
 import { ASSET_OWNER_TYPES } from "@/const/asset-reference.const";
+import {
+  recordAuditLog,
+  calculateAuditDiff,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
 import { updateCaseDocumentSchema } from "@/utils/zod/case-document.validation";
 import { formatCaseDocumentItem } from "../route";
 import type {
@@ -89,7 +95,7 @@ export const GET = withErrorHandler(
  */
 export const PATCH = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
 
     const { id, docId } = await params;
     if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(docId)) {
@@ -124,6 +130,8 @@ export const PATCH = withErrorHandler(
         throw ApiError.notFound("Document not found for this case or has already been archived.");
       }
 
+      const beforeState = doc.toObject();
+
       // Handle file replacement if a new assetReferenceId is supplied
       if (validated.assetReferenceId) {
         const newAssetRefId = new mongoose.Types.ObjectId(validated.assetReferenceId);
@@ -140,8 +148,11 @@ export const PATCH = withErrorHandler(
           );
         }
 
-        // Soft-delete the previous AssetReference to avoid orphaned active references
-        if (doc.assetReferenceId) {
+        // Soft-delete the previous AssetReference only if replacing with a different file
+        if (
+          doc.assetReferenceId &&
+          doc.assetReferenceId.toString() !== newAssetRefId.toString()
+        ) {
           await AssetReference.findByIdAndUpdate(
             doc.assetReferenceId,
             { deletedAt: new Date() },
@@ -174,6 +185,20 @@ export const PATCH = withErrorHandler(
       }
 
       await doc.save({ session: dbSession });
+
+      // Record audit log for case document update
+      const diff = calculateAuditDiff(beforeState, doc.toObject());
+      await recordAuditLog({
+        req,
+        userId,
+        action: AUDIT_ACTIONS.UPDATE,
+        entityType: AUDIT_ENTITY_TYPES.CASE_DOCUMENT,
+        entityId: doc._id,
+        oldValues: diff.oldValues,
+        newValues: diff.newValues,
+        description: `Updated case document "${doc.title}"`,
+        session: dbSession,
+      });
     });
 
     const updatedDoc = await CaseDocument.findById(docObjectId)
@@ -218,7 +243,7 @@ export const PUT = PATCH;
  */
 export const DELETE = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
 
     const { id, docId } = await params;
     if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(docId)) {
@@ -253,6 +278,19 @@ export const DELETE = withErrorHandler(
       // 2. Soft-delete the CaseDocument record
       doc.deletedAt = new Date();
       await doc.save({ session: dbSession });
+
+      // Record audit log for case document soft deletion
+      await recordAuditLog({
+        req,
+        userId,
+        action: AUDIT_ACTIONS.SOFT_DELETE,
+        entityType: AUDIT_ENTITY_TYPES.CASE_DOCUMENT,
+        entityId: doc._id,
+        oldValues: { deletedAt: null },
+        newValues: { deletedAt: doc.deletedAt },
+        description: `Archived case document "${doc.title}"`,
+        session: dbSession,
+      });
     });
 
     const response: CaseDocumentDeleteResponse = {

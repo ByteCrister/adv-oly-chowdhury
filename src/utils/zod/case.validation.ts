@@ -101,6 +101,7 @@ export const createCaseSchema = z.object({
     .optional(),
   opposingParties: z
     .array(z.string().trim().min(1, "Party name cannot be empty").max(200, "Party name cannot exceed 200 characters"))
+    .max(50, "Cannot specify more than 50 opposing parties")
     .default([]),
 });
 
@@ -179,6 +180,7 @@ export const updateCaseSchema = z.object({
     .optional(),
   opposingParties: z
     .array(z.string().trim().min(1, "Party name cannot be empty").max(200, "Party name cannot exceed 200 characters"))
+    .max(50, "Cannot specify more than 50 opposing parties")
     .optional(),
   closedAt: z
     .string()
@@ -209,6 +211,7 @@ export const caseQueryFilterSchema = z.object({
     .string()
     .trim()
     .optional()
+    .transform((val) => (val === "ALL" || !val ? undefined : val))
     .refine((val) => !val || !isNaN(parseInt(val, 10)), {
       message: "Invalid filing year",
     }),

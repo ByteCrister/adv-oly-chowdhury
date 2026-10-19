@@ -5,6 +5,12 @@ import { AssetReference } from "@/db/models/AssetReference.model";
 import { IAsset } from "@/types/db/asset.type";
 import { MediaItemDto } from "@/types/media.types";
 import { AssetPurpose } from "@/const/asset-reference.const";
+import { getAuthSession } from "@/lib/auth/auth.helper";
+import {
+  recordAuditLog,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -80,9 +86,23 @@ export const DELETE = withErrorHandler(
       throw ApiError.notFound("Media reference not found");
     }
 
+    const authSession = await getAuthSession();
+    const userId = authSession?.user?.id || req.headers.get("x-user-id");
+
     // Soft delete the logical reference
     ref.deletedAt = new Date();
     await ref.save();
+
+    await recordAuditLog({
+      req,
+      userId,
+      action: AUDIT_ACTIONS.SOFT_DELETE,
+      entityType: AUDIT_ENTITY_TYPES.ASSET_REFERENCE,
+      entityId: ref._id,
+      oldValues: { deletedAt: null },
+      newValues: { deletedAt: ref.deletedAt },
+      description: `Soft deleted media reference "${ref.originalFileName || ref._id}"`,
+    });
 
     return NextResponse.json({
       success: true,

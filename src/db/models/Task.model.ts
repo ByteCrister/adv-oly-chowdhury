@@ -25,18 +25,15 @@ const taskSchema = new Schema<ITaskDocument>(
       type: Schema.Types.ObjectId,
       ref: MODELS.CASE,
       default: null,
-      index: true,
     },
     clientId: {
       type: Schema.Types.ObjectId,
       ref: MODELS.CLIENT,
       default: null,
-      index: true,
     },
     dueAt: {
       type: Date,
       default: null,
-      index: true,
     },
     priority: {
       type: String,
@@ -45,7 +42,6 @@ const taskSchema = new Schema<ITaskDocument>(
         message: "{VALUE} is not a valid task priority",
       },
       default: TASK_PRIORITIES.NORMAL,
-      index: true,
     },
     status: {
       type: String,
@@ -54,7 +50,6 @@ const taskSchema = new Schema<ITaskDocument>(
         message: "{VALUE} is not a valid task status",
       },
       default: TASK_STATUSES.TODO,
-      index: true,
     },
     completedAt: {
       type: Date,
@@ -63,7 +58,6 @@ const taskSchema = new Schema<ITaskDocument>(
     deletedAt: {
       type: Date,
       default: null,
-      index: true,
     },
   },
   {
@@ -72,11 +66,13 @@ const taskSchema = new Schema<ITaskDocument>(
   }
 );
 
-// High-frequency query & soft-delete indexes
+// High-frequency query & soft-delete compound indexes
+taskSchema.index({ deletedAt: 1, createdAt: -1 });
+taskSchema.index({ deletedAt: 1, dueAt: 1, createdAt: -1 });
 taskSchema.index({ deletedAt: 1, status: 1, dueAt: 1 });
 taskSchema.index({ deletedAt: 1, caseId: 1, status: 1 });
 taskSchema.index({ deletedAt: 1, clientId: 1, status: 1 });
-taskSchema.index({ deletedAt: 1, priority: 1 });
+taskSchema.index({ deletedAt: 1, priority: 1, createdAt: -1 });
 taskSchema.index({ title: "text", description: "text" });
 
 export const Task: Model<ITaskDocument> =

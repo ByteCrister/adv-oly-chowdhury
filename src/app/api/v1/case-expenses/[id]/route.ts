@@ -8,124 +8,43 @@ import { Case } from "@/db/models/Case.model";
 import { AssetReference } from "@/db/models/AssetReference.model";
 import { ASSET_OWNER_TYPES } from "@/const/asset-reference.const";
 import {
-  CASE_EXPENSE_CATEGORY_LABELS,
-  CaseExpenseCategory,
-} from "@/const/case-expense.const";
-import { updateCaseExpenseSchema } from "@/utils/zod/case-expense.validation";
+  recordAuditLog,
+  calculateAuditDiff,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
+import {
+  objectIdRegex,
+  updateCaseExpenseSchema,
+} from "@/utils/zod/case-expense.validation";
 import type {
-  CaseExpenseItemDto,
   CaseExpenseActionResponse,
   CaseExpenseDeleteResponse,
+  CaseExpenseDocInput,
 } from "@/types/case-expense.types";
-import type { IAsset } from "@/types/db/asset.type";
-import type { IAssetReferenceDocument } from "@/types/db/asset-reference.type";
-import ConnectDB from "@/db";
+import { formatCaseExpenseItem } from "../route";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
 /**
- * Format a CaseExpense record into CaseExpenseItemDto.
- */
-function formatCaseExpenseItem(
-  expense: Record<string, unknown>,
-  caseDoc?: {
-    _id?: mongoose.Types.ObjectId;
-    internalReference?: string;
-    caseNumber?: string;
-    title?: string;
-    clientId?: mongoose.Types.ObjectId | { _id?: mongoose.Types.ObjectId; name?: string; clientNumber?: string };
-  } | null,
-  clientDoc?: { name?: string; clientNumber?: string } | null,
-  receiptRef?: (IAssetReferenceDocument & { assetId?: IAsset }) | null,
-  recordedByUser?: { _id: mongoose.Types.ObjectId; name: string; email: string } | null
-): CaseExpenseItemDto {
-  const cat = expense.category as CaseExpenseCategory;
-  const caseRef = caseDoc
-    ? caseDoc.caseNumber || caseDoc.internalReference || null
-    : null;
-
-  let cId: string | null = null;
-  let cName: string | null = null;
-  let cNumber: string | null = null;
-
-  if (clientDoc) {
-    cName = clientDoc.name || null;
-    cNumber = clientDoc.clientNumber || null;
-  }
-
-  if (caseDoc?.clientId) {
-    if (typeof caseDoc.clientId === "object" && "_id" in caseDoc.clientId) {
-      const popClient = caseDoc.clientId as { _id?: mongoose.Types.ObjectId; name?: string; clientNumber?: string };
-      cId = popClient._id ? popClient._id.toString() : null;
-      if (!cName && popClient.name) cName = popClient.name;
-      if (!cNumber && popClient.clientNumber) cNumber = popClient.clientNumber;
-    } else {
-      cId = (caseDoc.clientId as mongoose.Types.ObjectId).toString();
-    }
-  }
-
-  const asset = receiptRef?.assetId;
-
-  return {
-    id: (expense._id as mongoose.Types.ObjectId).toString(),
-    caseId: (expense.caseId as mongoose.Types.ObjectId).toString(),
-    caseReference: caseRef,
-    caseTitle: caseDoc?.title || null,
-    clientId: cId,
-    clientName: cName,
-    clientNumber: cNumber,
-    expenseDate: new Date(expense.expenseDate as Date).toISOString(),
-    category: cat,
-    categoryLabel: CASE_EXPENSE_CATEGORY_LABELS[cat] || String(expense.category),
-    description: (expense.description as string) || null,
-    amount: expense.amount as number,
-    currency: (expense.currency as string) || "BDT",
-    receiptAssetReferenceId: expense.receiptAssetReferenceId
-      ? (expense.receiptAssetReferenceId as mongoose.Types.ObjectId).toString()
-      : null,
-    receiptUrl: asset?.secureUrl || null,
-    receiptFileName: receiptRef?.originalFileName || asset?.originalFilename || null,
-    recordedBy: recordedByUser
-      ? {
-          id: recordedByUser._id.toString(),
-          name: recordedByUser.name,
-          email: recordedByUser.email,
-        }
-      : null,
-    createdAt: expense.createdAt ? new Date(expense.createdAt as Date).toISOString() : "",
-    updatedAt: expense.updatedAt ? new Date(expense.updatedAt as Date).toISOString() : "",
-  };
-}
-
-/**
  * GET /api/v1/case-expenses/[id]
  *
- * Retrieve details for a single case expense.
+ * Retrieve details for a single case expense with projected relationship details.
  */
 export const GET = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
     await getUserId();
 
     const { id } = await params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!objectIdRegex.test(id)) {
       throw ApiError.badRequest("Invalid case expense ID format");
     }
 
-    await ConnectDB();
-
     const expenseObjectId = new mongoose.Types.ObjectId(id);
     const expense = await CaseExpense.findById(expenseObjectId)
-      .populate<{
-        caseId: {
-          _id: mongoose.Types.ObjectId;
-          internalReference: string;
-          caseNumber: string;
-          title: string;
-          clientId: { _id: mongoose.Types.ObjectId; name: string; clientNumber: string };
-        };
-      }>({
+      .populate({
         path: "caseId",
         select: "internalReference caseNumber title clientId",
         populate: {
@@ -133,54 +52,38 @@ export const GET = withErrorHandler(
           select: "name clientNumber",
         },
       })
-      .populate<{
-        receiptAssetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
-      }>({
+      .populate({
         path: "receiptAssetReferenceId",
-        populate: { path: "assetId" },
+        select: "originalFileName assetId",
+        populate: {
+          path: "assetId",
+          select: "secureUrl originalFilename",
+        },
       })
-      .populate<{
-        recordedBy: { _id: mongoose.Types.ObjectId; name: string; email: string };
-      }>("recordedBy", "name email")
-      .lean();
+      .populate("recordedBy", "name email")
+      .lean<CaseExpenseDocInput>();
 
     if (!expense) {
       throw ApiError.notFound("Case expense record not found");
     }
 
-    const itemDto = formatCaseExpenseItem(
-      expense,
-      expense.caseId as unknown as {
-        _id?: mongoose.Types.ObjectId;
-        internalReference?: string;
-        caseNumber?: string;
-        title?: string;
-        clientId?: { _id?: mongoose.Types.ObjectId; name?: string; clientNumber?: string };
-      },
-      null,
-      expense.receiptAssetReferenceId as unknown as (IAssetReferenceDocument & { assetId?: IAsset }),
-      expense.recordedBy as unknown as { _id: mongoose.Types.ObjectId; name: string; email: string }
-    );
-
-    return NextResponse.json({ success: true, data: itemDto });
+    return NextResponse.json({ success: true, data: formatCaseExpenseItem(expense) });
   }
 );
 
 /**
  * PUT /api/v1/case-expenses/[id]
  *
- * Update an existing case expense.
+ * Update an existing case expense with receipt reference synchronization and audit tracking.
  */
 export const PUT = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
 
     const { id } = await params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!objectIdRegex.test(id)) {
       throw ApiError.badRequest("Invalid case expense ID format");
     }
-
-    await ConnectDB();
 
     const expenseObjectId = new mongoose.Types.ObjectId(id);
     const existingExpense = await CaseExpense.findById(expenseObjectId);
@@ -188,38 +91,46 @@ export const PUT = withErrorHandler(
       throw ApiError.notFound("Case expense record not found");
     }
 
+    const beforeState = existingExpense.toObject();
+
     const body = await req.json();
     const validated = updateCaseExpenseSchema.parse(body);
 
-    let caseObjectId = existingExpense.caseId;
+    let targetCaseObjectId = existingExpense.caseId;
     if (validated.caseId) {
-      caseObjectId = new mongoose.Types.ObjectId(validated.caseId);
-      const caseExists = await Case.exists({ _id: caseObjectId, deletedAt: null });
+      targetCaseObjectId = new mongoose.Types.ObjectId(validated.caseId);
+      const caseExists = await Case.exists({ _id: targetCaseObjectId, deletedAt: null });
       if (!caseExists) {
         throw ApiError.badRequest("The specified case does not exist or has been deleted.");
       }
     }
 
-    let receiptObjectId = existingExpense.receiptAssetReferenceId || null;
+    let targetReceiptObjectId = existingExpense.receiptAssetReferenceId || null;
     if (validated.receiptAssetReferenceId !== undefined) {
       if (validated.receiptAssetReferenceId) {
-        receiptObjectId = new mongoose.Types.ObjectId(validated.receiptAssetReferenceId);
+        targetReceiptObjectId = new mongoose.Types.ObjectId(validated.receiptAssetReferenceId);
         const receiptExists = await AssetReference.exists({
-          _id: receiptObjectId,
+          _id: targetReceiptObjectId,
           deletedAt: null,
         });
         if (!receiptExists) {
           throw ApiError.badRequest("The referenced receipt voucher file does not exist.");
         }
       } else {
-        receiptObjectId = null;
+        targetReceiptObjectId = null;
       }
     }
 
     await withTransaction(async (dbSession) => {
-      // If receipt changed, unassign old and assign new
       const oldReceiptId = existingExpense.receiptAssetReferenceId;
-      if (oldReceiptId && (!receiptObjectId || !oldReceiptId.equals(receiptObjectId))) {
+      const receiptChanged =
+        (oldReceiptId && !targetReceiptObjectId) ||
+        (!oldReceiptId && targetReceiptObjectId) ||
+        (oldReceiptId && targetReceiptObjectId && !oldReceiptId.equals(targetReceiptObjectId));
+      const caseChanged = !existingExpense.caseId.equals(targetCaseObjectId);
+
+      // 1. If receipt reference was changed or detached, release ownership on the old asset reference
+      if (oldReceiptId && receiptChanged) {
         await AssetReference.findByIdAndUpdate(
           oldReceiptId,
           { ownerType: ASSET_OWNER_TYPES.OTHER, ownerId: null },
@@ -227,22 +138,27 @@ export const PUT = withErrorHandler(
         );
       }
 
-      if (receiptObjectId && (!oldReceiptId || !receiptObjectId.equals(oldReceiptId))) {
+      // 2. If new receipt assigned or caseId changed, establish/update ownership
+      if (targetReceiptObjectId && (receiptChanged || caseChanged)) {
         await AssetReference.findByIdAndUpdate(
-          receiptObjectId,
+          targetReceiptObjectId,
           {
             ownerType: ASSET_OWNER_TYPES.CASE_EXPENSE,
-            ownerId: caseObjectId,
+            ownerId: targetCaseObjectId,
           },
           { session: dbSession }
         );
       }
 
-      const updateFields: Record<string, unknown> = {
-        caseId: caseObjectId,
-        receiptAssetReferenceId: receiptObjectId,
-      };
+      // 3. Assemble explicit update fields (avoiding unintended default overwrites)
+      const updateFields: Record<string, unknown> = {};
 
+      if (validated.caseId) {
+        updateFields.caseId = targetCaseObjectId;
+      }
+      if (validated.receiptAssetReferenceId !== undefined) {
+        updateFields.receiptAssetReferenceId = targetReceiptObjectId;
+      }
       if (validated.expenseDate) {
         updateFields.expenseDate = new Date(validated.expenseDate);
       }
@@ -262,18 +178,24 @@ export const PUT = withErrorHandler(
       await CaseExpense.findByIdAndUpdate(expenseObjectId, updateFields, {
         session: dbSession,
       });
+
+      // 4. Record audit log for case expense update
+      const diff = calculateAuditDiff(beforeState, { ...beforeState, ...updateFields });
+      await recordAuditLog({
+        req,
+        userId,
+        action: AUDIT_ACTIONS.UPDATE,
+        entityType: AUDIT_ENTITY_TYPES.CASE_EXPENSE,
+        entityId: expenseObjectId,
+        oldValues: diff.oldValues,
+        newValues: diff.newValues,
+        description: `Updated case expense record of ${validated.amount ?? existingExpense.amount} ${validated.currency ?? existingExpense.currency}`,
+        session: dbSession,
+      });
     });
 
     const updated = await CaseExpense.findById(expenseObjectId)
-      .populate<{
-        caseId: {
-          _id: mongoose.Types.ObjectId;
-          internalReference: string;
-          caseNumber: string;
-          title: string;
-          clientId: { _id: mongoose.Types.ObjectId; name: string; clientNumber: string };
-        };
-      }>({
+      .populate({
         path: "caseId",
         select: "internalReference caseNumber title clientId",
         populate: {
@@ -281,34 +203,22 @@ export const PUT = withErrorHandler(
           select: "name clientNumber",
         },
       })
-      .populate<{
-        receiptAssetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
-      }>({
+      .populate({
         path: "receiptAssetReferenceId",
-        populate: { path: "assetId" },
+        select: "originalFileName assetId",
+        populate: {
+          path: "assetId",
+          select: "secureUrl originalFilename",
+        },
       })
-      .populate<{
-        recordedBy: { _id: mongoose.Types.ObjectId; name: string; email: string };
-      }>("recordedBy", "name email")
-      .lean();
+      .populate("recordedBy", "name email")
+      .lean<CaseExpenseDocInput>();
 
-    const itemDto = formatCaseExpenseItem(
-      updated!,
-      updated!.caseId as unknown as {
-        _id?: mongoose.Types.ObjectId;
-        internalReference?: string;
-        caseNumber?: string;
-        title?: string;
-        clientId?: { _id?: mongoose.Types.ObjectId; name?: string; clientNumber?: string };
-      },
-      null,
-      updated!.receiptAssetReferenceId as unknown as (IAssetReferenceDocument & { assetId?: IAsset }),
-      updated!.recordedBy as unknown as { _id: mongoose.Types.ObjectId; name: string; email: string }
-    );
+    const itemDto = formatCaseExpenseItem(updated!);
 
     const response: CaseExpenseActionResponse = {
       success: true,
-      message: `Case expense updated successfully.`,
+      message: "Case expense updated successfully.",
       data: itemDto,
     };
 
@@ -317,20 +227,25 @@ export const PUT = withErrorHandler(
 );
 
 /**
+ * PATCH /api/v1/case-expenses/[id]
+ *
+ * Alias for PUT handler.
+ */
+export const PATCH = PUT;
+
+/**
  * DELETE /api/v1/case-expenses/[id]
  *
- * Delete a case expense record.
+ * Delete a case expense record and release its attached receipt asset reference.
  */
 export const DELETE = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
 
     const { id } = await params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!objectIdRegex.test(id)) {
       throw ApiError.badRequest("Invalid case expense ID format");
     }
-
-    await ConnectDB();
 
     const expenseObjectId = new mongoose.Types.ObjectId(id);
     const expense = await CaseExpense.findById(expenseObjectId);
@@ -339,6 +254,8 @@ export const DELETE = withErrorHandler(
     }
 
     await withTransaction(async (dbSession) => {
+      const expenseSnapshot = expense.toObject();
+
       // If there's an associated receipt asset reference, clean its ownership
       if (expense.receiptAssetReferenceId) {
         await AssetReference.findByIdAndUpdate(
@@ -348,7 +265,26 @@ export const DELETE = withErrorHandler(
         );
       }
 
-      await CaseExpense.findByIdAndDelete(expenseObjectId, { session: dbSession });
+      const deletedDoc = await CaseExpense.findByIdAndDelete(expenseObjectId, {
+        session: dbSession,
+      });
+
+      if (!deletedDoc) {
+        throw ApiError.notFound("Case expense record not found or already deleted");
+      }
+
+      // Record audit log for case expense deletion
+      await recordAuditLog({
+        req,
+        userId,
+        action: AUDIT_ACTIONS.DELETE,
+        entityType: AUDIT_ENTITY_TYPES.CASE_EXPENSE,
+        entityId: expenseObjectId,
+        oldValues: expenseSnapshot,
+        newValues: null,
+        description: `Deleted case expense record of ${expense.amount} ${expense.currency}`,
+        session: dbSession,
+      });
     });
 
     const response: CaseExpenseDeleteResponse = {

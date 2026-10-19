@@ -1,16 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
+import ConnectDB from "@/db";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
 import { sanitizeSearchParam, buildSearchRegex } from "@/lib/helpers/search.helper";
+import {
+  recordAuditLog,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
 import { Client } from "@/db/models/Client.model";
 import { ClientDocument } from "@/db/models/ClientDocument.model";
 import { AssetReference } from "@/db/models/AssetReference.model";
 import { ASSET_OWNER_TYPES } from "@/const/asset-reference.const";
 import {
   CLIENT_DOCUMENT_DEFAULT_PAGE_LIMIT,
-  CLIENT_DOCUMENT_PAGE_LIMITS,
   CLIENT_DOCUMENT_SORT_OPTIONS,
   CLIENT_DOCUMENT_TYPE_LABELS,
   ClientDocumentPageLimit,
@@ -21,6 +26,7 @@ import {
   createClientDocumentSchema,
   clientDocumentQueryFilterSchema,
 } from "@/utils/zod/client-document.validation";
+import { formatSafeIsoDate } from "@/app/api/v1/clients/route";
 import type {
   ClientDocumentItemDto,
   ClientDocumentPaginationResponse,
@@ -28,7 +34,6 @@ import type {
 } from "@/types/client-document.types";
 import type { IAsset } from "@/types/db/asset.type";
 import type { IAssetReferenceDocument } from "@/types/db/asset-reference.type";
-import ConnectDB from "@/db";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -54,10 +59,11 @@ function formatClientDocumentItem(
     documentType: docType,
     documentTypeLabel: CLIENT_DOCUMENT_TYPE_LABELS[docType] || String(doc.documentType),
     title: doc.title as string,
-    documentDate: doc.documentDate ? new Date(doc.documentDate as Date).toISOString() : null,
-    expiryDate: doc.expiryDate ? new Date(doc.expiryDate as Date).toISOString() : null,
+    documentDate: formatSafeIsoDate(doc.documentDate),
+    expiryDate: formatSafeIsoDate(doc.expiryDate),
     notes: (doc.notes as string) || null,
-    originalFileName: assetRef?.originalFileName || asset?.originalFilename || (doc.title as string),
+    originalFileName:
+      assetRef?.originalFileName || asset?.originalFilename || (doc.title as string),
     fileUrl: asset?.secureUrl || "",
     publicId: asset?.publicId || "",
     mimeType: asset?.mimeType || "application/octet-stream",
@@ -66,15 +72,15 @@ function formatClientDocumentItem(
     width: asset?.width || null,
     height: asset?.height || null,
     pages: asset?.pages || null,
-    createdAt: doc.createdAt ? new Date(doc.createdAt as Date).toISOString() : "",
-    updatedAt: doc.updatedAt ? new Date(doc.updatedAt as Date).toISOString() : "",
+    createdAt: formatSafeIsoDate(doc.createdAt) || new Date().toISOString(),
+    updatedAt: formatSafeIsoDate(doc.updatedAt) || new Date().toISOString(),
   };
 }
 
 /**
  * GET /api/v1/clients/[id]/documents
  *
- * List all documents associated with the given client.
+ * List all active documents associated with the given client.
  */
 export const GET = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
@@ -95,17 +101,6 @@ export const GET = withErrorHandler(
 
     const { searchParams } = new URL(req.url);
 
-    // Validate limit parameter if provided
-    const rawLimit = searchParams.get("limit");
-    if (rawLimit !== null) {
-      const parsedLimit = parseInt(rawLimit, 10);
-      if (!CLIENT_DOCUMENT_PAGE_LIMITS.includes(parsedLimit as ClientDocumentPageLimit)) {
-        throw ApiError.badRequest(
-          `Invalid page limit "${rawLimit}". Allowed page limits are: ${CLIENT_DOCUMENT_PAGE_LIMITS.join(", ")}`
-        );
-      }
-    }
-
     const rawParams = {
       search: sanitizeSearchParam(searchParams.get("search")),
       documentType: searchParams.get("documentType") || undefined,
@@ -113,7 +108,7 @@ export const GET = withErrorHandler(
       endDate: searchParams.get("endDate") || undefined,
       sort: searchParams.get("sort") || CLIENT_DOCUMENT_SORT_OPTIONS.NEWEST,
       page: searchParams.get("page") || 1,
-      limit: rawLimit ? parseInt(rawLimit, 10) : CLIENT_DOCUMENT_DEFAULT_PAGE_LIMIT,
+      limit: searchParams.get("limit") || CLIENT_DOCUMENT_DEFAULT_PAGE_LIMIT,
     };
 
     const parsed = clientDocumentQueryFilterSchema.safeParse(rawParams);
@@ -123,8 +118,10 @@ export const GET = withErrorHandler(
 
     const { search, documentType, startDate, endDate, sort, page, limit } = parsed.data;
 
+    // Filter by client and exclude soft-deleted documents
     const filter: Record<string, unknown> = {
       clientId: objectId,
+      deletedAt: null,
     };
 
     if (documentType && documentType !== "ALL") {
@@ -201,12 +198,12 @@ export const GET = withErrorHandler(
 /**
  * POST /api/v1/clients/[id]/documents
  *
- * Create a new ClientDocument record and associate the existing AssetReference
- * with this client.
+ * Create a new ClientDocument record, associate the AssetReference with this client,
+ * and record an audit log.
  */
 export const POST = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
 
     const { id } = await params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -256,6 +253,7 @@ export const POST = withErrorHandler(
             documentDate: validated.documentDate ? new Date(validated.documentDate) : null,
             expiryDate: validated.expiryDate ? new Date(validated.expiryDate) : null,
             notes: validated.notes?.trim() || null,
+            deletedAt: null,
           },
         ],
         { session: dbSession }
@@ -280,6 +278,18 @@ export const POST = withErrorHandler(
         assetId: IAsset;
       })
     );
+
+    // Record audit log for document creation
+    await recordAuditLog({
+      req,
+      userId,
+      action: AUDIT_ACTIONS.CREATE,
+      entityType: AUDIT_ENTITY_TYPES.CLIENT_DOCUMENT,
+      entityId: createdDoc._id,
+      oldValues: null,
+      newValues: createdDoc.toObject(),
+      description: `Added document "${itemDto.title}" to client "${client.name}"`,
+    });
 
     const response: ClientDocumentActionResponse = {
       success: true,

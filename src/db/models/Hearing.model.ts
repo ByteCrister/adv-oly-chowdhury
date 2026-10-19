@@ -9,18 +9,15 @@ const hearingSchema = new Schema<IHearingDocument>(
       type: Schema.Types.ObjectId,
       ref: MODELS.CASE,
       required: [true, "Case ID is required"],
-      index: true,
     },
     courtId: {
       type: Schema.Types.ObjectId,
       ref: MODELS.COURT,
       default: null,
-      index: true,
     },
     hearingDate: {
       type: Date,
       required: [true, "Hearing date is required"],
-      index: true,
     },
     startTime: {
       type: String,
@@ -51,7 +48,6 @@ const hearingSchema = new Schema<IHearingDocument>(
         message: "{VALUE} is not a valid hearing status",
       },
       default: HEARING_STATUSES.SCHEDULED,
-      index: true,
     },
     adjournmentReason: {
       type: String,
@@ -68,9 +64,12 @@ const hearingSchema = new Schema<IHearingDocument>(
   }
 );
 
-// High performance dashboard indexes
+// High-performance compound query indexes
+hearingSchema.index({ caseId: 1, hearingDate: 1 });
+hearingSchema.index({ courtId: 1, hearingDate: 1 });
+hearingSchema.index({ status: 1, hearingDate: 1 });
 hearingSchema.index({ hearingDate: 1, status: 1 });
-hearingSchema.index({ caseId: 1, hearingDate: -1 });
+hearingSchema.index({ createdAt: -1 });
 
 export const Hearing: Model<IHearingDocument> =
   (mongoose.models[MODELS.HEARING] as Model<IHearingDocument>) ||

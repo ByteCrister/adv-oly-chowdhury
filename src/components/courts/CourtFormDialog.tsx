@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Loader2, Plus, Pencil, Building2 } from "lucide-react";
+import { Loader2, Plus, Pencil } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -68,8 +68,13 @@ export function CourtFormDialog({
   const [errors, setErrors] = React.useState<Record<string, string>>({});
   const [generalError, setGeneralError] = React.useState<string | null>(null);
 
-  // Synchronize state when editing a court or opening modal
-  React.useEffect(() => {
+  // Track previous props to synchronize form state during render without cascading effects
+  const [prevCourt, setPrevCourt] = React.useState(court);
+  const [prevOpen, setPrevOpen] = React.useState(open);
+
+  if (court !== prevCourt || open !== prevOpen) {
+    setPrevCourt(court);
+    setPrevOpen(open);
     if (court && open) {
       setFormData({
         name: court.name,
@@ -88,7 +93,7 @@ export function CourtFormDialog({
       setErrors({});
       setGeneralError(null);
     }
-  }, [court, open]);
+  }
 
   const createMutation = useCreateCourtMutation();
   const updateMutation = useUpdateCourtMutation();

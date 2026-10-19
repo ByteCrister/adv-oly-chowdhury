@@ -7,6 +7,7 @@ import { CLIENT_QUERY_KEYS } from "@/const/client.const";
 import { DASHBOARD_QUERY_KEYS } from "@/const/dashboard.const";
 import { DROPDOWN_QUERY_KEYS } from "@/const/dropdown.const";
 import { HEARING_QUERY_KEYS } from "@/const/hearing.const";
+import { AUDIT_QUERY_KEYS } from "@/const/audit-log.const";
 import type { CaseDeleteResponse } from "@/types/case.types";
 
 /**
@@ -36,6 +37,7 @@ export function useDeleteCaseMutation(
         queryClient.invalidateQueries({ queryKey: DASHBOARD_QUERY_KEYS.all }),
         queryClient.invalidateQueries({ queryKey: HEARING_QUERY_KEYS.all }),
         queryClient.invalidateQueries({ queryKey: DROPDOWN_QUERY_KEYS.ALL }),
+        queryClient.invalidateQueries({ queryKey: AUDIT_QUERY_KEYS.all }),
       ]);
       await options?.onSuccess?.(data, variables, context, mutation);
     },

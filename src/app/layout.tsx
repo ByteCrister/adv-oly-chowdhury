@@ -61,6 +61,7 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
+      data-scroll-behavior="smooth"
       className={`${fontVariables} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col font-sans">

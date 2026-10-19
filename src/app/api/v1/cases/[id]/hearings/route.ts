@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
+import { withTransaction } from "@/lib/helpers/withTransaction";
+import {
+  recordAuditLog,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
 import { sanitizeSearchParam, buildSearchRegex } from "@/lib/helpers/search.helper";
 import ConnectDB from "@/db";
 import { Case } from "@/db/models/Case.model";
@@ -288,7 +294,7 @@ export const GET = withErrorHandler(
  */
 export const POST = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
 
     const { id } = await params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -327,22 +333,45 @@ export const POST = withErrorHandler(
       }
     }
 
-    const createdHearing = await Hearing.create({
-      caseId: caseObjectId,
-      courtId: courtObjectId,
-      hearingDate: new Date(validated.hearingDate),
-      startTime: validated.startTime?.trim() || null,
-      hearingType: validated.hearingType?.trim() || null,
-      purpose: validated.purpose?.trim() || null,
-      outcome: validated.outcome?.trim() || null,
-      nextDate: validated.nextDate ? new Date(validated.nextDate) : null,
-      status: validated.status || HEARING_STATUSES.SCHEDULED,
-      adjournmentReason: validated.adjournmentReason?.trim() || null,
-      notes: validated.notes?.trim() || null,
-    });
+    // Atomically create hearing, synchronize parent case nextHearingDate, and write audit log
+    const createdHearing = await withTransaction(async (dbSession) => {
+      const [hearingDoc] = await Hearing.create(
+        [
+          {
+            caseId: caseObjectId,
+            courtId: courtObjectId,
+            hearingDate: new Date(validated.hearingDate),
+            startTime: validated.startTime?.trim() || null,
+            hearingType: validated.hearingType?.trim() || null,
+            purpose: validated.purpose?.trim() || null,
+            outcome: validated.outcome?.trim() || null,
+            nextDate: validated.nextDate ? new Date(validated.nextDate) : null,
+            status: validated.status || HEARING_STATUSES.SCHEDULED,
+            adjournmentReason: validated.adjournmentReason?.trim() || null,
+            notes: validated.notes?.trim() || null,
+          },
+        ],
+        { session: dbSession }
+      );
 
-    // Synchronize Case nextHearingDate
-    await syncCaseNextHearingDate(caseObjectId);
+      // Synchronize Case nextHearingDate inside transaction session
+      await syncCaseNextHearingDate(caseObjectId, dbSession);
+
+      // Record audit log for hearing creation
+      await recordAuditLog({
+        req,
+        userId,
+        action: AUDIT_ACTIONS.CREATE,
+        entityType: AUDIT_ENTITY_TYPES.HEARING,
+        entityId: hearingDoc._id,
+        oldValues: null,
+        newValues: hearingDoc.toObject(),
+        description: `Scheduled hearing for case "${parentCase.title}" on ${hearingDoc.hearingDate.toISOString()}`,
+        session: dbSession,
+      });
+
+      return hearingDoc;
+    });
 
     const populated = await Hearing.findById(createdHearing._id)
       .populate({

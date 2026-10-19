@@ -70,6 +70,9 @@ const casePartySchema = new Schema<ICasePartyDocument>(
 );
 
 casePartySchema.index({ caseId: 1, role: 1 });
+casePartySchema.index({ caseId: 1, name: 1 });
+casePartySchema.index({ caseId: 1, createdAt: -1 });
+casePartySchema.index({ caseId: 1, role: 1, name: 1 });
 
 export const CaseParty: Model<ICasePartyDocument> =
   (mongoose.models[MODELS.CASE_PARTY] as Model<ICasePartyDocument>) ||

@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
+import ConnectDB from "@/db";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
 import { sanitizeSearchParam, buildSearchRegex } from "@/lib/helpers/search.helper";
+import {
+  recordAuditLog,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
 import { Client } from "@/db/models/Client.model";
 import { Case } from "@/db/models/Case.model";
 import { ClientPayment } from "@/db/models/ClientPayment.model";
@@ -11,7 +17,6 @@ import { AssetReference } from "@/db/models/AssetReference.model";
 import { ASSET_OWNER_TYPES } from "@/const/asset-reference.const";
 import {
   CLIENT_PAYMENT_DEFAULT_PAGE_LIMIT,
-  CLIENT_PAYMENT_PAGE_LIMITS,
   CLIENT_PAYMENT_SORT_OPTIONS,
   PAYMENT_METHOD_LABELS,
   PAYMENT_TYPE_LABELS,
@@ -24,6 +29,7 @@ import {
   createClientPaymentSchema,
   clientPaymentQueryFilterSchema,
 } from "@/utils/zod/client-payment.validation";
+import { formatSafeIsoDate } from "@/app/api/v1/clients/route";
 import type {
   ClientPaymentItemDto,
   ClientPaymentPaginationResponse,
@@ -32,7 +38,6 @@ import type {
 } from "@/types/client-payment.types";
 import type { IAsset } from "@/types/db/asset.type";
 import type { IAssetReferenceDocument } from "@/types/db/asset-reference.type";
-import ConnectDB from "@/db";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -61,7 +66,7 @@ function formatClientPaymentItem(
     caseId: payment.caseId ? (payment.caseId as mongoose.Types.ObjectId).toString() : null,
     caseReference: caseRef,
     caseTitle: caseDoc?.title || null,
-    paymentDate: new Date(payment.paymentDate as Date).toISOString(),
+    paymentDate: formatSafeIsoDate(payment.paymentDate) || new Date().toISOString(),
     amount: payment.amount as number,
     currency: (payment.currency as string) || "BDT",
     paymentMethod: method,
@@ -83,15 +88,15 @@ function formatClientPaymentItem(
           email: receivedByUser.email,
         }
       : null,
-    createdAt: payment.createdAt ? new Date(payment.createdAt as Date).toISOString() : "",
-    updatedAt: payment.updatedAt ? new Date(payment.updatedAt as Date).toISOString() : "",
+    createdAt: formatSafeIsoDate(payment.createdAt) || new Date().toISOString(),
+    updatedAt: formatSafeIsoDate(payment.updatedAt) || new Date().toISOString(),
   };
 }
 
 /**
  * GET /api/v1/clients/[id]/payments
  *
- * List all payments for a specific client with pagination, filters, and financial summary.
+ * List all payments for a specific client with pagination, filters, and parallelized financial summary.
  */
 export const GET = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
@@ -112,17 +117,6 @@ export const GET = withErrorHandler(
 
     const { searchParams } = new URL(req.url);
 
-    // Validate limit parameter if provided
-    const rawLimit = searchParams.get("limit");
-    if (rawLimit !== null) {
-      const parsedLimit = parseInt(rawLimit, 10);
-      if (!CLIENT_PAYMENT_PAGE_LIMITS.includes(parsedLimit as ClientPaymentPageLimit)) {
-        throw ApiError.badRequest(
-          `Invalid page limit "${rawLimit}". Allowed page limits are: ${CLIENT_PAYMENT_PAGE_LIMITS.join(", ")}`
-        );
-      }
-    }
-
     const rawParams = {
       search: sanitizeSearchParam(searchParams.get("search")),
       paymentMethod: searchParams.get("paymentMethod") || undefined,
@@ -132,7 +126,7 @@ export const GET = withErrorHandler(
       endDate: searchParams.get("endDate") || undefined,
       sort: searchParams.get("sort") || CLIENT_PAYMENT_SORT_OPTIONS.NEWEST_PAYMENT,
       page: searchParams.get("page") || 1,
-      limit: rawLimit ? parseInt(rawLimit, 10) : CLIENT_PAYMENT_DEFAULT_PAGE_LIMIT,
+      limit: searchParams.get("limit") || CLIENT_PAYMENT_DEFAULT_PAGE_LIMIT,
     };
 
     const parsed = clientPaymentQueryFilterSchema.safeParse(rawParams);
@@ -203,8 +197,8 @@ export const GET = withErrorHandler(
     const sortOption = sortMap[sort as ClientPaymentSortOption] || { paymentDate: -1 };
     const skip = (page - 1) * limit;
 
-    // Parallel execution for paginated payments and client summary aggregates
-    const [total, payments, summaryAgg] = await Promise.all([
+    // Single consolidated parallel execution for paginated payments and breakdowns
+    const [total, payments, summaryAgg, methodAgg, typeAgg] = await Promise.all([
       ClientPayment.countDocuments(filter),
       ClientPayment.find(filter)
         .sort(sortOption)
@@ -237,10 +231,6 @@ export const GET = withErrorHandler(
           },
         },
       ]),
-    ]);
-
-    // Compute breakdown aggregates by paymentMethod and paymentType for this client
-    const [methodAgg, typeAgg] = await Promise.all([
       ClientPayment.aggregate<{ _id: PaymentMethod; amount: number }>([
         { $match: { clientId: objectId } },
         { $group: { _id: "$paymentMethod", amount: { $sum: "$amount" } } },
@@ -294,8 +284,8 @@ export const GET = withErrorHandler(
 /**
  * POST /api/v1/clients/[id]/payments
  *
- * Record a new client payment. Enforces relationship validity (if caseId is provided,
- * verifies it belongs to this client).
+ * Record a new client payment. Enforces relationship validity, claims receipt references,
+ * and records an audit log.
  */
 export const POST = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
@@ -318,7 +308,7 @@ export const POST = withErrorHandler(
     const validated = createClientPaymentSchema.parse(body);
 
     // If caseId is provided, enforce relationship integrity:
-    // Case must belong to this specific client!
+    // Case must exist, be active, and belong to this specific client
     let caseObjectId: mongoose.Types.ObjectId | null = null;
     if (validated.caseId) {
       caseObjectId = new mongoose.Types.ObjectId(validated.caseId);
@@ -335,7 +325,7 @@ export const POST = withErrorHandler(
       }
     }
 
-    // If receipt asset reference is provided, verify it exists
+    // If receipt asset reference is provided, verify it exists and is active
     let receiptObjectId: mongoose.Types.ObjectId | null = null;
     if (validated.receiptAssetreferenceId) {
       receiptObjectId = new mongoose.Types.ObjectId(validated.receiptAssetreferenceId);
@@ -410,6 +400,18 @@ export const POST = withErrorHandler(
       populated!.receiptAssetreferenceId as unknown as (IAssetReferenceDocument & { assetId?: IAsset }),
       populated!.receivedBy as unknown as { _id: mongoose.Types.ObjectId; name: string; email: string }
     );
+
+    // Record audit log for payment creation
+    await recordAuditLog({
+      req,
+      userId: currentUserId,
+      action: AUDIT_ACTIONS.CREATE,
+      entityType: AUDIT_ENTITY_TYPES.CLIENT_PAYMENT,
+      entityId: createdPayment._id,
+      oldValues: null,
+      newValues: createdPayment.toObject(),
+      description: `Recorded payment of ${itemDto.amount} ${itemDto.currency} for client "${client.name}"`,
+    });
 
     const response: ClientPaymentActionResponse = {
       success: true,

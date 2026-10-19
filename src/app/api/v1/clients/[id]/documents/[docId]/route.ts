@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
+import ConnectDB from "@/db";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
@@ -7,10 +8,17 @@ import { ClientDocument } from "@/db/models/ClientDocument.model";
 import { AssetReference } from "@/db/models/AssetReference.model";
 import { ASSET_OWNER_TYPES } from "@/const/asset-reference.const";
 import {
+  recordAuditLog,
+  calculateAuditDiff,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
+import {
   CLIENT_DOCUMENT_TYPE_LABELS,
   ClientDocumentType,
 } from "@/const/client-document.const";
 import { updateClientDocumentSchema } from "@/utils/zod/client-document.validation";
+import { formatSafeIsoDate } from "@/app/api/v1/clients/route";
 import type {
   ClientDocumentItemDto,
   ClientDocumentActionResponse,
@@ -18,7 +26,6 @@ import type {
 } from "@/types/client-document.types";
 import type { IAsset } from "@/types/db/asset.type";
 import type { IAssetReferenceDocument } from "@/types/db/asset-reference.type";
-import ConnectDB from "@/db";
 
 interface RouteParams {
   params: Promise<{ id: string; docId: string }>;
@@ -44,10 +51,11 @@ function formatClientDocumentItem(
     documentType: docType,
     documentTypeLabel: CLIENT_DOCUMENT_TYPE_LABELS[docType] || String(doc.documentType),
     title: doc.title as string,
-    documentDate: doc.documentDate ? new Date(doc.documentDate as Date).toISOString() : null,
-    expiryDate: doc.expiryDate ? new Date(doc.expiryDate as Date).toISOString() : null,
+    documentDate: formatSafeIsoDate(doc.documentDate),
+    expiryDate: formatSafeIsoDate(doc.expiryDate),
     notes: (doc.notes as string) || null,
-    originalFileName: assetRef?.originalFileName || asset?.originalFilename || (doc.title as string),
+    originalFileName:
+      assetRef?.originalFileName || asset?.originalFilename || (doc.title as string),
     fileUrl: asset?.secureUrl || "",
     publicId: asset?.publicId || "",
     mimeType: asset?.mimeType || "application/octet-stream",
@@ -56,15 +64,15 @@ function formatClientDocumentItem(
     width: asset?.width || null,
     height: asset?.height || null,
     pages: asset?.pages || null,
-    createdAt: doc.createdAt ? new Date(doc.createdAt as Date).toISOString() : "",
-    updatedAt: doc.updatedAt ? new Date(doc.updatedAt as Date).toISOString() : "",
+    createdAt: formatSafeIsoDate(doc.createdAt) || new Date().toISOString(),
+    updatedAt: formatSafeIsoDate(doc.updatedAt) || new Date().toISOString(),
   };
 }
 
 /**
  * GET /api/v1/clients/[id]/documents/[docId]
  *
- * Retrieve an individual document for a client.
+ * Retrieve an individual active document for a client.
  */
 export const GET = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
@@ -83,6 +91,7 @@ export const GET = withErrorHandler(
     const doc = await ClientDocument.findOne({
       _id: docObjectId,
       clientId: clientObjectId,
+      deletedAt: null,
     })
       .populate<{
         assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
@@ -117,7 +126,7 @@ export const GET = withErrorHandler(
  */
 export const PATCH = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
 
     const { id, docId } = await params;
     if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(docId)) {
@@ -136,11 +145,14 @@ export const PATCH = withErrorHandler(
       const doc = await ClientDocument.findOne({
         _id: docObjectId,
         clientId: clientObjectId,
+        deletedAt: null,
       }).session(dbSession);
 
       if (!doc) {
         throw ApiError.notFound("Document not found for this client");
       }
+
+      const beforeState = doc.toObject();
 
       // Handle file replacement if a new assetReferenceId is supplied
       if (validated.assetReferenceId) {
@@ -189,6 +201,20 @@ export const PATCH = withErrorHandler(
       }
 
       await doc.save({ session: dbSession });
+
+      // Record audit log for client document update
+      const diff = calculateAuditDiff(beforeState, doc.toObject());
+      await recordAuditLog({
+        req,
+        userId,
+        action: AUDIT_ACTIONS.UPDATE,
+        entityType: AUDIT_ENTITY_TYPES.CLIENT_DOCUMENT,
+        entityId: doc._id,
+        oldValues: diff.oldValues,
+        newValues: diff.newValues,
+        description: `Updated client document "${doc.title}"`,
+        session: dbSession,
+      });
     });
 
     const updatedDoc = await ClientDocument.findById(docObjectId)
@@ -227,13 +253,12 @@ export const PUT = PATCH;
 /**
  * DELETE /api/v1/clients/[id]/documents/[docId]
  *
- * Safely delete a client document.
- * Soft-deletes its AssetReference without deleting the underlying physical asset,
- * preserving integrity for shared files.
+ * Safely soft-deletes a client document and its AssetReference.
+ * Preserves the underlying physical asset for shared files and records an audit log.
  */
 export const DELETE = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
 
     const { id, docId } = await params;
     if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(docId)) {
@@ -248,14 +273,15 @@ export const DELETE = withErrorHandler(
     const doc = await ClientDocument.findOne({
       _id: docObjectId,
       clientId: clientObjectId,
+      deletedAt: null,
     });
 
     if (!doc) {
-      throw ApiError.notFound("Document not found for this client");
+      throw ApiError.notFound("Document not found for this client or has already been removed");
     }
 
     await withTransaction(async (dbSession) => {
-      // 1. Soft delete the logical AssetReference
+      // 1. Soft-delete the logical AssetReference
       if (doc.assetReferenceId) {
         await AssetReference.findByIdAndUpdate(
           doc.assetReferenceId,
@@ -264,13 +290,27 @@ export const DELETE = withErrorHandler(
         );
       }
 
-      // 2. Delete the ClientDocument record
-      await doc.deleteOne({ session: dbSession });
+      // 2. Soft-delete the ClientDocument record
+      doc.deletedAt = new Date();
+      await doc.save({ session: dbSession });
+
+      // Record audit log for client document soft deletion
+      await recordAuditLog({
+        req,
+        userId,
+        action: AUDIT_ACTIONS.SOFT_DELETE,
+        entityType: AUDIT_ENTITY_TYPES.CLIENT_DOCUMENT,
+        entityId: doc._id,
+        oldValues: { deletedAt: null },
+        newValues: { deletedAt: doc.deletedAt },
+        description: `Archived client document "${doc.title}"`,
+        session: dbSession,
+      });
     });
 
     const response: ClientDocumentDeleteResponse = {
       success: true,
-      message: `Document "${doc.title}" was removed successfully.`,
+      message: `Document "${doc.title}" was moved to archive successfully.`,
       id: docId,
     };
 

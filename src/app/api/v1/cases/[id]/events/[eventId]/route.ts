@@ -7,6 +7,12 @@ import ConnectDB from "@/db";
 import { CaseEvent } from "@/db/models/CaseEvent.model";
 import { AssetReference } from "@/db/models/AssetReference.model";
 import { ASSET_OWNER_TYPES } from "@/const/asset-reference.const";
+import {
+  recordAuditLog,
+  calculateAuditDiff,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
 import { updateCaseEventSchema } from "@/utils/zod/case-event.validation";
 import { formatCaseEventItem } from "../route";
 import type {
@@ -76,7 +82,7 @@ export const GET = withErrorHandler(
  */
 export const PATCH = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
 
     const { id, eventId } = await params;
     if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(eventId)) {
@@ -100,6 +106,8 @@ export const PATCH = withErrorHandler(
       if (!eventDoc) {
         throw ApiError.notFound("Event not found for this case.");
       }
+
+      const beforeState = eventDoc.toObject();
 
       // Handle attachment replacement if provided
       if (validated.assetReferenceId !== undefined) {
@@ -158,6 +166,20 @@ export const PATCH = withErrorHandler(
       }
 
       await eventDoc.save({ session: dbSession });
+
+      // Record audit log for case event update
+      const diff = calculateAuditDiff(beforeState, eventDoc.toObject());
+      await recordAuditLog({
+        req,
+        userId,
+        action: AUDIT_ACTIONS.UPDATE,
+        entityType: AUDIT_ENTITY_TYPES.CASE_EVENT,
+        entityId: eventDoc._id,
+        oldValues: diff.oldValues,
+        newValues: diff.newValues,
+        description: `Updated case event "${eventDoc.title}"`,
+        session: dbSession,
+      });
     });
 
     const updatedDoc = await CaseEvent.findById(eventObjectId)
@@ -200,7 +222,7 @@ export const PUT = PATCH;
  */
 export const DELETE = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
 
     const { id, eventId } = await params;
     if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(eventId)) {
@@ -221,6 +243,8 @@ export const DELETE = withErrorHandler(
       throw ApiError.notFound("Event not found for this case.");
     }
 
+    const eventSnapshot = eventDoc.toObject();
+
     await withTransaction(async (dbSession) => {
       // 1. Soft-delete attached AssetReference if present
       if (eventDoc.assetReferenceId) {
@@ -233,6 +257,19 @@ export const DELETE = withErrorHandler(
 
       // 2. Delete the CaseEvent document
       await eventDoc.deleteOne({ session: dbSession });
+
+      // Record audit log for case event hard deletion
+      await recordAuditLog({
+        req,
+        userId,
+        action: AUDIT_ACTIONS.DELETE,
+        entityType: AUDIT_ENTITY_TYPES.CASE_EVENT,
+        entityId: eventDoc._id,
+        oldValues: eventSnapshot,
+        newValues: null,
+        description: `Deleted case event "${eventDoc.title}"`,
+        session: dbSession,
+      });
     });
 
     const response: CaseEventDeleteResponse = {

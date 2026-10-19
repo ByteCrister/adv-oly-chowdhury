@@ -10,6 +10,22 @@ import {
 
 
 /**
+ * Standard 24-character hexadecimal MongoDB ObjectId validator.
+ */
+const objectIdValidator = z
+  .string()
+  .refine((val) => /^[0-9a-fA-F]{24}$/.test(val), {
+    message: "Invalid court ID format",
+  });
+
+/**
+ * Validation schema for court route parameters (e.g. /api/v1/courts/[id]).
+ */
+export const courtIdParamSchema = z.object({
+  id: objectIdValidator,
+});
+
+/**
  * Validation schema for creating a new court record.
  */
 export const createCourtSchema = z.object({
@@ -66,41 +82,54 @@ export const updateCourtSchema = createCourtSchema.partial();
 /**
  * Validation schema for court listing query parameters.
  */
-export const courtQueryFilterSchema = z.object({
-  search: z.string().trim().optional(),
-  courtType: z.string().trim().optional(),
-  district: z.string().trim().optional(),
-  division: z.string().trim().optional(),
-  isActive: z
-    .string()
-    .optional()
-    .transform((val) => {
-      if (val === "true") return true;
-      if (val === "false") return false;
-      return undefined;
-    }),
-  startDate: z
-    .string()
-    .optional()
-    .refine((val) => !val || !isNaN(Date.parse(val)), {
-      message: "Invalid startDate format",
-    }),
-  endDate: z
-    .string()
-    .optional()
-    .refine((val) => !val || !isNaN(Date.parse(val)), {
-      message: "Invalid endDate format",
-    }),
-  sort: z
-    .enum(Object.values(COURT_SORT_OPTIONS) as [string, ...string[]])
-    .default(COURT_SORT_OPTIONS.NEWEST),
-  page: z.coerce.number().int().min(1).default(1),
-  limit: z.coerce
-    .number()
-    .int()
-    .refine((val) => (COURT_PAGE_LIMITS as readonly number[]).includes(val), {
-      message: `Limit must be one of: ${COURT_PAGE_LIMITS.join(", ")}`,
-    })
-    .default(COURT_DEFAULT_PAGE_LIMIT),
-});
+export const courtQueryFilterSchema = z
+  .object({
+    search: z.string().trim().max(100, "Search query cannot exceed 100 characters").optional(),
+    courtType: z.string().trim().optional(),
+    district: z.string().trim().max(100, "District filter cannot exceed 100 characters").optional(),
+    division: z.string().trim().max(100, "Division filter cannot exceed 100 characters").optional(),
+    isActive: z
+      .string()
+      .optional()
+      .transform((val) => {
+        if (val === "true") return true;
+        if (val === "false") return false;
+        return undefined;
+      }),
+    startDate: z
+      .string()
+      .optional()
+      .refine((val) => !val || !isNaN(Date.parse(val)), {
+        message: "Invalid startDate format",
+      }),
+    endDate: z
+      .string()
+      .optional()
+      .refine((val) => !val || !isNaN(Date.parse(val)), {
+        message: "Invalid endDate format",
+      }),
+    sort: z
+      .enum(Object.values(COURT_SORT_OPTIONS) as [string, ...string[]])
+      .default(COURT_SORT_OPTIONS.NEWEST),
+    page: z.coerce.number().int().min(1).default(1),
+    limit: z.coerce
+      .number()
+      .int()
+      .refine((val) => (COURT_PAGE_LIMITS as readonly number[]).includes(val), {
+        message: `Limit must be one of: ${COURT_PAGE_LIMITS.join(", ")}`,
+      })
+      .default(COURT_DEFAULT_PAGE_LIMIT),
+  })
+  .refine(
+    (data) => {
+      if (data.startDate && data.endDate) {
+        return new Date(data.startDate) <= new Date(data.endDate);
+      }
+      return true;
+    },
+    {
+      message: "startDate cannot be later than endDate",
+      path: ["startDate"],
+    }
+  );
 

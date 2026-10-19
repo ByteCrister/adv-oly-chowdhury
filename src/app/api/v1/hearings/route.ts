@@ -1,14 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
+import ConnectDB from "@/db";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
+import {
+  recordAuditLog,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
 import { sanitizeSearchParam, buildSearchRegex } from "@/lib/helpers/search.helper";
-import ConnectDB from "@/db";
 import { Hearing } from "@/db/models/Hearing.model";
 import { Case } from "@/db/models/Case.model";
 import { Court } from "@/db/models/Court.model";
 import { Client } from "@/db/models/Client.model";
+import { AssetReference } from "@/db/models/AssetReference.model";
+import { ASSET_OWNER_TYPES } from "@/const/asset-reference.const";
 import {
   HEARING_DEFAULT_PAGE_LIMIT,
   HEARING_PAGE_LIMITS,
@@ -30,23 +37,54 @@ import type {
   HearingPaginationResponse,
   HearingStatsDto,
   HearingActionResponse,
+  IPopulatedHearingDoc,
+  IPopulatedHearingCase,
+  IPopulatedHearingClient,
+  IPopulatedHearingCourt,
 } from "@/types/hearing.types";
 
 /**
+ * Safely extracts a string ID from an ObjectId, populated object, or string.
+ */
+export function extractIdString(val: unknown): string {
+  if (!val) return "";
+  if (val instanceof mongoose.Types.ObjectId) return val.toString();
+  if (typeof val === "object" && "_id" in (val as Record<string, unknown>)) {
+    const inner = (val as Record<string, unknown>)._id;
+    return inner ? String(inner) : "";
+  }
+  return String(val);
+}
+
+/**
+ * Safely converts an arbitrary date representation into an ISO string.
+ */
+export function formatSafeIsoDate(val: unknown): string | null {
+  if (!val) return null;
+  if (val instanceof Date) return isNaN(val.getTime()) ? null : val.toISOString();
+  if (typeof val === "string" || typeof val === "number") {
+    const d = new Date(val);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  }
+  return null;
+}
+
+/**
  * Synchronize a case's nextHearingDate with the earliest scheduled hearing
- * on or after today that is not cancelled.
+ * on or after today that is active (not cancelled or completed).
  */
 export async function syncCaseNextHearingDate(
   caseId: mongoose.Types.ObjectId | string,
   dbSession?: mongoose.ClientSession
 ): Promise<Date | null> {
+  const caseObjectId = typeof caseId === "string" ? new mongoose.Types.ObjectId(caseId) : caseId;
   const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
 
   const query = Hearing.findOne({
-    caseId,
+    caseId: caseObjectId,
     hearingDate: { $gte: startOfToday },
-    status: { $ne: HEARING_STATUSES.CANCELLED },
+    status: { $nin: [HEARING_STATUSES.CANCELLED, HEARING_STATUSES.COMPLETED] },
   })
     .sort({ hearingDate: 1 })
     .select("hearingDate");
@@ -59,9 +97,9 @@ export async function syncCaseNextHearingDate(
   const nextHearingDate = nextHearing?.hearingDate ? new Date(nextHearing.hearingDate) : null;
 
   const updateQuery = Case.findByIdAndUpdate(
-    caseId,
+    caseObjectId,
     { nextHearingDate },
-    { new: true }
+    { select: "_id" }
   );
   if (dbSession) {
     updateQuery.session(dbSession);
@@ -72,62 +110,71 @@ export async function syncCaseNextHearingDate(
 }
 
 /**
- * Format a lean Hearing document into a type-safe HearingListItemDto.
+ * Format a populated or lean Hearing document into a type-safe HearingListItemDto.
  */
 export function formatHearingListItem(
-  doc: Record<string, unknown>,
-  fallbackCourtsMap?: Map<string, Record<string, unknown>>
+  doc: IPopulatedHearingDoc | Record<string, unknown>,
+  fallbackCourtsMap?: Map<string, IPopulatedHearingCourt | Record<string, unknown>>
 ): HearingListItemDto {
-  const id = (doc._id as mongoose.Types.ObjectId).toString();
-  const rawCase = doc.caseId as Record<string, unknown> | null;
-  const rawClient = rawCase?.clientId as Record<string, unknown> | null;
+  const id = extractIdString(doc._id || (doc as { id?: unknown }).id);
+
+  const rawCase =
+    doc.caseId && typeof doc.caseId === "object" && "_id" in doc.caseId
+      ? (doc.caseId as IPopulatedHearingCase)
+      : null;
+
+  const rawClient =
+    rawCase?.clientId && typeof rawCase.clientId === "object" && "_id" in rawCase.clientId
+      ? (rawCase.clientId as IPopulatedHearingClient)
+      : null;
+
   const rawCourt =
-    (doc.courtId as Record<string, unknown> | null) ||
-    (rawCase?.courtId && typeof rawCase.courtId === "object"
-      ? (rawCase.courtId as Record<string, unknown>)
+    (doc.courtId && typeof doc.courtId === "object" && "_id" in doc.courtId
+      ? (doc.courtId as IPopulatedHearingCourt)
+      : null) ||
+    (rawCase?.courtId && typeof rawCase.courtId === "object" && "_id" in rawCase.courtId
+      ? (rawCase.courtId as IPopulatedHearingCourt)
       : fallbackCourtsMap && rawCase?.courtId
-      ? fallbackCourtsMap.get(String(rawCase.courtId))
+      ? (fallbackCourtsMap.get(extractIdString(rawCase.courtId)) as IPopulatedHearingCourt)
       : null);
 
   const status = (doc.status as HearingStatus) || HEARING_STATUSES.SCHEDULED;
   const cType = (rawCourt?.courtType as CourtType) || COURT_TYPES.DISTRICT_JUDGE_COURT;
 
   const caseDto: HearingCaseDto = {
-    id: rawCase ? (rawCase._id as mongoose.Types.ObjectId).toString() : String(doc.caseId),
-    internalReference: (rawCase?.internalReference as string) || "N/A",
-    caseNumber: (rawCase?.caseNumber as string) || null,
-    title: (rawCase?.title as string) || "Untitled Case",
-    caseType: (rawCase?.caseType as string) || "CIVIL",
-    caseStatus: (rawCase?.caseStatus as string) || "ACTIVE",
-    priority: (rawCase?.priority as string) || "NORMAL",
-    filingDate: rawCase?.filingDate ? new Date(rawCase.filingDate as Date).toISOString() : null,
-    nextHearingDate: rawCase?.nextHearingDate
-      ? new Date(rawCase.nextHearingDate as Date).toISOString()
-      : null,
+    id: rawCase ? extractIdString(rawCase) : extractIdString(doc.caseId),
+    internalReference: rawCase?.internalReference || "N/A",
+    caseNumber: rawCase?.caseNumber || null,
+    title: rawCase?.title || "Untitled Case",
+    caseType: rawCase?.caseType || "CIVIL",
+    caseStatus: rawCase?.caseStatus || "ACTIVE",
+    priority: rawCase?.priority || "NORMAL",
+    filingDate: formatSafeIsoDate(rawCase?.filingDate),
+    nextHearingDate: formatSafeIsoDate(rawCase?.nextHearingDate),
   };
 
   const clientDto: HearingClientDto | null = rawClient
     ? {
-        id: (rawClient._id as mongoose.Types.ObjectId).toString(),
-        name: (rawClient.name as string) || "Unknown Client",
-        clientNumber: (rawClient.clientNumber as string) || "",
-        organizationName: (rawClient.organizationName as string) || null,
-        clientType: (rawClient.clientType as string) || "INDIVIDUAL",
-        phone: (rawClient.phone as string) || null,
-        email: (rawClient.email as string) || null,
+        id: extractIdString(rawClient),
+        name: rawClient.name || "Unknown Client",
+        clientNumber: rawClient.clientNumber || "",
+        organizationName: rawClient.organizationName || null,
+        clientType: rawClient.clientType || "INDIVIDUAL",
+        phone: rawClient.phone || null,
+        email: rawClient.email || null,
       }
     : null;
 
   const courtDto: HearingCourtDto | null = rawCourt
     ? {
-        id: (rawCourt._id as mongoose.Types.ObjectId).toString(),
-        name: (rawCourt.name as string) || "Unknown Court",
+        id: extractIdString(rawCourt),
+        name: rawCourt.name || "Unknown Court",
         courtType: cType,
         courtTypeLabel: COURT_TYPE_LABELS[cType] || String(rawCourt.courtType || ""),
-        district: (rawCourt.district as string) || "Sylhet",
-        roomOrHall: (rawCourt.roomOrHall as string) || null,
-        address: (rawCourt.address as string) || null,
-        presidingJudgeTitle: (rawCourt.presidingJudgeTitle as string) || null,
+        district: rawCourt.district || "Sylhet",
+        roomOrHall: rawCourt.roomOrHall || null,
+        address: rawCourt.address || null,
+        presidingJudgeTitle: rawCourt.presidingJudgeTitle || null,
       }
     : null;
 
@@ -136,27 +183,21 @@ export function formatHearingListItem(
     caseId: caseDto.id,
     case: caseDto,
     client: clientDto,
-    courtId: courtDto ? courtDto.id : null,
+    courtId: courtDto ? courtDto.id : (doc.courtId ? extractIdString(doc.courtId) : (rawCase?.courtId ? extractIdString(rawCase.courtId) : null)),
     court: courtDto,
-    hearingDate: doc.hearingDate
-      ? new Date(doc.hearingDate as Date).toISOString()
-      : new Date().toISOString(),
-    startTime: (doc.startTime as string) || null,
-    hearingType: (doc.hearingType as string) || null,
-    purpose: (doc.purpose as string) || null,
-    outcome: (doc.outcome as string) || null,
-    nextDate: doc.nextDate ? new Date(doc.nextDate as Date).toISOString() : null,
+    hearingDate: formatSafeIsoDate(doc.hearingDate) || new Date().toISOString(),
+    startTime: typeof doc.startTime === "string" ? doc.startTime : null,
+    hearingType: typeof doc.hearingType === "string" ? doc.hearingType : null,
+    purpose: typeof doc.purpose === "string" ? doc.purpose : null,
+    outcome: typeof doc.outcome === "string" ? doc.outcome : null,
+    nextDate: formatSafeIsoDate(doc.nextDate),
     status,
     statusLabel: HEARING_STATUS_LABELS[status] || status,
-    adjournmentReason: (doc.adjournmentReason as string) || null,
-    notes: (doc.notes as string) || null,
-    isDeletable: true,
-    createdAt: doc.createdAt
-      ? new Date(doc.createdAt as Date).toISOString()
-      : new Date().toISOString(),
-    updatedAt: doc.updatedAt
-      ? new Date(doc.updatedAt as Date).toISOString()
-      : new Date().toISOString(),
+    adjournmentReason: typeof doc.adjournmentReason === "string" ? doc.adjournmentReason : null,
+    notes: typeof doc.notes === "string" ? doc.notes : null,
+    isDeletable: doc.isDeletable !== undefined ? Boolean(doc.isDeletable) : true,
+    createdAt: formatSafeIsoDate(doc.createdAt) || new Date().toISOString(),
+    updatedAt: formatSafeIsoDate(doc.updatedAt) || new Date().toISOString(),
   };
 }
 
@@ -168,6 +209,7 @@ export function formatHearingListItem(
  */
 export const GET = withErrorHandler(async (req: NextRequest) => {
   await getUserId();
+  await ConnectDB();
 
   const { searchParams } = new URL(req.url);
 
@@ -219,8 +261,6 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     limit,
   } = parsed.data;
 
-  await ConnectDB();
-
   // Construct MongoDB filter object
   const filter: Record<string, unknown> = {};
 
@@ -262,24 +302,44 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     filter.hearingDate = dateQuery;
   }
 
-  // Search across hearing fields, case numbers/titles, and client names
+  // Safe search across hearing fields, case numbers/titles, client names, and court details
   if (search) {
     const searchRegex = buildSearchRegex(search);
     if (searchRegex) {
-      // Find matching clients
-      const matchedClients = await Client.find(
-        {
-          deletedAt: null,
-          $or: [
-            { name: searchRegex },
-            { clientNumber: searchRegex },
-            { organizationName: searchRegex },
-            { phone: searchRegex },
-          ],
-        },
-        { _id: 1 }
-      ).lean();
+      // Find matching clients and courts in parallel, bounded to 100 results
+      const [matchedClients, matchedCourts] = await Promise.all([
+        Client.find(
+          {
+            deletedAt: null,
+            $or: [
+              { name: searchRegex },
+              { clientNumber: searchRegex },
+              { organizationName: searchRegex },
+              { phone: searchRegex },
+            ],
+          },
+          { _id: 1 }
+        )
+          .limit(100)
+          .lean(),
+        Court.find(
+          {
+            deletedAt: null,
+            $or: [
+              { name: searchRegex },
+              { district: searchRegex },
+              { roomOrHall: searchRegex },
+              { presidingJudgeTitle: searchRegex },
+            ],
+          },
+          { _id: 1 }
+        )
+          .limit(100)
+          .lean(),
+      ]);
+
       const matchedClientIds = matchedClients.map((c) => c._id);
+      const matchedCourtIds = matchedCourts.map((c) => c._id);
 
       // Find matching cases
       const caseSearchConditions: Record<string, unknown>[] = [
@@ -290,6 +350,9 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       if (matchedClientIds.length > 0) {
         caseSearchConditions.push({ clientId: { $in: matchedClientIds } });
       }
+      if (matchedCourtIds.length > 0) {
+        caseSearchConditions.push({ courtId: { $in: matchedCourtIds } });
+      }
 
       const matchedCases = await Case.find(
         {
@@ -297,7 +360,9 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
           $or: caseSearchConditions,
         },
         { _id: 1 }
-      ).lean();
+      )
+        .limit(100)
+        .lean();
       const matchedCaseIds = matchedCases.map((c) => c._id);
 
       const directConditions: Record<string, unknown>[] = [
@@ -309,6 +374,9 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       ];
       if (matchedCaseIds.length > 0) {
         directConditions.push({ caseId: { $in: matchedCaseIds } });
+      }
+      if (matchedCourtIds.length > 0) {
+        directConditions.push({ courtId: { $in: matchedCourtIds } });
       }
 
       filter.$or = directConditions;
@@ -328,7 +396,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   const skip = (page - 1) * limit;
 
   const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
   const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 
   // Execute stats aggregation and paginated records in parallel using common filter
@@ -419,10 +487,16 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
         path: "caseId",
         select:
           "internalReference caseNumber title caseType caseStatus priority courtId clientId filingDate nextHearingDate",
-        populate: {
-          path: "clientId",
-          select: "name clientNumber organizationName clientType phone email",
-        },
+        populate: [
+          {
+            path: "clientId",
+            select: "name clientNumber organizationName clientType phone email",
+          },
+          {
+            path: "courtId",
+            select: "name courtType district roomOrHall address presidingJudgeTitle",
+          },
+        ],
       })
       .populate({
         path: "courtId",
@@ -434,30 +508,23 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   const rawStats = statsAggResult[0];
   const total = rawStats?.total ?? 0;
 
-  // For hearings where courtId was not directly set, check if we need fallback courts from case
-  const unresolvedCourtIds = new Set<string>();
-  for (const h of hearings) {
-    const rawCaseObj = h.caseId as unknown as Record<string, unknown> | null;
-    if (!h.courtId && rawCaseObj && typeof rawCaseObj === "object" && rawCaseObj.courtId) {
-      const cId = rawCaseObj.courtId;
-      if (typeof cId === "string" || cId instanceof mongoose.Types.ObjectId) {
-        unresolvedCourtIds.add(String(cId));
-      }
-    }
-  }
-
-  let fallbackCourtsMap: Map<string, Record<string, unknown>> | undefined;
-  if (unresolvedCourtIds.size > 0) {
-    const courtsList = await Court.find({
-      _id: { $in: Array.from(unresolvedCourtIds).map((id) => new mongoose.Types.ObjectId(id)) },
-    }).lean();
-    fallbackCourtsMap = new Map(
-      courtsList.map((c) => [(c._id as mongoose.Types.ObjectId).toString(), c as unknown as Record<string, unknown>])
-    );
-  }
+  // Accurately batch check whether hearings on this page have attached documents
+  const hearingIds = hearings.map((h) => h._id);
+  const attachedOwnerIds =
+    hearingIds.length > 0
+      ? await AssetReference.distinct("ownerId", {
+          ownerType: ASSET_OWNER_TYPES.HEARING,
+          ownerId: { $in: hearingIds },
+          deletedAt: null,
+        })
+      : [];
+  const hearingsWithDocsSet = new Set(attachedOwnerIds.map(String));
 
   const items: HearingListItemDto[] = hearings.map((h) =>
-    formatHearingListItem(h as unknown as Record<string, unknown>, fallbackCourtsMap)
+    formatHearingListItem({
+      ...(h as unknown as IPopulatedHearingDoc),
+      isDeletable: !hearingsWithDocsSet.has(String(h._id)),
+    })
   );
 
   const stats: HearingStatsDto = {
@@ -488,22 +555,21 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
 /**
  * POST /api/v1/hearings
  *
- * Create a new hearing inside a database transaction, verifying references
- * and updating the associated Case's nextHearingDate.
+ * Create a new hearing inside a database transaction, verifying references,
+ * recording audit compliance logging, and updating the associated Case's nextHearingDate.
  */
 export const POST = withErrorHandler(async (req: NextRequest) => {
-  await getUserId();
+  const userId = await getUserId();
+  await ConnectDB();
 
   const body = await req.json();
   const validated = createHearingSchema.parse(body);
 
-  await ConnectDB();
-
-  // Verify Case exists and is active
+  // Verify Case exists and is active (select only necessary fields)
   const targetCase = await Case.findOne({
     _id: new mongoose.Types.ObjectId(validated.caseId),
     deletedAt: null,
-  });
+  }).select("_id courtId title");
 
   if (!targetCase) {
     throw ApiError.notFound(`Case with ID "${validated.caseId}" does not exist or has been removed.`);
@@ -512,7 +578,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   // Resolve Court ID: default to case's courtId if omitted
   let courtObjectId: mongoose.Types.ObjectId | null = null;
   if (validated.courtId) {
-    const courtExists = await Court.findOne({
+    const courtExists = await Court.exists({
       _id: new mongoose.Types.ObjectId(validated.courtId),
       deletedAt: null,
     });
@@ -551,19 +617,38 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     // Sync case.nextHearingDate
     await syncCaseNextHearingDate(targetCase._id, dbSession);
 
+    // Record audit log for hearing creation
+    await recordAuditLog({
+      req,
+      userId,
+      action: AUDIT_ACTIONS.CREATE,
+      entityType: AUDIT_ENTITY_TYPES.HEARING,
+      entityId: hearing._id,
+      oldValues: null,
+      newValues: hearing.toObject(),
+      description: `Scheduled hearing for case "${targetCase.title}" on ${hearing.hearingDate.toISOString()}`,
+      session: dbSession,
+    });
+
     return hearing;
   });
 
-  // Fetch populated hearing detail
+  // Fetch populated hearing detail in a single consolidated query
   const populatedDoc = await Hearing.findById(createdHearing._id)
     .populate({
       path: "caseId",
       select:
         "internalReference caseNumber title caseType caseStatus priority courtId clientId filingDate nextHearingDate",
-      populate: {
-        path: "clientId",
-        select: "name clientNumber organizationName clientType phone email",
-      },
+      populate: [
+        {
+          path: "clientId",
+          select: "name clientNumber organizationName clientType phone email",
+        },
+        {
+          path: "courtId",
+          select: "name courtType district roomOrHall address presidingJudgeTitle",
+        },
+      ],
     })
     .populate({
       path: "courtId",
@@ -572,12 +657,13 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     .lean();
 
   const formattedItem = formatHearingListItem(
-    populatedDoc as unknown as Record<string, unknown>
+    populatedDoc as unknown as IPopulatedHearingDoc
   );
 
   const detailDto: HearingDetailDto = {
     ...formattedItem,
     documentsCount: 0,
+    isDeletable: true,
   };
 
   const response: HearingActionResponse = {

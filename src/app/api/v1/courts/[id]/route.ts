@@ -3,81 +3,119 @@ import mongoose from "mongoose";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
+import { escapeRegex } from "@/lib/helpers/search.helper";
 import { Court } from "@/db/models/Court.model";
 import { Case } from "@/db/models/Case.model";
 import { Hearing } from "@/db/models/Hearing.model";
 import { AssetReference } from "@/db/models/AssetReference.model";
-import { COURT_TYPE_LABELS, CourtType } from "@/const/court.const";
 import { ASSET_OWNER_TYPES } from "@/const/asset-reference.const";
-import { updateCourtSchema } from "@/utils/zod/court.validation";
+import {
+  recordAuditLog,
+  calculateAuditDiff,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
+import { updateCourtSchema, courtIdParamSchema } from "@/utils/zod/court.validation";
+import { formatCourtItem } from "../route";
 import type {
-  CourtListItemDto,
   CourtActionResponse,
   CourtDeleteResponse,
 } from "@/types/court.types";
-import type { ICourtDocument } from "@/types/db/court.type";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
 /**
- * Helper to format a Court document into CourtListItemDto.
+ * Validates and extracts a valid MongoDB ObjectId from the route params.
  */
-function formatCourtItem(
-  court: ICourtDocument | Record<string, unknown>,
-  counts?: { cases?: number; hearings?: number; assets?: number }
-): CourtListItemDto {
-  const cType = court.courtType as CourtType;
-  const cases = counts?.cases ?? 0;
-  const hearings = counts?.hearings ?? 0;
-  const assets = counts?.assets ?? 0;
-
+async function getValidatedCourtId(params: Promise<{ id: string }>): Promise<{ id: string; objectId: mongoose.Types.ObjectId }> {
+  const resolved = await params;
+  const parsed = courtIdParamSchema.safeParse(resolved);
+  if (!parsed.success) {
+    throw ApiError.badRequest("Invalid court ID format");
+  }
   return {
-    id: (court._id as mongoose.Types.ObjectId).toString(),
-    name: court.name as string,
-    courtType: cType,
-    courtTypeLabel: COURT_TYPE_LABELS[cType] || (court.courtType as string),
-    district: court.district as string,
-    division: (court.division as string) || null,
-    roomOrHall: (court.roomOrHall as string) || null,
-    address: (court.address as string) || null,
-    presidingJudgeTitle: (court.presidingJudgeTitle as string) || null,
-    isActive: Boolean(court.isActive),
-    totalCases: cases,
-    totalHearings: hearings,
-    totalAssets: assets,
-    isDeletable: cases === 0 && hearings === 0 && assets === 0,
-    createdAt: court.createdAt ? new Date(court.createdAt as Date).toISOString() : "",
-    updatedAt: court.updatedAt ? new Date(court.updatedAt as Date).toISOString() : "",
+    id: parsed.data.id,
+    objectId: new mongoose.Types.ObjectId(parsed.data.id),
   };
 }
 
 /**
- * PATCH /api/v1/courts/[id]
+ * GET /api/v1/courts/[id]
  *
- * Update an existing court record using a transaction.
+ * Retrieve full details of a specific court by its ObjectId, including
+ * live associated case, hearing, and asset reference counts.
  */
-export const PATCH = withErrorHandler(
+export const GET = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
     await getUserId();
 
-    const { id } = await params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      throw ApiError.badRequest("Invalid court ID format");
+    const { objectId } = await getValidatedCourtId(params);
+
+    const court = await Court.findOne({
+      _id: objectId,
+      deletedAt: null,
+    })
+      .select(
+        "_id name courtType district division roomOrHall address presidingJudgeTitle isActive createdAt updatedAt"
+      )
+      .lean();
+
+    if (!court) {
+      throw ApiError.notFound("Court not found or has already been removed");
     }
 
-    const body = await req.json();
-    const validated = updateCourtSchema.parse(body);
+    // Compute relation counts for response DTO in parallel
+    const [casesCount, hearingsCount, assetsCount] = await Promise.all([
+      Case.countDocuments({ courtId: objectId, deletedAt: null }),
+      Hearing.countDocuments({ courtId: objectId }),
+      AssetReference.countDocuments({
+        ownerType: ASSET_OWNER_TYPES.COURT,
+        ownerId: objectId,
+        deletedAt: null,
+      }),
+    ]);
 
-    const objectId = new mongoose.Types.ObjectId(id);
+    const dto = formatCourtItem(court, {
+      cases: casesCount,
+      hearings: hearingsCount,
+      assets: assetsCount,
+    });
+
+    const response: CourtActionResponse = {
+      success: true,
+      message: "Court details retrieved successfully.",
+      data: dto,
+    };
+
+    return NextResponse.json(response);
+  }
+);
+
+/**
+ * PATCH /api/v1/courts/[id]
+ *
+ * Update an existing court record using a transaction with full audit logging and conflict guards.
+ */
+export const PATCH = withErrorHandler(
+  async (req: NextRequest, { params }: RouteParams) => {
+    const userId = await getUserId();
+
+    const { objectId } = await getValidatedCourtId(params);
+
+    const body = await req.json().catch(() => ({}));
+    const validated = updateCourtSchema.parse(body);
 
     // If name or district is updated, check for duplicate conflict with other courts
     if (validated.name || validated.district) {
       const existingRecord = await Court.findOne({
         _id: objectId,
         deletedAt: null,
-      }).lean();
+      })
+        .select("name district")
+        .lean();
+
       if (!existingRecord) {
         throw ApiError.notFound("Court not found");
       }
@@ -88,9 +126,11 @@ export const PATCH = withErrorHandler(
       const duplicate = await Court.findOne({
         _id: { $ne: objectId },
         deletedAt: null,
-        name: { $regex: new RegExp(`^${targetName}$`, "i") },
-        district: { $regex: new RegExp(`^${targetDistrict}$`, "i") },
-      });
+        name: { $regex: new RegExp(`^${escapeRegex(targetName)}$`, "i") },
+        district: { $regex: new RegExp(`^${escapeRegex(targetDistrict)}$`, "i") },
+      })
+        .select("_id")
+        .lean();
 
       if (duplicate) {
         throw ApiError.conflict(
@@ -105,9 +145,12 @@ export const PATCH = withErrorHandler(
         _id: objectId,
         deletedAt: null,
       }).session(dbSession);
+
       if (!court) {
         throw ApiError.notFound("Court not found");
       }
+
+      const beforeState = court.toObject();
 
       if (validated.name !== undefined) court.name = validated.name.trim();
       if (validated.courtType !== undefined) court.courtType = validated.courtType;
@@ -121,10 +164,27 @@ export const PATCH = withErrorHandler(
       if (validated.isActive !== undefined) court.isActive = validated.isActive;
 
       await court.save({ session: dbSession });
+
+      // Record audit log for court update if any tracked fields changed
+      const diff = calculateAuditDiff(beforeState, court.toObject());
+      if (diff.oldValues !== null || diff.newValues !== null) {
+        await recordAuditLog({
+          req,
+          userId,
+          action: AUDIT_ACTIONS.UPDATE,
+          entityType: AUDIT_ENTITY_TYPES.COURT,
+          entityId: court._id,
+          oldValues: diff.oldValues,
+          newValues: diff.newValues,
+          description: `Updated court "${court.name}"`,
+          session: dbSession,
+        });
+      }
+
       return court;
     });
 
-    // Compute relation counts for response DTO
+    // Compute relation counts for response DTO in parallel
     const [casesCount, hearingsCount, assetsCount] = await Promise.all([
       Case.countDocuments({ courtId: objectId, deletedAt: null }),
       Hearing.countDocuments({ courtId: objectId }),
@@ -135,7 +195,7 @@ export const PATCH = withErrorHandler(
       }),
     ]);
 
-    const dto = formatCourtItem(updatedCourt, {
+    const dto = formatCourtItem(updatedCourt.toObject(), {
       cases: casesCount,
       hearings: hearingsCount,
       assets: assetsCount,
@@ -163,25 +223,24 @@ export const PUT = PATCH;
  *
  * Safely soft-deletes a court record (sets deletedAt timestamp and marks inactive).
  * Enforces reference integrity by checking for linked active Cases, Hearings,
- * and AssetReferences before moving to trash.
+ * and AssetReferences before moving to trash. Uses transaction for atomic soft-deletion and audit logging.
  */
 export const DELETE = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
 
-    const { id } = await params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      throw ApiError.badRequest("Invalid court ID format");
-    }
+    const { id, objectId } = await getValidatedCourtId(params);
 
-    const objectId = new mongoose.Types.ObjectId(id);
     const court = await Court.findOne({
       _id: objectId,
       deletedAt: null,
     });
+
     if (!court) {
       throw ApiError.notFound("Court not found or already deleted");
     }
+
+    const beforeState = court.toObject();
 
     // Association guard: check if court is referenced anywhere
     const [caseCount, hearingCount, assetCount] = await Promise.all([
@@ -220,10 +279,25 @@ export const DELETE = withErrorHandler(
       );
     }
 
-    // Perform soft delete
-    court.deletedAt = new Date();
-    court.isActive = false;
-    await court.save();
+    // Perform atomic soft deletion and audit logging inside transaction
+    await withTransaction(async (dbSession) => {
+      court.deletedAt = new Date();
+      court.isActive = false;
+      await court.save({ session: dbSession });
+
+      // Record audit log for court soft deletion
+      await recordAuditLog({
+        req,
+        userId,
+        action: AUDIT_ACTIONS.SOFT_DELETE,
+        entityType: AUDIT_ENTITY_TYPES.COURT,
+        entityId: court._id,
+        oldValues: { deletedAt: null, isActive: beforeState.isActive },
+        newValues: { deletedAt: court.deletedAt, isActive: false },
+        description: `Archived court "${court.name}"`,
+        session: dbSession,
+      });
+    });
 
     const response: CourtDeleteResponse = {
       success: true,

@@ -2,11 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import ConnectDB from "@/config/db";
 import User from "@/db/models/User.model";
-import { rateLimit, isInCooldown, setCooldown } from "@/lib/services/redis.service";
+import {
+  rateLimit,
+  isInCooldown,
+  setCooldown,
+  trackFailedAttempt,
+  clearFailedAttempts,
+  LOCKOUT_TIERS,
+} from "@/lib/services/redis.service";
 
 const RATE_LIMIT_MAX = 5;
 const RATE_LIMIT_WINDOW_S = 60;
-const FAILED_ATTEMPT_COOLDOWN_S = 10;
 
 export async function POST(req: NextRequest) {
   try {
@@ -40,7 +46,7 @@ export async function POST(req: NextRequest) {
     const coolingDown = await isInCooldown("signin_fail", email);
     if (coolingDown) {
       return NextResponse.json(
-        { error: "Too many failed attempts for this account. Please wait 10 seconds before trying again." },
+        { error: "Too many failed attempts for this account. Please wait before trying again." },
         { status: 429 }
       );
     }
@@ -52,19 +58,30 @@ export async function POST(req: NextRequest) {
       .lean();
 
     if (!user || !user.passwordHash) {
-      // Set cooldown even if user is not found to prevent user enumeration timing attacks
-      await setCooldown("signin_fail", email, FAILED_ATTEMPT_COOLDOWN_S);
+      // Apply progressive lockout even for unknown emails (prevents user enumeration).
+      const failures = await trackFailedAttempt(email);
+      const tier = LOCKOUT_TIERS.find((t) => failures >= t.minFailures);
+      if (tier) {
+        await setCooldown("signin_fail", email, tier.cooldownSeconds);
+      }
       return NextResponse.json({ error: "Invalid email or password." }, { status: 401 });
     }
 
     // 5. Compare Password Hash
     const passwordMatches = await bcrypt.compare(password, user.passwordHash);
     if (!passwordMatches) {
-      await setCooldown("signin_fail", email, FAILED_ATTEMPT_COOLDOWN_S);
+      const failures = await trackFailedAttempt(email);
+      const tier = LOCKOUT_TIERS.find((t) => failures >= t.minFailures);
+      if (tier) {
+        await setCooldown("signin_fail", email, tier.cooldownSeconds);
+      }
       return NextResponse.json({ error: "Invalid email or password." }, { status: 401 });
     }
 
-    // 6. Record last login timestamp asynchronously
+    // 6. Record last login timestamp and clear brute-force counter
+    clearFailedAttempts(email).catch((err) => {
+      console.warn("Could not clear failed attempts:", err);
+    });
     User.findByIdAndUpdate(user._id, { lastLoginAt: new Date() }).catch((err) => {
       console.warn("Could not record lastLoginAt:", err);
     });

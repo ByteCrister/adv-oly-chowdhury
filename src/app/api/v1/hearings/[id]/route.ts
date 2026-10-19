@@ -1,20 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
+import ConnectDB from "@/db";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
-import ConnectDB from "@/db";
 import { Hearing } from "@/db/models/Hearing.model";
 import { Case } from "@/db/models/Case.model";
 import { Court } from "@/db/models/Court.model";
 import { AssetReference } from "@/db/models/AssetReference.model";
 import { ASSET_OWNER_TYPES } from "@/const/asset-reference.const";
+import {
+  recordAuditLog,
+  calculateAuditDiff,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
 import { updateHearingSchema } from "@/utils/zod/hearing.validation";
-import { formatHearingListItem, syncCaseNextHearingDate } from "../route";
+import { formatHearingListItem, syncCaseNextHearingDate, extractIdString } from "../route";
 import type {
   HearingDetailDto,
   HearingActionResponse,
   HearingDeleteResponse,
+  IPopulatedHearingDoc,
 } from "@/types/hearing.types";
 
 interface RouteParams {
@@ -22,7 +29,7 @@ interface RouteParams {
 }
 
 /**
- * Fetch and construct the HearingDetailDto for a hearing record.
+ * Fetch and construct the HearingDetailDto for a hearing record with parallelized lookups.
  */
 async function buildHearingDetailDto(
   hearingId: mongoose.Types.ObjectId,
@@ -33,10 +40,16 @@ async function buildHearingDetailDto(
       path: "caseId",
       select:
         "internalReference caseNumber title caseType caseStatus priority courtId clientId filingDate nextHearingDate",
-      populate: {
-        path: "clientId",
-        select: "name clientNumber organizationName clientType phone email",
-      },
+      populate: [
+        {
+          path: "clientId",
+          select: "name clientNumber organizationName clientType phone email",
+        },
+        {
+          path: "courtId",
+          select: "name courtType district roomOrHall address presidingJudgeTitle",
+        },
+      ],
     })
     .populate({
       path: "courtId",
@@ -47,12 +60,21 @@ async function buildHearingDetailDto(
     query.session(dbSession);
   }
 
-  const hearing = await query.lean();
+  // Execute hearing detail fetch and document reference count in parallel
+  const [hearing, documentsCount] = await Promise.all([
+    query.lean(),
+    AssetReference.countDocuments({
+      ownerType: ASSET_OWNER_TYPES.HEARING,
+      ownerId: hearingId,
+      deletedAt: null,
+    }),
+  ]);
+
   if (!hearing) {
     throw ApiError.notFound("Hearing record not found or has been removed.");
   }
 
-  // Fallback court lookup if courtId was not set on hearing
+  // Fallback court lookup only if courtId was not set and not resolved via case
   let fallbackCourtsMap: Map<string, Record<string, unknown>> | undefined;
   const rawCaseObj = hearing.caseId as unknown as Record<string, unknown> | null;
   if (!hearing.courtId && rawCaseObj && typeof rawCaseObj === "object" && rawCaseObj.courtId) {
@@ -67,21 +89,15 @@ async function buildHearingDetailDto(
     }
   }
 
-  // Count attached documents in AssetReference
-  const documentsCount = await AssetReference.countDocuments({
-    ownerType: ASSET_OWNER_TYPES.HEARING,
-    ownerId: hearingId,
-    deletedAt: null,
-  });
-
   const formattedItem = formatHearingListItem(
-    hearing as unknown as Record<string, unknown>,
+    hearing as unknown as IPopulatedHearingDoc,
     fallbackCourtsMap
   );
 
   return {
     ...formattedItem,
     documentsCount,
+    isDeletable: documentsCount === 0,
   };
 }
 
@@ -93,13 +109,12 @@ async function buildHearingDetailDto(
 export const GET = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
     await getUserId();
+    await ConnectDB();
 
     const { id } = await params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
       throw ApiError.badRequest("Invalid hearing ID format");
     }
-
-    await ConnectDB();
 
     const objectId = new mongoose.Types.ObjectId(id);
     const detailDto = await buildHearingDetailDto(objectId);
@@ -121,7 +136,8 @@ export const GET = withErrorHandler(
  */
 export const PATCH = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
+    await ConnectDB();
 
     const { id } = await params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -131,51 +147,48 @@ export const PATCH = withErrorHandler(
     const body = await req.json();
     const validated = updateHearingSchema.parse(body);
 
-    await ConnectDB();
-
     const objectId = new mongoose.Types.ObjectId(id);
-    const existingHearing = await Hearing.findById(objectId);
 
-    if (!existingHearing) {
-      throw ApiError.notFound("Hearing record not found or has been removed.");
-    }
-
-    // Verify Case if caseId is changing
-    let targetCaseId = existingHearing.caseId;
-    const oldCaseId = existingHearing.caseId;
-    if (validated.caseId && validated.caseId !== existingHearing.caseId.toString()) {
-      const targetCase = await Case.findOne({
-        _id: new mongoose.Types.ObjectId(validated.caseId),
-        deletedAt: null,
-      });
-      if (!targetCase) {
-        throw ApiError.notFound(`Case with ID "${validated.caseId}" not found.`);
-      }
-      targetCaseId = targetCase._id;
-    }
-
-    // Verify Court if courtId is explicitly provided
-    let targetCourtId = existingHearing.courtId;
-    if (validated.courtId !== undefined) {
-      if (validated.courtId) {
-        const targetCourt = await Court.findOne({
-          _id: new mongoose.Types.ObjectId(validated.courtId),
-          deletedAt: null,
-        });
-        if (!targetCourt) {
-          throw ApiError.notFound(`Court with ID "${validated.courtId}" not found.`);
-        }
-        targetCourtId = targetCourt._id;
-      } else {
-        targetCourtId = null;
-      }
-    }
-
-    // Execute update inside a transaction
+    // Execute update inside a single ACID transaction without redundant pre-fetching
     await withTransaction(async (dbSession) => {
       const hearing = await Hearing.findById(objectId).session(dbSession);
       if (!hearing) {
-        throw ApiError.notFound("Hearing record not found.");
+        throw ApiError.notFound("Hearing record not found or has been removed.");
+      }
+
+      const beforeState = hearing.toObject();
+      let targetCaseId = hearing.caseId;
+      const oldCaseId = hearing.caseId;
+
+      // Verify Case if caseId is changing
+      if (validated.caseId && validated.caseId !== hearing.caseId.toString()) {
+        const targetCaseExists = await Case.exists({
+          _id: new mongoose.Types.ObjectId(validated.caseId),
+          deletedAt: null,
+        }).session(dbSession);
+
+        if (!targetCaseExists) {
+          throw ApiError.notFound(`Case with ID "${validated.caseId}" not found or has been removed.`);
+        }
+        targetCaseId = new mongoose.Types.ObjectId(validated.caseId);
+      }
+
+      // Verify Court if courtId is explicitly provided
+      let targetCourtId = hearing.courtId;
+      if (validated.courtId !== undefined) {
+        if (validated.courtId) {
+          const targetCourtExists = await Court.exists({
+            _id: new mongoose.Types.ObjectId(validated.courtId),
+            deletedAt: null,
+          }).session(dbSession);
+
+          if (!targetCourtExists) {
+            throw ApiError.notFound(`Court with ID "${validated.courtId}" not found or has been removed.`);
+          }
+          targetCourtId = new mongoose.Types.ObjectId(validated.courtId);
+        } else {
+          targetCourtId = null;
+        }
       }
 
       if (validated.caseId !== undefined) {
@@ -219,6 +232,20 @@ export const PATCH = withErrorHandler(
       if (oldCaseId.toString() !== targetCaseId.toString()) {
         await syncCaseNextHearingDate(oldCaseId, dbSession);
       }
+
+      // Record audit log for hearing update
+      const diff = calculateAuditDiff(beforeState, hearing.toObject());
+      await recordAuditLog({
+        req,
+        userId,
+        action: AUDIT_ACTIONS.UPDATE,
+        entityType: AUDIT_ENTITY_TYPES.HEARING,
+        entityId: hearing._id,
+        oldValues: diff.oldValues,
+        newValues: diff.newValues,
+        description: `Updated hearing scheduled for ${hearing.hearingDate.toISOString()}`,
+        session: dbSession,
+      });
     });
 
     const updatedDto = await buildHearingDetailDto(objectId);
@@ -247,28 +274,29 @@ export const PUT = PATCH;
  */
 export const DELETE = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
+    await ConnectDB();
 
     const { id } = await params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
       throw ApiError.badRequest("Invalid hearing ID format");
     }
 
-    await ConnectDB();
-
     const objectId = new mongoose.Types.ObjectId(id);
-    const hearing = await Hearing.findById(objectId);
+
+    // Concurrently fetch the target hearing and check attached document references
+    const [hearing, attachedFilesCount] = await Promise.all([
+      Hearing.findById(objectId),
+      AssetReference.countDocuments({
+        ownerType: ASSET_OWNER_TYPES.HEARING,
+        ownerId: objectId,
+        deletedAt: null,
+      }),
+    ]);
 
     if (!hearing) {
       throw ApiError.notFound("Hearing record not found or already deleted.");
     }
-
-    // Association guard: check if hearing has attached files in AssetReference
-    const attachedFilesCount = await AssetReference.countDocuments({
-      ownerType: ASSET_OWNER_TYPES.HEARING,
-      ownerId: objectId,
-      deletedAt: null,
-    });
 
     if (attachedFilesCount > 0) {
       throw ApiError.conflict(
@@ -284,10 +312,25 @@ export const DELETE = withErrorHandler(
 
     // Execute deletion inside a transaction
     await withTransaction(async (dbSession) => {
+      const hearingSnapshot = hearing.toObject();
+
       await Hearing.findByIdAndDelete(objectId).session(dbSession);
 
       // Recalculate case's next hearing date
       await syncCaseNextHearingDate(caseId, dbSession);
+
+      // Record audit log for hearing hard deletion
+      await recordAuditLog({
+        req,
+        userId,
+        action: AUDIT_ACTIONS.DELETE,
+        entityType: AUDIT_ENTITY_TYPES.HEARING,
+        entityId: hearing._id,
+        oldValues: hearingSnapshot,
+        newValues: null,
+        description: `Deleted hearing record for case ${extractIdString(caseId)}`,
+        session: dbSession,
+      });
     });
 
     const response: HearingDeleteResponse = {

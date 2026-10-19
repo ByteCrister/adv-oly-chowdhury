@@ -5,6 +5,7 @@ import axios from "axios";
 import { CASE_EXPENSE_QUERY_KEYS } from "@/const/case-expense.const";
 import { FINANCIAL_QUERY_KEYS } from "@/const/financial.const";
 import { CASE_QUERY_KEYS } from "@/const/case.const";
+import { AUDIT_QUERY_KEYS } from "@/const/audit-log.const";
 import type { CaseExpenseDeleteResponse } from "@/types/case-expense.types";
 
 /**
@@ -43,6 +44,9 @@ export function useDeleteCaseExpenseMutation(
         }),
         queryClient.invalidateQueries({
           queryKey: CASE_QUERY_KEYS.all,
+        }),
+        queryClient.invalidateQueries({
+          queryKey: AUDIT_QUERY_KEYS.all,
         }),
       ]);
       await options?.onSuccess?.(data, variables, context, mutation);

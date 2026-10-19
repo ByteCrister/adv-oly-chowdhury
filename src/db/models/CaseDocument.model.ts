@@ -12,7 +12,6 @@ const caseDocumentSchema = new Schema<ICaseDocumentRecord>(
       type: Schema.Types.ObjectId,
       ref: MODELS.CASE,
       required: [true, "Case ID is required"],
-      index: true,
     },
     assetReferenceId: {
       type: Schema.Types.ObjectId,
@@ -57,7 +56,6 @@ const caseDocumentSchema = new Schema<ICaseDocumentRecord>(
     deletedAt: {
       type: Date,
       default: null,
-      index: true,
     },
   },
   {
@@ -66,11 +64,21 @@ const caseDocumentSchema = new Schema<ICaseDocumentRecord>(
   }
 );
 
+// Case-specific scoped indexes
 caseDocumentSchema.index({ caseId: 1, createdAt: -1 });
 caseDocumentSchema.index({ caseId: 1, documentType: 1 });
 caseDocumentSchema.index({ caseId: 1, assetReferenceId: 1 });
-caseDocumentSchema.index({ caseId: 1, deletedAt: 1 });
+caseDocumentSchema.index({ caseId: 1, deletedAt: 1, createdAt: -1 });
+caseDocumentSchema.index({ caseId: 1, deletedAt: 1, documentDate: -1 });
+caseDocumentSchema.index({ caseId: 1, deletedAt: 1, documentType: 1 });
+
+// Chamber Documents Vault global query indexes
 caseDocumentSchema.index({ deletedAt: 1, createdAt: -1 });
+caseDocumentSchema.index({ deletedAt: 1, documentType: 1, createdAt: -1 });
+caseDocumentSchema.index({ deletedAt: 1, isConfidential: 1, createdAt: -1 });
+caseDocumentSchema.index({ deletedAt: 1, documentDate: -1, createdAt: -1 });
+caseDocumentSchema.index({ deletedAt: 1, title: 1 });
+caseDocumentSchema.index({ assetReferenceId: 1, deletedAt: 1 });
 
 export const CaseDocument: Model<ICaseDocumentRecord> =
   (mongoose.models[MODELS.CASE_DOCUMENT] as Model<ICaseDocumentRecord>) ||

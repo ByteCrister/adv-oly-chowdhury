@@ -6,6 +6,7 @@ import { CASE_QUERY_KEYS } from "@/const/case.const";
 import { CLIENT_QUERY_KEYS } from "@/const/client.const";
 import { DASHBOARD_QUERY_KEYS } from "@/const/dashboard.const";
 import { DROPDOWN_QUERY_KEYS } from "@/const/dropdown.const";
+import { AUDIT_QUERY_KEYS } from "@/const/audit-log.const";
 import type { UpdateCaseInput, CaseActionResponse } from "@/types/case.types";
 
 interface UpdateCaseVariables {
@@ -43,6 +44,7 @@ export function useUpdateCaseMutation(
         queryClient.invalidateQueries({ queryKey: CLIENT_QUERY_KEYS.all }),
         queryClient.invalidateQueries({ queryKey: DASHBOARD_QUERY_KEYS.all }),
         queryClient.invalidateQueries({ queryKey: DROPDOWN_QUERY_KEYS.ALL }),
+        queryClient.invalidateQueries({ queryKey: AUDIT_QUERY_KEYS.all }),
       ]);
       await options?.onSuccess?.(data, variables, context, mutation);
     },

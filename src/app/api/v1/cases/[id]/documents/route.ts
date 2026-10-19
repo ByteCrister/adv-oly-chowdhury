@@ -4,6 +4,11 @@ import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
 import { sanitizeSearchParam, buildSearchRegex } from "@/lib/helpers/search.helper";
+import {
+  recordAuditLog,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
 import ConnectDB from "@/db";
 import { Case } from "@/db/models/Case.model";
 import { CaseDocument } from "@/db/models/CaseDocument.model";
@@ -22,6 +27,7 @@ import {
   createCaseDocumentSchema,
   caseDocumentQueryFilterSchema,
 } from "@/utils/zod/case-document.validation";
+import { formatSafeIsoDate } from "@/app/api/v1/cases/route";
 import type {
   CaseDocumentItemDto,
   CaseDocumentPaginationResponse,
@@ -59,12 +65,14 @@ export function formatCaseDocumentItem(
       : null,
     assetReferenceId: assetRef?._id
       ? assetRef._id.toString()
-      : (doc.assetReferenceId as mongoose.Types.ObjectId).toString(),
+      : doc.assetReferenceId
+      ? String(doc.assetReferenceId)
+      : "",
     assetId: asset?._id ? asset._id.toString() : "",
     documentType: docType,
     documentTypeLabel: CASE_DOCUMENT_TYPE_LABELS[docType] || String(doc.documentType),
     title: doc.title as string,
-    documentDate: doc.documentDate ? new Date(doc.documentDate as Date).toISOString() : null,
+    documentDate: formatSafeIsoDate(doc.documentDate),
     description: (doc.description as string) || null,
     exhibitNumber: (doc.exhibitNumber as string) || null,
     isConfidential: Boolean(doc.isConfidential),
@@ -77,8 +85,8 @@ export function formatCaseDocumentItem(
     width: asset?.width || null,
     height: asset?.height || null,
     pages: asset?.pages || null,
-    createdAt: doc.createdAt ? new Date(doc.createdAt as Date).toISOString() : new Date().toISOString(),
-    updatedAt: doc.updatedAt ? new Date(doc.updatedAt as Date).toISOString() : new Date().toISOString(),
+    createdAt: formatSafeIsoDate(doc.createdAt) || new Date().toISOString(),
+    updatedAt: formatSafeIsoDate(doc.updatedAt) || new Date().toISOString(),
   };
 }
 
@@ -233,7 +241,7 @@ export const GET = withErrorHandler(
  */
 export const POST = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
-    await getUserId();
+    const userId = await getUserId();
 
     const { id } = await params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -261,26 +269,26 @@ export const POST = withErrorHandler(
     const validated = createCaseDocumentSchema.parse(payload);
     const assetRefId = new mongoose.Types.ObjectId(validated.assetReferenceId);
 
-    // Verify AssetReference exists and is active
-    const existingRef = await AssetReference.findOne({
-      _id: assetRefId,
-      deletedAt: null,
-    });
-
-    if (!existingRef) {
-      throw ApiError.badRequest(
-        "Referenced media file does not exist or has already been deleted."
-      );
-    }
-
     // Create case document record inside transaction
     const createdDoc = await withTransaction(async (dbSession) => {
-      // 1. Ensure AssetReference is owned by this Case
+      // 1. Verify AssetReference exists and is active inside session
+      const existingRef = await AssetReference.findOne({
+        _id: assetRefId,
+        deletedAt: null,
+      }).session(dbSession);
+
+      if (!existingRef) {
+        throw ApiError.badRequest(
+          "Referenced media file does not exist or has already been deleted."
+        );
+      }
+
+      // 2. Ensure AssetReference is owned by this Case
       existingRef.ownerType = ASSET_OWNER_TYPES.CASE;
       existingRef.ownerId = caseObjectId;
       await existingRef.save({ session: dbSession });
 
-      // 2. Create CaseDocument
+      // 3. Create CaseDocument
       const [doc] = await CaseDocument.create(
         [
           {
@@ -296,6 +304,19 @@ export const POST = withErrorHandler(
         ],
         { session: dbSession }
       );
+
+      // 4. Record audit log for case document creation
+      await recordAuditLog({
+        req,
+        userId,
+        action: AUDIT_ACTIONS.CREATE,
+        entityType: AUDIT_ENTITY_TYPES.CASE_DOCUMENT,
+        entityId: doc._id,
+        oldValues: null,
+        newValues: doc.toObject(),
+        description: `Added document "${doc.title}" to case "${parentCase.title}"`,
+        session: dbSession,
+      });
 
       return doc;
     });

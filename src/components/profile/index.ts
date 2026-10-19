@@ -5,3 +5,6 @@ export * from "./ProfileTabsNav";
 export * from "./ProfileInfoView";
 export * from "./ProfileEditForm";
 export * from "./ProfileSkeleton";
+export * from "./AuditHistorySection";
+export * from "./AuditHistoryItem";
+export * from "./AuditHistoryPagination";

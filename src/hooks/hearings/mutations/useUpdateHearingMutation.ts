@@ -6,6 +6,7 @@ import { HEARING_QUERY_KEYS } from "@/const/hearing.const";
 import { CASE_QUERY_KEYS } from "@/const/case.const";
 import { DASHBOARD_QUERY_KEYS } from "@/const/dashboard.const";
 import { CLIENT_QUERY_KEYS } from "@/const/client.const";
+import { AUDIT_QUERY_KEYS } from "@/const/audit-log.const";
 import type { UpdateHearingInput, HearingActionResponse } from "@/types/hearing.types";
 
 export interface UpdateHearingParams {
@@ -45,6 +46,7 @@ export function useUpdateHearingMutation(
         queryClient.invalidateQueries({ queryKey: CASE_QUERY_KEYS.all }),
         queryClient.invalidateQueries({ queryKey: DASHBOARD_QUERY_KEYS.all }),
         queryClient.invalidateQueries({ queryKey: CLIENT_QUERY_KEYS.all }),
+        queryClient.invalidateQueries({ queryKey: AUDIT_QUERY_KEYS.all }),
       ]);
       await options?.onSuccess?.(data, variables, context, mutation);
     },

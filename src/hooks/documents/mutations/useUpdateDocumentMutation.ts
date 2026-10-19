@@ -7,6 +7,7 @@ import { CASE_DOCUMENT_QUERY_KEYS } from "@/const/case-document.const";
 import { CLIENT_DOCUMENT_QUERY_KEYS } from "@/const/client-document.const";
 import { CASE_QUERY_KEYS } from "@/const/case.const";
 import { CLIENT_QUERY_KEYS } from "@/const/client.const";
+import { AUDIT_QUERY_KEYS } from "@/const/audit-log.const";
 import type {
   UpdateUnifiedDocumentInput,
   DocumentActionResponse,
@@ -43,6 +44,7 @@ export function useUpdateDocumentMutation(
         queryClient.invalidateQueries({ queryKey: CLIENT_DOCUMENT_QUERY_KEYS.all }),
         queryClient.invalidateQueries({ queryKey: CASE_QUERY_KEYS.all }),
         queryClient.invalidateQueries({ queryKey: CLIENT_QUERY_KEYS.all }),
+        queryClient.invalidateQueries({ queryKey: AUDIT_QUERY_KEYS.all }),
       ]);
       await options?.onSuccess?.(data, variables, context, mutation);
     },

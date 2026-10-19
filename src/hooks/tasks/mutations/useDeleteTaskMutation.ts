@@ -6,6 +6,7 @@ import { TASK_QUERY_KEYS } from "@/const/task.const";
 import { DASHBOARD_QUERY_KEYS } from "@/const/dashboard.const";
 import { CLIENT_QUERY_KEYS } from "@/const/client.const";
 import { CASE_QUERY_KEYS } from "@/const/case.const";
+import { AUDIT_QUERY_KEYS } from "@/const/audit-log.const";
 import type { TaskDeleteResponse } from "@/types/task.types";
 
 export async function deleteTask(id: string): Promise<TaskDeleteResponse> {
@@ -27,6 +28,7 @@ export function useDeleteTaskMutation(
         queryClient.invalidateQueries({ queryKey: DASHBOARD_QUERY_KEYS.all }),
         queryClient.invalidateQueries({ queryKey: CLIENT_QUERY_KEYS.all }),
         queryClient.invalidateQueries({ queryKey: CASE_QUERY_KEYS.all }),
+        queryClient.invalidateQueries({ queryKey: AUDIT_QUERY_KEYS.all }),
       ]);
       await options?.onSuccess?.(data, variables, context, mutation);
     },

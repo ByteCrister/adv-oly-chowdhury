@@ -3,6 +3,11 @@ import mongoose from "mongoose";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { sanitizeSearchParam, buildSearchRegex } from "@/lib/helpers/search.helper";
+import {
+  recordAuditLog,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+} from "@/lib/helpers/audit.helper";
 import ConnectDB from "@/db";
 import { Case } from "@/db/models/Case.model";
 import { Client } from "@/db/models/Client.model";
@@ -37,6 +42,33 @@ import type {
   CaseClientDto,
   CaseCourtDto,
 } from "@/types/case.types";
+import type { ICase, ICaseDocument } from "@/types/db/case.type";
+
+/**
+ * Safely extracts a string ID from an ObjectId, populated object, or string.
+ */
+export function extractIdString(val: unknown): string {
+  if (!val) return "";
+  if (val instanceof mongoose.Types.ObjectId) return val.toString();
+  if (typeof val === "object" && "_id" in (val as Record<string, unknown>)) {
+    const inner = (val as Record<string, unknown>)._id;
+    return inner ? String(inner) : "";
+  }
+  return String(val);
+}
+
+/**
+ * Safely converts an arbitrary date representation into an ISO string.
+ */
+export function formatSafeIsoDate(val: unknown): string | null {
+  if (!val) return null;
+  if (val instanceof Date) return isNaN(val.getTime()) ? null : val.toISOString();
+  if (typeof val === "string" || typeof val === "number") {
+    const d = new Date(val);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  }
+  return null;
+}
 
 /**
  * Generate a sequential, year-scoped internalReference (e.g. CASE-2026-0001).
@@ -70,8 +102,6 @@ export async function generateCaseReference(
   return `${prefix}${String(nextSeq).padStart(4, "0")}`;
 }
 
-import type { ICase, ICaseDocument } from "@/types/db/case.type";
-
 export type CaseDocInput =
   | ICaseDocument
   | ICase
@@ -92,7 +122,7 @@ export function formatCaseListItem(
 ): CaseListItemDto {
   const rawDoc = doc as Record<string, unknown>;
   const rawId = (doc as { _id?: unknown })._id;
-  const id = rawId ? (rawId as mongoose.Types.ObjectId).toString() : "";
+  const id = rawId ? extractIdString(rawId) : "";
   const rawClient = rawDoc.clientId as Record<string, unknown> | null;
   const rawCourt = rawDoc.courtId as Record<string, unknown> | null;
 
@@ -101,9 +131,9 @@ export function formatCaseListItem(
   const priority = (rawDoc.priority as CasePriority) || CASE_PRIORITIES.NORMAL;
   const courtType = (rawCourt?.courtType as CourtType) || COURT_TYPES.DISTRICT_JUDGE_COURT;
 
-  const clientDto: CaseClientDto | null = rawClient
+  const clientDto: CaseClientDto | null = rawClient && rawClient._id
     ? {
-        id: (rawClient._id as mongoose.Types.ObjectId).toString(),
+        id: extractIdString(rawClient._id),
         clientNumber: (rawClient.clientNumber as string) || "",
         name: (rawClient.name as string) || "Unknown Client",
         organizationName: (rawClient.organizationName as string) || null,
@@ -113,9 +143,9 @@ export function formatCaseListItem(
       }
     : null;
 
-  const courtDto: CaseCourtDto | null = rawCourt
+  const courtDto: CaseCourtDto | null = rawCourt && rawCourt._id
     ? {
-        id: (rawCourt._id as mongoose.Types.ObjectId).toString(),
+        id: extractIdString(rawCourt._id),
         name: (rawCourt.name as string) || "Unknown Court",
         courtType,
         courtTypeLabel: COURT_TYPE_LABELS[courtType] || String(rawCourt.courtType || ""),
@@ -139,11 +169,11 @@ export function formatCaseListItem(
     caseType,
     caseTypeLabel: CASE_TYPE_LABELS[caseType] || caseType,
     caseCategory: (rawDoc.caseCategory as string) || null,
-    courtId: rawCourt ? (rawCourt._id as mongoose.Types.ObjectId).toString() : String(rawDoc.courtId || ""),
+    courtId: extractIdString(rawDoc.courtId),
     court: courtDto,
-    clientId: rawClient ? (rawClient._id as mongoose.Types.ObjectId).toString() : String(rawDoc.clientId || ""),
+    clientId: extractIdString(rawDoc.clientId),
     client: clientDto,
-    filingDate: rawDoc.filingDate ? new Date(rawDoc.filingDate as Date).toISOString() : null,
+    filingDate: formatSafeIsoDate(rawDoc.filingDate),
     caseStatus,
     caseStatusLabel: CASE_STATUS_LABELS[caseStatus] || caseStatus,
     priority,
@@ -152,16 +182,16 @@ export function formatCaseListItem(
     legalIssues: (rawDoc.legalIssues as string) || null,
     opposingCounsel: (rawDoc.opposingCounsel as string) || null,
     opposingParties: Array.isArray(rawDoc.opposingParties) ? (rawDoc.opposingParties as string[]) : [],
-    nextHearingDate: rawDoc.nextHearingDate ? new Date(rawDoc.nextHearingDate as Date).toISOString() : null,
-    closedAt: rawDoc.closedAt ? new Date(rawDoc.closedAt as Date).toISOString() : null,
+    nextHearingDate: formatSafeIsoDate(rawDoc.nextHearingDate),
+    closedAt: formatSafeIsoDate(rawDoc.closedAt),
     closureReason: (rawDoc.closureReason as string) || null,
     hearingsCount,
     documentsCount,
     eventsCount,
     partiesCount,
     isDeletable: hearingsCount === 0 && documentsCount === 0,
-    createdAt: rawDoc.createdAt ? new Date(rawDoc.createdAt as Date).toISOString() : new Date().toISOString(),
-    updatedAt: rawDoc.updatedAt ? new Date(rawDoc.updatedAt as Date).toISOString() : new Date().toISOString(),
+    createdAt: formatSafeIsoDate(rawDoc.createdAt) || new Date().toISOString(),
+    updatedAt: formatSafeIsoDate(rawDoc.updatedAt) || new Date().toISOString(),
   };
 }
 
@@ -282,29 +312,33 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   if (search) {
     const searchRegex = buildSearchRegex(search);
     if (searchRegex) {
-      // Find matching clients
-      const matchedClients = await Client.find(
-        {
-          deletedAt: null,
-          $or: [
-            { name: searchRegex },
-            { clientNumber: searchRegex },
-            { organizationName: searchRegex },
-            { phone: searchRegex },
-          ],
-        },
-        { _id: 1 }
-      ).lean();
+      // Find matching clients and courts in parallel, bounded to 100 results to avoid massive $in predicates
+      const [matchedClients, matchedCourts] = await Promise.all([
+        Client.find(
+          {
+            deletedAt: null,
+            $or: [
+              { name: searchRegex },
+              { clientNumber: searchRegex },
+              { organizationName: searchRegex },
+              { phone: searchRegex },
+            ],
+          },
+          { _id: 1 }
+        )
+          .limit(100)
+          .lean(),
+        Court.find(
+          {
+            deletedAt: null,
+            $or: [{ name: searchRegex }, { district: searchRegex }],
+          },
+          { _id: 1 }
+        )
+          .limit(100)
+          .lean(),
+      ]);
       const matchedClientIds = matchedClients.map((c) => c._id);
-
-      // Find matching courts
-      const matchedCourts = await Court.find(
-        {
-          deletedAt: null,
-          $or: [{ name: searchRegex }, { district: searchRegex }],
-        },
-        { _id: 1 }
-      ).lean();
       const matchedCourtIds = matchedCourts.map((c) => c._id);
 
       const searchConditions: Record<string, unknown>[] = [
@@ -506,62 +540,94 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
  * Create a new Case record.
  */
 export const POST = withErrorHandler(async (req: NextRequest) => {
-  await getUserId();
+  const userId = await getUserId();
 
   const body = await req.json();
   const validated = createCaseSchema.parse(body);
 
   await ConnectDB();
 
-  // Validate referenced Client
+  // Validate referenced Client and Court in parallel
   const clientObjectId = new mongoose.Types.ObjectId(validated.clientId);
-  const clientExists = await Client.exists({ _id: clientObjectId, deletedAt: null });
+  const courtObjectId = new mongoose.Types.ObjectId(validated.courtId);
+
+  const [clientExists, courtExists] = await Promise.all([
+    Client.exists({ _id: clientObjectId, deletedAt: null }),
+    Court.exists({ _id: courtObjectId, deletedAt: null }),
+  ]);
+
   if (!clientExists) {
     throw ApiError.badRequest("Selected client does not exist or has been archived.");
   }
 
-  // Validate referenced Court
-  const courtObjectId = new mongoose.Types.ObjectId(validated.courtId);
-  const courtExists = await Court.exists({ _id: courtObjectId, deletedAt: null });
   if (!courtExists) {
     throw ApiError.badRequest("Selected court does not exist or has been archived.");
   }
 
   // Determine internalReference: use user-specified if provided, else auto-generate
-  let internalReference: string;
-  if (validated.internalReference?.trim()) {
-    internalReference = validated.internalReference.trim().toUpperCase();
+  const isAutoGenerated = !validated.internalReference?.trim();
+  let internalReference: string = "";
+
+  if (!isAutoGenerated) {
+    internalReference = validated.internalReference!.trim().toUpperCase();
     const existingRef = await Case.exists({ internalReference });
     if (existingRef) {
       throw ApiError.badRequest(
         `A case with internal reference "${internalReference}" already exists. Please choose a unique reference.`
       );
     }
-  } else {
-    internalReference = await generateCaseReference();
   }
 
-  // Create Case document
-  const createdCase = await Case.create({
-    internalReference,
-    caseNumber: validated.caseNumber?.trim() || null,
-    filingYear: validated.filingYear ?? null,
-    title: validated.title.trim(),
-    caseType: validated.caseType,
-    caseCategory: validated.caseCategory?.trim() || null,
-    courtId: courtObjectId,
-    clientId: clientObjectId,
-    filingDate: validated.filingDate ? new Date(validated.filingDate) : null,
-    caseStatus: validated.caseStatus,
-    priority: validated.priority,
-    description: validated.description?.trim() || null,
-    legalIssues: validated.legalIssues?.trim() || null,
-    opposingCounsel: validated.opposingCounsel?.trim() || null,
-    opposingParties: validated.opposingParties || [],
-    nextHearingDate: null,
-    closedAt: null,
-    closureReason: null,
-  });
+  // Create Case document with concurrency collision retry for auto-generated references
+  const maxAttempts = isAutoGenerated ? 3 : 1;
+  let createdCase = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      if (isAutoGenerated) {
+        internalReference = await generateCaseReference();
+      }
+
+      createdCase = await Case.create({
+        internalReference,
+        caseNumber: validated.caseNumber?.trim() || null,
+        filingYear: validated.filingYear ?? null,
+        title: validated.title.trim(),
+        caseType: validated.caseType,
+        caseCategory: validated.caseCategory?.trim() || null,
+        courtId: courtObjectId,
+        clientId: clientObjectId,
+        filingDate: validated.filingDate ? new Date(validated.filingDate) : null,
+        caseStatus: validated.caseStatus,
+        priority: validated.priority,
+        description: validated.description?.trim() || null,
+        legalIssues: validated.legalIssues?.trim() || null,
+        opposingCounsel: validated.opposingCounsel?.trim() || null,
+        opposingParties: validated.opposingParties || [],
+        nextHearingDate: null,
+        closedAt: null,
+        closureReason: null,
+      });
+      break;
+    } catch (err: unknown) {
+      if (
+        isAutoGenerated &&
+        attempt < maxAttempts &&
+        typeof err === "object" &&
+        err !== null &&
+        "code" in err &&
+        (err as { code: number }).code === 11000
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  if (!createdCase) {
+    throw ApiError.internal("Failed to generate a unique case reference after multiple attempts.");
+  }
 
   // Populate for response
   const populated = await Case.findById(createdCase._id)
@@ -585,6 +651,18 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
       parties: 0,
     },
   };
+
+  // Record audit log for case creation
+  await recordAuditLog({
+    req,
+    userId,
+    action: AUDIT_ACTIONS.CREATE,
+    entityType: AUDIT_ENTITY_TYPES.CASE,
+    entityId: createdCase._id,
+    oldValues: null,
+    newValues: createdCase.toObject(),
+    description: `Created case "${itemDto.title}" (${itemDto.internalReference})`,
+  });
 
   const response: CaseActionResponse = {
     success: true,
