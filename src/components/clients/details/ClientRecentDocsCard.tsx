@@ -2,9 +2,10 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { FileText, ExternalLink, ArrowRight } from "lucide-react";
+import { FileText, Eye, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ClientDocumentTypeBadge } from "@/components/clients/shared/ClientBadges";
+import { DocumentViewerDialog, type DocumentViewerTarget } from "@/components/documents/DocumentViewerDialog";
 import type { ClientDocumentSummaryDto } from "@/types/client.types";
 
 export interface ClientRecentDocsCardProps {
@@ -13,6 +14,8 @@ export interface ClientRecentDocsCardProps {
 }
 
 export function ClientRecentDocsCard({ documents, clientId }: ClientRecentDocsCardProps) {
+  const [previewDoc, setPreviewDoc] = React.useState<DocumentViewerTarget | null>(null);
+
   const formatSize = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -72,9 +75,23 @@ export function ClientRecentDocsCard({ documents, clientId }: ClientRecentDocsCa
             >
               <div className="space-y-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-xs font-semibold text-foreground truncate">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPreviewDoc({
+                        id: doc.id,
+                        title: doc.title,
+                        fileUrl: doc.fileUrl,
+                        originalFileName: doc.fileName,
+                        sizeBytes: doc.fileSize,
+                        mimeType: doc.mimeType,
+                      })
+                    }
+                    className="text-xs font-semibold text-foreground truncate hover:text-gold-500 transition-colors text-left"
+                    title="Preview document"
+                  >
                     {doc.title}
-                  </span>
+                  </button>
                   <ClientDocumentTypeBadge type={doc.documentType} />
                 </div>
 
@@ -95,21 +112,36 @@ export function ClientRecentDocsCard({ documents, clientId }: ClientRecentDocsCa
 
               {doc.fileUrl && (
                 <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
-                  <a
-                    href={doc.fileUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border border-border/80 hover:bg-muted text-foreground transition-colors"
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPreviewDoc({
+                        id: doc.id,
+                        title: doc.title,
+                        fileUrl: doc.fileUrl,
+                        originalFileName: doc.fileName,
+                        sizeBytes: doc.fileSize,
+                        mimeType: doc.mimeType,
+                      })
+                    }
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border border-border/80 hover:bg-gold-500/10 hover:border-gold-500/30 text-foreground transition-colors cursor-pointer"
                   >
-                    <ExternalLink className="w-3 h-3 text-gold-500" />
+                    <Eye className="w-3 h-3 text-gold-500" />
                     <span>View File</span>
-                  </a>
+                  </button>
                 </div>
               )}
             </div>
           ))}
         </div>
       )}
+
+      {/* In-app Document Viewer Modal */}
+      <DocumentViewerDialog
+        isOpen={Boolean(previewDoc)}
+        onClose={() => setPreviewDoc(null)}
+        document={previewDoc}
+      />
     </div>
   );
 }

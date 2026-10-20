@@ -53,6 +53,7 @@ export function ProfileAvatarDialog({
     selectedFile,
     previewUrl,
     compressionStats,
+    isCompressing,
     stage,
     stageMessage,
     uploadProgress,
@@ -247,10 +248,22 @@ export function ProfileAvatarDialog({
                 {selectedFile ? (
                   <div className="space-y-0.5 text-center">
                     <p className="text-[11px] font-medium text-foreground truncate max-w-[180px]">
-                      {selectedFile.name}
+                      {compressionStats?.file?.name || selectedFile.name}
                     </p>
                     <p className="text-[10px] text-muted-foreground font-mono">
-                      {formatByteSize(selectedFile.size)} • {selectedFile.type || "image"}
+                      {isCompressing ? (
+                        <span className="text-gold-600 dark:text-gold-400 flex items-center justify-center gap-1">
+                          <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+                          Optimizing image...
+                        </span>
+                      ) : compressionStats && compressionStats.didCompress ? (
+                        <span>
+                          {formatByteSize(compressionStats.compressedSizeBytes)} •{" "}
+                          {compressionStats.format.replace("image/", "").toUpperCase()}
+                        </span>
+                      ) : (
+                        `${formatByteSize(selectedFile.size)} • ${selectedFile.type || "image"}`
+                      )}
                     </p>
                   </div>
                 ) : (
@@ -321,15 +334,20 @@ export function ProfileAvatarDialog({
             <FadeIn duration={0.25} viewport={{ once: true, margin: "0px" }}>
               <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-between text-xs text-emerald-700 dark:text-emerald-300">
                 <div className="flex items-center gap-2">
-                  <Zap className="w-4 h-4 text-emerald-500" />
+                  <Zap className="w-4 h-4 text-emerald-500 shrink-0" />
                   <span>
-                    <strong>Compressed:</strong> {formatByteSize(compressionStats.originalSizeBytes)} →{" "}
+                    <strong>Lossless Compression:</strong> {formatByteSize(compressionStats.originalSizeBytes)} →{" "}
                     {formatByteSize(compressionStats.compressedSizeBytes)}
                   </span>
                 </div>
-                <Badge variant="emerald" className="font-mono text-[10px]">
-                  -{Math.round(compressionStats.compressionRatio * 100)}% Saved
-                </Badge>
+                <div className="flex items-center gap-1.5">
+                  <Badge variant="outline" className="font-mono text-[9px] uppercase border-emerald-500/30 text-emerald-600 dark:text-emerald-400">
+                    {compressionStats.format.replace("image/", "")}
+                  </Badge>
+                  <Badge variant="emerald" className="font-mono text-[10px]">
+                    -{Math.round(compressionStats.compressionRatio * 100)}% Saved
+                  </Badge>
+                </div>
               </div>
             </FadeIn>
           )}

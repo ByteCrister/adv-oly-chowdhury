@@ -23,6 +23,7 @@ import type { UnifiedDocumentItemDto } from "@/types/document.types";
 export interface DocumentTableProps {
   documents: UnifiedDocumentItemDto[];
   isLoading?: boolean;
+  onViewDocument?: (doc: UnifiedDocumentItemDto) => void;
   onEditDocument: (doc: UnifiedDocumentItemDto) => void;
   onReplaceDocument: (doc: UnifiedDocumentItemDto) => void;
   onDeleteDocument: (doc: UnifiedDocumentItemDto) => void;
@@ -34,6 +35,7 @@ export interface DocumentTableProps {
 export function DocumentTable({
   documents,
   isLoading = false,
+  onViewDocument,
   onEditDocument,
   onReplaceDocument,
   onDeleteDocument,
@@ -166,9 +168,13 @@ export function DocumentTable({
 
                       <div className="space-y-1 min-w-0 max-w-xs sm:max-w-sm">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-semibold text-foreground text-xs truncate max-w-[220px]">
+                          <button
+                            type="button"
+                            onClick={() => onViewDocument?.(doc)}
+                            className="font-semibold text-foreground text-xs truncate max-w-[220px] hover:text-gold-500 hover:underline text-left cursor-pointer transition-colors"
+                          >
                             {doc.title}
-                          </span>
+                          </button>
                           {doc.isConfidential && (
                             <Badge
                               variant="destructive"
@@ -292,16 +298,21 @@ export function DocumentTable({
                       {activeMenuId === doc.id && (
                         <div className="absolute right-0 mt-1 w-44 rounded-xl bg-card/95 backdrop-blur-2xl border border-border/80 dark:border-white/10 shadow-xl py-1 z-50 animate-in fade-in zoom-in-95">
                           {doc.fileUrl && (
-                            <a
-                              href={doc.fileUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex items-center gap-2 px-3 py-2 text-xs text-foreground hover:bg-muted/80 transition-colors"
-                              onClick={() => setActiveMenuId(null)}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveMenuId(null);
+                                if (onViewDocument) {
+                                  onViewDocument(doc);
+                                } else {
+                                  window.open(doc.fileUrl, "_blank");
+                                }
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-foreground hover:bg-muted/80 transition-colors text-left cursor-pointer"
                             >
                               <ExternalLink className="w-3.5 h-3.5 text-blue-500" />
-                              <span>View / Download</span>
-                            </a>
+                              <span>View Document</span>
+                            </button>
                           )}
 
                           <button

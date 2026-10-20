@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import axios from "axios";
 import { useQueryClient } from "@tanstack/react-query";
 import { useMediaUpload, computeFileHash } from "@/hooks/media/useMediaUpload";
@@ -50,6 +50,7 @@ export function useProfileAvatar({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [compressionStats, setCompressionStats] =
     useState<CompressionResult | null>(null);
+  const [isCompressing, setIsCompressing] = useState<boolean>(false);
   const [stage, setStage] = useState<AvatarUploadStage>("idle");
   const [stageMessage, setStageMessage] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
@@ -59,9 +60,16 @@ export function useProfileAvatar({
   const { uploadFiles, overallProgress } = useMediaUpload();
   const updateProfileMutation = useUpdateProfileMutation();
 
-  // Clean up object URLs when previewUrl changes or component unmounts
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const compressionPromiseRef = useRef<Promise<CompressionResult | null> | null>(null);
+  const compressedResultRef = useRef<CompressionResult | null>(null);
+
+  // Clean up object URLs and abort controllers on unmount
   useEffect(() => {
     return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
       if (previewUrl && previewUrl.startsWith("blob:")) {
         URL.revokeObjectURL(previewUrl);
       }
@@ -94,12 +102,21 @@ export function useProfileAvatar({
 
   /**
    * Select a candidate file from input or dropzone, validate it, and generate an immediate preview.
+   * Proactively triggers Web Worker image compression in the background so the user receives
+   * immediate size reduction stats and zero delay upon clicking "Save Avatar".
    */
   const selectAvatarFile = useCallback(
     (file: File) => {
       try {
         setError(null);
         validateAvatarFile(file);
+
+        // Abort previous background compression if user switched files
+        if (abortControllerRef.current) {
+          abortControllerRef.current.abort();
+        }
+        const abortController = new AbortController();
+        abortControllerRef.current = abortController;
 
         if (previewUrl && previewUrl.startsWith("blob:")) {
           URL.revokeObjectURL(previewUrl);
@@ -109,12 +126,56 @@ export function useProfileAvatar({
         setSelectedFile(file);
         setPreviewUrl(objectUrl);
         setCompressionStats(null);
+        compressedResultRef.current = null;
         setStage("idle");
         setStageMessage("");
+        setIsCompressing(true);
+
+        // Start non-blocking background compression via Web Worker
+        const compPromise = (async () => {
+          try {
+            const compResult = await compressImage(file, {
+              maxWidth: 1024,
+              maxHeight: 1024,
+              quality: 0.86,
+              useWebWorker: true,
+              signal: abortController.signal,
+            });
+
+            if (!abortController.signal.aborted) {
+              compressedResultRef.current = compResult;
+              setCompressionStats(compResult);
+
+              // Update preview to the compressed version for exact WYSIWYG
+              if (compResult.file && compResult.didCompress) {
+                const compUrl = URL.createObjectURL(compResult.file);
+                setPreviewUrl((prev) => {
+                  if (prev && prev.startsWith("blob:")) {
+                    URL.revokeObjectURL(prev);
+                  }
+                  return compUrl;
+                });
+              }
+            }
+            return compResult;
+          } catch (err: unknown) {
+            if (!abortController.signal.aborted) {
+              console.warn("[useProfileAvatar] Background compression error:", err);
+            }
+            return null;
+          } finally {
+            if (!abortController.signal.aborted) {
+              setIsCompressing(false);
+            }
+          }
+        })();
+
+        compressionPromiseRef.current = compPromise;
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Failed to select image";
         setError(msg);
         setSelectedFile(null);
+        setIsCompressing(false);
         if (previewUrl && previewUrl.startsWith("blob:")) {
           URL.revokeObjectURL(previewUrl);
         }
@@ -125,15 +186,22 @@ export function useProfileAvatar({
   );
 
   /**
-   * Clear pending selection and preview
+   * Clear pending selection, abort compression, and clean up preview
    */
   const clearSelection = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
     if (previewUrl && previewUrl.startsWith("blob:")) {
       URL.revokeObjectURL(previewUrl);
     }
     setSelectedFile(null);
     setPreviewUrl(null);
     setCompressionStats(null);
+    compressedResultRef.current = null;
+    compressionPromiseRef.current = null;
+    setIsCompressing(false);
     setError(null);
     setStage("idle");
     setStageMessage("");
@@ -188,8 +256,8 @@ export function useProfileAvatar({
   /**
    * Execute the end-to-end avatar processing & upload workflow:
    * 1. Validate
-   * 2. Hash & check deduplication via /api/v1/media/prepare
-   * 3. Compress if new asset needed
+   * 2. Ensure compression has finished (reusing background worker result)
+   * 3. Compute SHA-256 hash & verify asset deduplication on the compressed target file
    * 4. Upload to Cloudinary & finalize asset reference
    * 5. Update user profile record
    */
@@ -209,10 +277,23 @@ export function useProfileAvatar({
 
       const userId = user?._id ? String(user._id) : undefined;
 
-      // Step 2: Compute SHA-256 hash & check deduplication
+      // Step 2: Ensure background compression is resolved
+      let targetFile = selectedFile;
+      if (!compressedResultRef.current && compressionPromiseRef.current) {
+        setStage("compressing");
+        setStageMessage("Optimizing image resolution and compressing headshot...");
+        const compResult = await compressionPromiseRef.current;
+        if (compResult?.file) {
+          targetFile = compResult.file;
+        }
+      } else if (compressedResultRef.current?.file) {
+        targetFile = compressedResultRef.current.file;
+      }
+
+      // Step 3: Compute SHA-256 cryptographic hash on the exact file to be saved
       setStage("checking");
       setStageMessage("Calculating cryptographic hash and verifying asset reuse...");
-      const fileHash = await computeFileHash(selectedFile);
+      const fileHash = await computeFileHash(targetFile);
 
       const prepareBatchId = `avatar_prep_${Date.now()}`;
       const prepareResponse = await prepareMutation.mutateAsync({
@@ -221,9 +302,9 @@ export function useProfileAvatar({
             id: prepareBatchId,
             fileHash,
             assetType: ASSET_TYPES.IMAGE,
-            originalFileName: selectedFile.name,
-            mimeType: selectedFile.type || "image/jpeg",
-            sizeBytes: selectedFile.size,
+            originalFileName: targetFile.name,
+            mimeType: targetFile.type || "image/jpeg",
+            sizeBytes: targetFile.size,
             ownerType: ASSET_OWNER_TYPES.USER,
             ownerId: userId,
             purpose: ASSET_PURPOSES.PROFILE_IMAGE,
@@ -240,20 +321,10 @@ export function useProfileAvatar({
         setStageMessage("Asset already indexed! Reusing existing reference without upload...");
         finalAssetReferenceId = prepResult.fileId;
       } else {
-        // Step 3: Compress image to optimize quality and upload size
-        setStage("compressing");
-        setStageMessage("Optimizing image resolution and compressing headshot...");
-        const compResult = await compressImage(selectedFile, {
-          maxWidth: 1024,
-          maxHeight: 1024,
-          quality: 0.85,
-        });
-        setCompressionStats(compResult);
-
-        // Step 4: Upload to Cloudinary via established media workflow
+        // Step 4: Upload to Cloudinary via media workflow
         setStage("uploading");
-        setStageMessage("Uploading to Cloudinary CDN...");
-        const [uploadResult] = await uploadFiles([compResult.file], {
+        setStageMessage("Uploading optimized headshot to Cloudinary CDN...");
+        const [uploadResult] = await uploadFiles([targetFile], {
           ownerType: ASSET_OWNER_TYPES.USER,
           ownerId: userId,
           purpose: ASSET_PURPOSES.PROFILE_IMAGE,
@@ -357,6 +428,7 @@ export function useProfileAvatar({
     selectedFile,
     previewUrl,
     compressionStats,
+    isCompressing,
     stage,
     stageMessage,
     uploadProgress: overallProgress,

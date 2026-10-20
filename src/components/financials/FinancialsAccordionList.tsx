@@ -28,6 +28,10 @@ import {
 } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
 import { PaymentMethodBadge } from "@/components/clients/shared/ClientBadges";
+import {
+  DocumentViewerDialog,
+  type DocumentViewerTarget,
+} from "@/components/documents/DocumentViewerDialog";
 import type { UnifiedFinancialRecordDto } from "@/types/financial.types";
 import type { ClientPaymentItemDto } from "@/types/client-payment.types";
 
@@ -54,6 +58,8 @@ export function FinancialsAccordionList({
   onRecordExpense,
   onResetFilters,
 }: FinancialsAccordionListProps) {
+  const [viewingDocument, setViewingDocument] = React.useState<DocumentViewerTarget | null>(null);
+
   const formatAmount = (amount: number, currency: string = "BDT"): string => {
     return new Intl.NumberFormat("en-BD", {
       style: "currency",
@@ -85,6 +91,36 @@ export function FinancialsAccordionList({
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   });
+
+  const handleOpenReceipt = (r: UnifiedFinancialRecordDto) => {
+    if (!r.receiptUrl) return;
+
+    const isPdf =
+      r.receiptAssetType === "pdf" ||
+      r.receiptMimeType === "application/pdf" ||
+      r.receiptFileName?.toLowerCase().endsWith(".pdf") ||
+      r.receiptUrl.toLowerCase().includes(".pdf");
+
+    setViewingDocument({
+      id: r.receiptAssetId || r.id,
+      title: `${r.recordType === "PAYMENT" ? "Payment Receipt" : "Expense Voucher"}: ${
+        r.recordType === "PAYMENT"
+          ? r.moneyReceiptNumber
+            ? `MR #${r.moneyReceiptNumber}`
+            : r.paymentMethodLabel || "Payment"
+          : r.expenseCategoryLabel || "Case Expense"
+      } - BDT ${r.amount}`,
+      fileUrl: r.receiptUrl,
+      originalFileName:
+        r.receiptFileName || (r.recordType === "PAYMENT" ? "payment-receipt" : "expense-receipt"),
+      mimeType: r.receiptMimeType || (isPdf ? "application/pdf" : "image/jpeg"),
+      format: isPdf ? "PDF" : "IMAGE",
+      sizeBytes: r.receiptSizeBytes || undefined,
+      documentDate: r.transactionDate,
+      entityType: r.recordType === "PAYMENT" ? "CLIENT" : "CASE",
+      notes: r.description || null,
+    });
+  };
 
   // Empty state
   if (!isLoading && records.length === 0) {
@@ -137,7 +173,8 @@ export function FinancialsAccordionList({
   }
 
   return (
-    <Accordion type="multiple" className="space-y-3">
+    <>
+      <Accordion type="multiple" className="space-y-3">
       {records.map((r) => {
         const isPayment = r.recordType === "PAYMENT";
         const dateObj = new Date(r.transactionDate);
@@ -459,16 +496,25 @@ export function FinancialsAccordionList({
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-border/40 text-[11px] text-muted-foreground">
                   <div className="flex items-center flex-wrap gap-4">
                     {r.receiptUrl ? (
-                      <a
-                        href={r.receiptUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 text-gold-600 dark:text-gold-400 font-semibold hover:underline"
-                      >
-                        <Receipt className="w-3.5 h-3.5" />
-                        <span>View Official Voucher Document ({r.receiptFileName || "Receipt"})</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenReceipt(r)}
+                          className="inline-flex items-center gap-1.5 text-gold-600 dark:text-gold-400 font-semibold hover:underline cursor-pointer"
+                        >
+                          <Receipt className="w-3.5 h-3.5" />
+                          <span>View Official Voucher ({r.receiptFileName || "Receipt"})</span>
+                        </button>
+                        <a
+                          href={r.receiptUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-muted-foreground hover:text-foreground inline-flex items-center"
+                          title="Open in new window"
+                        >
+                          <ExternalLink className="w-3 h-3 text-muted-foreground" />
+                        </a>
+                      </div>
                     ) : (
                       <span className="text-muted-foreground/70 italic flex items-center gap-1">
                         <FileText className="w-3 h-3" />
@@ -543,6 +589,16 @@ export function FinancialsAccordionList({
         );
       })}
     </Accordion>
+
+      {/* Embedded Document Viewer Modal */}
+      {viewingDocument && (
+        <DocumentViewerDialog
+          document={viewingDocument}
+          isOpen={Boolean(viewingDocument)}
+          onClose={() => setViewingDocument(null)}
+        />
+      )}
+    </>
   );
 }
 

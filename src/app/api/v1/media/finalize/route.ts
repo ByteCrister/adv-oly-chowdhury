@@ -77,6 +77,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     const existingAsset = (await Asset.findOne({
       fileHash: item.fileHash,
       assetType: item.assetType as AssetType,
+      status: ASSET_STATUSES.READY,
     }).lean()) as IAsset | null;
 
     if (existingAsset) {
@@ -125,6 +126,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
           const fallbackAsset = (await Asset.findOne({
             fileHash: item.fileHash,
             assetType: item.assetType as AssetType,
+            status: ASSET_STATUSES.READY,
           }).lean()) as IAsset | null;
 
           if (!fallbackAsset) {

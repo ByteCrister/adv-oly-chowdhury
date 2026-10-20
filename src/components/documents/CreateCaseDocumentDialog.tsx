@@ -88,7 +88,7 @@ export function CreateCaseDocumentDialog({
       setValidationError(
         err instanceof Error
           ? err.message
-          : "Invalid file. Max size 2MB (PDF, Word, Images)."
+          : "Invalid file. Max size 2MB (PDF and Image files only)."
       );
       return;
     }
@@ -214,7 +214,7 @@ export function CreateCaseDocumentDialog({
                 type="file"
                 className="hidden"
                 onChange={handleFileChange}
-                accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp"
+                accept=".pdf,image/jpeg,image/png,image/webp,image/jpg"
                 disabled={isProcessing}
               />
 
@@ -240,7 +240,7 @@ export function CreateCaseDocumentDialog({
                     Click or drag file to upload
                   </p>
                   <p className="text-[11px] text-muted-foreground">
-                    PDF, DOC, DOCX, PNG, JPG (up to 2 MB)
+                    PDF, PNG, JPG, or WebP (Maximum 2 MB • Lossless Compressed)
                   </p>
                 </div>
               )}

@@ -6,7 +6,7 @@ import { withTransaction } from "@/lib/helpers/withTransaction";
 import { CaseExpense } from "@/db/models/CaseExpense.model";
 import { Case } from "@/db/models/Case.model";
 import { AssetReference } from "@/db/models/AssetReference.model";
-import { ASSET_OWNER_TYPES } from "@/const/asset-reference.const";
+import { ASSET_OWNER_TYPES, ASSET_PURPOSES } from "@/const/asset-reference.const";
 import {
   recordAuditLog,
   calculateAuditDiff,
@@ -57,7 +57,7 @@ export const GET = withErrorHandler(
         select: "originalFileName assetId",
         populate: {
           path: "assetId",
-          select: "secureUrl originalFilename",
+          select: "secureUrl originalFilename assetType mimeType bytes",
         },
       })
       .populate("recordedBy", "name email")
@@ -105,16 +105,37 @@ export const PUT = withErrorHandler(
       }
     }
 
-    let targetReceiptObjectId = existingExpense.receiptAssetReferenceId || null;
-    if (validated.receiptAssetReferenceId !== undefined) {
-      if (validated.receiptAssetReferenceId) {
-        targetReceiptObjectId = new mongoose.Types.ObjectId(validated.receiptAssetReferenceId);
-        const receiptExists = await AssetReference.exists({
+    const receiptFieldSpecified =
+      validated.receiptAssetReferenceId !== undefined ||
+      validated.receiptAssetreferenceId !== undefined;
+    const rawReceiptVal =
+      validated.receiptAssetReferenceId !== undefined
+        ? validated.receiptAssetReferenceId
+        : validated.receiptAssetreferenceId;
+
+    let targetReceiptObjectId: mongoose.Types.ObjectId | null = null;
+    if (receiptFieldSpecified) {
+      if (rawReceiptVal) {
+        targetReceiptObjectId = new mongoose.Types.ObjectId(rawReceiptVal);
+        const receiptRef = await AssetReference.findOne({
           _id: targetReceiptObjectId,
           deletedAt: null,
-        });
-        if (!receiptExists) {
-          throw ApiError.badRequest("The referenced receipt voucher file does not exist.");
+        })
+          .select("_id ownerType ownerId")
+          .lean();
+
+        if (!receiptRef) {
+          throw ApiError.badRequest("The referenced receipt voucher file does not exist or was deleted.");
+        }
+
+        // Security guard: Ensure the asset reference is not owned by a different case
+        if (
+          receiptRef.ownerId &&
+          (receiptRef.ownerType === ASSET_OWNER_TYPES.CASE_EXPENSE ||
+            receiptRef.ownerType === ASSET_OWNER_TYPES.CASE) &&
+          !receiptRef.ownerId.equals(targetCaseObjectId)
+        ) {
+          throw ApiError.badRequest("The referenced receipt file belongs to another legal case.");
         }
       } else {
         targetReceiptObjectId = null;
@@ -123,42 +144,55 @@ export const PUT = withErrorHandler(
 
     await withTransaction(async (dbSession) => {
       const oldReceiptId = existingExpense.receiptAssetReferenceId;
-      const receiptChanged =
-        (oldReceiptId && !targetReceiptObjectId) ||
-        (!oldReceiptId && targetReceiptObjectId) ||
-        (oldReceiptId && targetReceiptObjectId && !oldReceiptId.equals(targetReceiptObjectId));
-      const caseChanged = !existingExpense.caseId.equals(targetCaseObjectId);
+      const updateFields: Record<string, unknown> = {};
 
-      // 1. If receipt reference was changed or detached, release ownership on the old asset reference
-      if (oldReceiptId && receiptChanged) {
+      // Handle receipt attachment, replacement, or removal
+      if (receiptFieldSpecified) {
+        if (targetReceiptObjectId) {
+          // If replacing previous receipt, soft-delete old reference
+          if (oldReceiptId && !oldReceiptId.equals(targetReceiptObjectId)) {
+            await AssetReference.findByIdAndUpdate(
+              oldReceiptId,
+              { deletedAt: new Date() },
+              { session: dbSession }
+            );
+          }
+
+          await AssetReference.findByIdAndUpdate(
+            targetReceiptObjectId,
+            {
+              ownerType: ASSET_OWNER_TYPES.CASE_EXPENSE,
+              ownerId: targetCaseObjectId,
+              purpose: ASSET_PURPOSES.EXPENSE_RECEIPT,
+            },
+            { session: dbSession }
+          );
+
+          updateFields.receiptAssetReferenceId = targetReceiptObjectId;
+        } else {
+          // Explicit removal request: soft-delete old reference
+          if (oldReceiptId) {
+            await AssetReference.findByIdAndUpdate(
+              oldReceiptId,
+              { deletedAt: new Date() },
+              { session: dbSession }
+            );
+          }
+          updateFields.receiptAssetReferenceId = null;
+        }
+      } else if (!existingExpense.caseId.equals(targetCaseObjectId) && oldReceiptId) {
+        // If caseId changed, update ownerId on existing receipt
         await AssetReference.findByIdAndUpdate(
           oldReceiptId,
-          { ownerType: ASSET_OWNER_TYPES.OTHER, ownerId: null },
+          { ownerId: targetCaseObjectId },
           { session: dbSession }
         );
       }
-
-      // 2. If new receipt assigned or caseId changed, establish/update ownership
-      if (targetReceiptObjectId && (receiptChanged || caseChanged)) {
-        await AssetReference.findByIdAndUpdate(
-          targetReceiptObjectId,
-          {
-            ownerType: ASSET_OWNER_TYPES.CASE_EXPENSE,
-            ownerId: targetCaseObjectId,
-          },
-          { session: dbSession }
-        );
-      }
-
-      // 3. Assemble explicit update fields (avoiding unintended default overwrites)
-      const updateFields: Record<string, unknown> = {};
 
       if (validated.caseId) {
         updateFields.caseId = targetCaseObjectId;
       }
-      if (validated.receiptAssetReferenceId !== undefined) {
-        updateFields.receiptAssetReferenceId = targetReceiptObjectId;
-      }
+
       if (validated.expenseDate) {
         updateFields.expenseDate = new Date(validated.expenseDate);
       }
@@ -208,7 +242,7 @@ export const PUT = withErrorHandler(
         select: "originalFileName assetId",
         populate: {
           path: "assetId",
-          select: "secureUrl originalFilename",
+          select: "secureUrl originalFilename assetType mimeType bytes",
         },
       })
       .populate("recordedBy", "name email")
@@ -256,11 +290,11 @@ export const DELETE = withErrorHandler(
     await withTransaction(async (dbSession) => {
       const expenseSnapshot = expense.toObject();
 
-      // If there's an associated receipt asset reference, clean its ownership
+      // If there's an associated receipt asset reference, soft-delete it
       if (expense.receiptAssetReferenceId) {
         await AssetReference.findByIdAndUpdate(
           expense.receiptAssetReferenceId,
-          { ownerType: ASSET_OWNER_TYPES.OTHER, ownerId: null },
+          { deletedAt: new Date() },
           { session: dbSession }
         );
       }

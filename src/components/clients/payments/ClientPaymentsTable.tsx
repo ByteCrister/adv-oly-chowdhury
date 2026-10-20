@@ -7,17 +7,24 @@ import {
   MoreVertical,
   Edit2,
   Trash2,
-  ExternalLink,
   Calendar,
   Briefcase,
   Coins,
   UserCheck,
+  FileText,
+  Image as ImageIcon,
+  Eye,
+  ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   PaymentMethodBadge,
   PaymentTypeBadge,
 } from "@/components/clients/shared/ClientBadges";
+import {
+  DocumentViewerDialog,
+  type DocumentViewerTarget,
+} from "@/components/documents/DocumentViewerDialog";
 import type { ClientPaymentItemDto } from "@/types/client-payment.types";
 
 export interface ClientPaymentsTableProps {
@@ -38,6 +45,7 @@ export function ClientPaymentsTable({
   onResetFilters,
 }: ClientPaymentsTableProps) {
   const [activeMenuId, setActiveMenuId] = React.useState<string | null>(null);
+  const [viewingReceipt, setViewingReceipt] = React.useState<DocumentViewerTarget | null>(null);
 
   React.useEffect(() => {
     const handleOutsideClick = (e: MouseEvent) => {
@@ -55,6 +63,29 @@ export function ClientPaymentsTable({
       currency,
       maximumFractionDigits: 0,
     }).format(amount);
+  };
+
+  const openReceiptViewer = (p: ClientPaymentItemDto) => {
+    if (!p.receiptUrl) return;
+
+    const isPdf =
+      p.receiptAssetType === "pdf" ||
+      p.receiptMimeType === "application/pdf" ||
+      p.receiptFileName?.toLowerCase().endsWith(".pdf") ||
+      p.receiptUrl.toLowerCase().includes(".pdf");
+
+    setViewingReceipt({
+      id: p.receiptAssetreferenceId || p.id,
+      title: `Payment Receipt: ${p.moneyReceiptNumber ? `MR #${p.moneyReceiptNumber}` : p.paymentMethodLabel} - BDT ${p.amount}`,
+      fileUrl: p.receiptUrl,
+      originalFileName: p.receiptFileName || "payment-receipt",
+      mimeType: p.receiptMimeType || (isPdf ? "application/pdf" : "image/jpeg"),
+      format: isPdf ? "PDF" : "IMAGE",
+      sizeBytes: p.receiptSizeBytes || undefined,
+      documentDate: p.paymentDate,
+      entityType: "CLIENT",
+      notes: p.notes || (p.moneyReceiptNumber ? `MR: ${p.moneyReceiptNumber}` : null),
+    });
   };
 
   // Empty state
@@ -98,237 +129,323 @@ export function ClientPaymentsTable({
   }
 
   return (
-    <div className="rounded-2xl border border-border/70 dark:border-white/10 bg-card/60 backdrop-blur-md overflow-hidden shadow-sm">
-      {/* Desktop Table View */}
-      <div className="hidden md:block overflow-x-auto">
-        <table className="w-full text-left text-xs text-muted-foreground border-collapse">
-          <thead>
-            <tr className="border-b border-border/60 bg-muted/30 text-foreground font-semibold">
-              <th className="py-3.5 px-4 font-serif">Payment Date & Receipt #</th>
-              <th className="py-3.5 px-4 font-serif">Amount (BDT)</th>
-              <th className="py-3.5 px-4">Method & Type</th>
-              <th className="py-3.5 px-4">Case Reference & Notes</th>
-              <th className="py-3.5 px-4 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border/40">
-            {payments.map((p) => (
-              <tr
-                key={p.id}
-                className="hover:bg-muted/30 transition-colors group"
-              >
-                {/* Date & Receipt Info */}
-                <td className="py-3.5 px-4 align-top">
-                  <div className="space-y-1">
-                    <span className="font-semibold text-foreground flex items-center gap-1.5">
-                      <Calendar className="w-3.5 h-3.5 text-gold-500" />
-                      <span>{new Date(p.paymentDate).toLocaleDateString()}</span>
-                    </span>
-                    {p.moneyReceiptNumber && (
-                      <span className="font-mono text-[11px] text-muted-foreground flex items-center gap-1">
-                        <Receipt className="w-3 h-3 text-gold-500/80" />
-                        <span>MR: {p.moneyReceiptNumber}</span>
-                      </span>
-                    )}
-                    {p.referenceNumber && (
-                      <span className="font-mono text-[10px] text-muted-foreground block">
-                        Ref: {p.referenceNumber}
-                      </span>
-                    )}
-                  </div>
-                </td>
+    <>
+      <div className="rounded-2xl border border-border/70 dark:border-white/10 bg-card/60 backdrop-blur-md overflow-hidden shadow-sm">
+        {/* Desktop Table View */}
+        <div className="hidden md:block overflow-x-auto">
+          <table className="w-full text-left text-xs text-muted-foreground border-collapse">
+            <thead>
+              <tr className="border-b border-border/60 bg-muted/30 text-foreground font-semibold">
+                <th className="py-3.5 px-4 font-serif">Payment Date & Receipt #</th>
+                <th className="py-3.5 px-4 font-serif">Amount (BDT)</th>
+                <th className="py-3.5 px-4">Method & Type</th>
+                <th className="py-3.5 px-4">Case Reference & Notes</th>
+                <th className="py-3.5 px-4 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/40">
+              {payments.map((p) => {
+                const isPdf = Boolean(
+                  p.receiptAssetType === "pdf" ||
+                    p.receiptMimeType === "application/pdf" ||
+                    p.receiptFileName?.toLowerCase().endsWith(".pdf") ||
+                    p.receiptUrl?.toLowerCase().includes(".pdf")
+                );
 
-                {/* Amount */}
-                <td className="py-3.5 px-4 align-top">
-                  <div className="space-y-0.5">
-                    <span className="font-serif text-sm font-bold text-foreground">
+                return (
+                  <tr
+                    key={p.id}
+                    className="hover:bg-muted/30 transition-colors group"
+                  >
+                    {/* Date & Receipt Info */}
+                    <td className="py-3.5 px-4 align-top">
+                      <div className="space-y-1">
+                        <span className="font-semibold text-foreground flex items-center gap-1.5">
+                          <Calendar className="w-3.5 h-3.5 text-gold-500" />
+                          <span>{new Date(p.paymentDate).toLocaleDateString()}</span>
+                        </span>
+                        {p.moneyReceiptNumber && (
+                          <span className="font-mono text-[11px] text-muted-foreground flex items-center gap-1">
+                            <Receipt className="w-3 h-3 text-gold-500/80" />
+                            <span>MR: {p.moneyReceiptNumber}</span>
+                          </span>
+                        )}
+                        {p.referenceNumber && (
+                          <span className="font-mono text-[10px] text-muted-foreground block">
+                            Ref: {p.referenceNumber}
+                          </span>
+                        )}
+                        {p.receiptUrl && (
+                          <div className="pt-0.5">
+                            <button
+                              type="button"
+                              onClick={() => openReceiptViewer(p)}
+                              className="inline-flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 hover:underline font-medium cursor-pointer"
+                              title={`View ${isPdf ? "PDF" : "Image"} Receipt Voucher`}
+                            >
+                              {isPdf ? (
+                                <FileText className="w-3 h-3 text-rose-500" />
+                              ) : (
+                                <ImageIcon className="w-3 h-3 text-emerald-500" />
+                              )}
+                              <span>Voucher Attached</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Amount */}
+                    <td className="py-3.5 px-4 align-top">
+                      <div className="space-y-0.5">
+                        <span className="font-serif text-sm font-bold text-foreground">
+                          {formatAmount(p.amount, p.currency)}
+                        </span>
+                        {p.receivedBy && (
+                          <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                            <UserCheck className="w-3 h-3 text-emerald-500 shrink-0" />
+                            <span>by {p.receivedBy.name}</span>
+                          </span>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Method & Type Badges */}
+                    <td className="py-3.5 px-4 align-top">
+                      <div className="flex flex-col items-start gap-1.5">
+                        <PaymentMethodBadge method={p.paymentMethod} />
+                        <PaymentTypeBadge type={p.paymentType} />
+                      </div>
+                    </td>
+
+                    {/* Case Reference & Notes */}
+                    <td className="py-3.5 px-4 align-top max-w-xs">
+                      <div className="space-y-1">
+                        {p.caseReference ? (
+                          <span className="inline-flex items-center gap-1 font-mono text-[11px] font-semibold text-gold-600 dark:text-gold-400">
+                            <Briefcase className="w-3 h-3" />
+                            <span>{p.caseReference}</span>
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-muted-foreground italic">
+                            General Account
+                          </span>
+                        )}
+                        {p.notes && (
+                          <p className="text-[11px] text-muted-foreground line-clamp-2">
+                            {p.notes}
+                          </p>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Actions */}
+                    <td className="py-3.5 px-4 align-top text-right">
+                      <div className="relative inline-block payment-action-menu-container">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {p.receiptUrl && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => openReceiptViewer(p)}
+                              className="h-8 px-2 rounded-lg text-xs gap-1 border-border/70 hover:bg-muted text-foreground transition-colors"
+                              title={`Open ${isPdf ? "PDF" : "Image"} Receipt Voucher`}
+                            >
+                              {isPdf ? (
+                                <FileText className="w-3.5 h-3.5 text-rose-500" />
+                              ) : (
+                                <ImageIcon className="w-3.5 h-3.5 text-emerald-500" />
+                              )}
+                              <span className="hidden lg:inline">{isPdf ? "PDF" : "Voucher"}</span>
+                            </Button>
+                          )}
+
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              setActiveMenuId(activeMenuId === p.id ? null : p.id)
+                            }
+                            className="h-8 w-8 p-0 rounded-lg text-muted-foreground hover:text-foreground"
+                          >
+                            <MoreVertical className="w-4 h-4" />
+                          </Button>
+                        </div>
+
+                        {/* Dropdown Menu */}
+                        {activeMenuId === p.id && (
+                          <div className="absolute right-0 mt-1 w-44 rounded-xl bg-popover/95 backdrop-blur-xl border border-border/80 dark:border-white/10 shadow-lg py-1 z-30 animate-in fade-in-50 zoom-in-95">
+                            {p.receiptUrl && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveMenuId(null);
+                                    openReceiptViewer(p);
+                                  }}
+                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-foreground hover:bg-muted/80 transition-colors cursor-pointer"
+                                >
+                                  <Eye className="w-3.5 h-3.5 text-gold-500" />
+                                  <span>View Voucher ({isPdf ? "PDF" : "Image"})</span>
+                                </button>
+                                <a
+                                  href={p.receiptUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={() => setActiveMenuId(null)}
+                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:bg-muted/80 transition-colors cursor-pointer"
+                                >
+                                  <ExternalLink className="w-3.5 h-3.5 text-blue-500" />
+                                  <span>Open in New Tab</span>
+                                </a>
+                                <div className="h-px bg-border/40 my-1" />
+                              </>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveMenuId(null);
+                                onEditPayment(p);
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-foreground hover:bg-muted/80 transition-colors cursor-pointer"
+                            >
+                              <Edit2 className="w-3.5 h-3.5 text-gold-500" />
+                              <span>Edit Payment</span>
+                            </button>
+
+                            <div className="h-px bg-border/40 my-1" />
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveMenuId(null);
+                                onDeletePayment(p);
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Delete Payment</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Mobile Card View */}
+        <div className="md:hidden divide-y divide-border/40">
+          {payments.map((p) => {
+            const isPdf = Boolean(
+              p.receiptAssetType === "pdf" ||
+                p.receiptMimeType === "application/pdf" ||
+                p.receiptFileName?.toLowerCase().endsWith(".pdf") ||
+                p.receiptUrl?.toLowerCase().includes(".pdf")
+            );
+
+            return (
+              <div key={p.id} className="p-4 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <span className="font-serif text-base font-bold text-foreground">
                       {formatAmount(p.amount, p.currency)}
                     </span>
-                    {p.receivedBy && (
-                      <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                        <UserCheck className="w-3 h-3 text-emerald-500 shrink-0" />
-                        <span>by {p.receivedBy.name}</span>
+                    <div className="flex items-center gap-2 text-[11px] text-muted-foreground flex-wrap">
+                      <span className="flex items-center gap-1">
+                        <Calendar className="w-3.5 h-3.5 text-gold-500" />
+                        <span>{new Date(p.paymentDate).toLocaleDateString()}</span>
                       </span>
-                    )}
+                      {p.moneyReceiptNumber && <span>• MR: {p.moneyReceiptNumber}</span>}
+                      {p.receivedBy && (
+                        <span className="flex items-center gap-1 text-[10px]">
+                          <UserCheck className="w-3 h-3 text-emerald-500" />
+                          <span>{p.receivedBy.name}</span>
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </td>
 
-                {/* Method & Type Badges */}
-                <td className="py-3.5 px-4 align-top">
-                  <div className="flex flex-col items-start gap-1.5">
+                  <div className="flex flex-col items-end gap-1">
                     <PaymentMethodBadge method={p.paymentMethod} />
                     <PaymentTypeBadge type={p.paymentType} />
                   </div>
-                </td>
+                </div>
 
-                {/* Case Reference & Notes */}
-                <td className="py-3.5 px-4 align-top max-w-xs">
-                  <div className="space-y-1">
-                    {p.caseReference ? (
-                      <span className="inline-flex items-center gap-1 font-mono text-[11px] font-semibold text-gold-600 dark:text-gold-400">
-                        <Briefcase className="w-3 h-3" />
-                        <span>{p.caseReference}</span>
-                      </span>
-                    ) : (
-                      <span className="text-[11px] text-muted-foreground italic">
-                        General Account
-                      </span>
-                    )}
-                    {p.notes && (
-                      <p className="text-[11px] text-muted-foreground line-clamp-2">
-                        {p.notes}
-                      </p>
-                    )}
+                {p.caseReference && (
+                  <div className="text-xs font-mono text-gold-600 dark:text-gold-400 font-semibold flex items-center gap-1">
+                    <Briefcase className="w-3.5 h-3.5" />
+                    <span>{p.caseReference}</span>
                   </div>
-                </td>
+                )}
 
-                {/* Actions */}
-                <td className="py-3.5 px-4 align-top text-right">
-                  <div className="relative inline-block payment-action-menu-container">
-                    <div className="flex items-center justify-end gap-1.5">
-                      {p.receiptUrl && (
-                        <a
-                          href={p.receiptUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="p-1.5 rounded-lg border border-border/70 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                          title="View Payment Receipt Voucher"
-                        >
-                          <ExternalLink className="w-3.5 h-3.5 text-gold-500" />
-                        </a>
+                {p.notes && (
+                  <p className="text-xs text-muted-foreground line-clamp-2">
+                    {p.notes}
+                  </p>
+                )}
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-border/30">
+                  {p.receiptUrl && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => openReceiptViewer(p)}
+                      className="rounded-xl text-xs h-7 px-2.5 gap-1.5 text-gold-600 dark:text-gold-400 mr-auto"
+                    >
+                      {isPdf ? (
+                        <FileText className="w-3.5 h-3.5 text-rose-500" />
+                      ) : (
+                        <ImageIcon className="w-3.5 h-3.5 text-emerald-500" />
                       )}
-
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() =>
-                          setActiveMenuId(activeMenuId === p.id ? null : p.id)
-                        }
-                        className="h-8 w-8 p-0 rounded-lg text-muted-foreground hover:text-foreground"
-                      >
-                        <MoreVertical className="w-4 h-4" />
-                      </Button>
-                    </div>
-
-                    {/* Dropdown Menu */}
-                    {activeMenuId === p.id && (
-                      <div className="absolute right-0 mt-1 w-40 rounded-xl bg-popover/95 backdrop-blur-xl border border-border/80 dark:border-white/10 shadow-lg py-1 z-30 animate-in fade-in-50 zoom-in-95">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setActiveMenuId(null);
-                            onEditPayment(p);
-                          }}
-                          className="w-full flex items-center gap-2 px-3 py-2 text-xs text-foreground hover:bg-muted/80 transition-colors cursor-pointer"
-                        >
-                          <Edit2 className="w-3.5 h-3.5 text-gold-500" />
-                          <span>Edit Payment</span>
-                        </button>
-
-                        <div className="h-px bg-border/40 my-1" />
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setActiveMenuId(null);
-                            onDeletePayment(p);
-                          }}
-                          className="w-full flex items-center gap-2 px-3 py-2 text-xs text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>Delete Payment</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Mobile Card View */}
-      <div className="md:hidden divide-y divide-border/40">
-        {payments.map((p) => (
-          <div key={p.id} className="p-4 space-y-3">
-            <div className="flex items-start justify-between gap-3">
-              <div className="space-y-1">
-                <span className="font-serif text-base font-bold text-foreground">
-                  {formatAmount(p.amount, p.currency)}
-                </span>
-                <div className="flex items-center gap-2 text-[11px] text-muted-foreground flex-wrap">
-                  <span className="flex items-center gap-1">
-                    <Calendar className="w-3.5 h-3.5 text-gold-500" />
-                    <span>{new Date(p.paymentDate).toLocaleDateString()}</span>
-                  </span>
-                  {p.moneyReceiptNumber && <span>• MR: {p.moneyReceiptNumber}</span>}
-                  {p.receivedBy && (
-                    <span className="flex items-center gap-1 text-[10px]">
-                      <UserCheck className="w-3 h-3 text-emerald-500" />
-                      <span>{p.receivedBy.name}</span>
-                    </span>
+                      <span>View Voucher</span>
+                    </Button>
                   )}
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onEditPayment(p)}
+                    className="rounded-xl text-xs h-7 px-3 gap-1"
+                  >
+                    <Edit2 className="w-3 h-3 text-gold-500" />
+                    <span>Edit</span>
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onDeletePayment(p)}
+                    className="rounded-xl text-xs h-7 px-2 border-destructive/40 text-destructive"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </Button>
                 </div>
               </div>
-
-              <div className="flex flex-col items-end gap-1">
-                <PaymentMethodBadge method={p.paymentMethod} />
-                <PaymentTypeBadge type={p.paymentType} />
-              </div>
-            </div>
-
-            {p.caseReference && (
-              <div className="text-xs font-mono text-gold-600 dark:text-gold-400 font-semibold flex items-center gap-1">
-                <Briefcase className="w-3.5 h-3.5" />
-                <span>{p.caseReference}</span>
-              </div>
-            )}
-
-            {p.notes && (
-              <p className="text-xs text-muted-foreground line-clamp-2">
-                {p.notes}
-              </p>
-            )}
-
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border/30">
-              {p.receiptUrl && (
-                <a
-                  href={p.receiptUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-xs text-gold-500 mr-auto"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  <span>Receipt</span>
-                </a>
-              )}
-
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => onEditPayment(p)}
-                className="rounded-xl text-xs h-7 px-3 gap-1"
-              >
-                <Edit2 className="w-3 h-3 text-gold-500" />
-                <span>Edit</span>
-              </Button>
-
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => onDeletePayment(p)}
-                className="rounded-xl text-xs h-7 px-2 border-destructive/40 text-destructive"
-              >
-                <Trash2 className="w-3 h-3" />
-              </Button>
-            </div>
-          </div>
-        ))}
+            );
+          })}
+        </div>
       </div>
-    </div>
+
+      {/* Full Modal Document Viewer Dialog */}
+      {viewingReceipt && (
+        <DocumentViewerDialog
+          document={viewingReceipt}
+          isOpen={Boolean(viewingReceipt)}
+          onClose={() => setViewingReceipt(null)}
+        />
+      )}
+    </>
   );
 }
+
+export default ClientPaymentsTable;

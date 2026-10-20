@@ -9,6 +9,7 @@ import {
   ASSET_TYPES,
   ASSET_TYPE_LIST,
   AssetType,
+  ASSET_STATUSES,
   MAX_MEDIA_SIZE_BYTES,
 } from "@/const/asset.const";
 import {
@@ -66,6 +67,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     const existingAsset = (await Asset.findOne({
       fileHash: item.fileHash,
       assetType: item.assetType as AssetType,
+      status: ASSET_STATUSES.READY,
     }).lean()) as IAsset | null;
 
     if (existingAsset) {

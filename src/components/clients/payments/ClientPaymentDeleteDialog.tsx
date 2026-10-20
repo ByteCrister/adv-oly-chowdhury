@@ -84,6 +84,11 @@ export function ClientPaymentDeleteDialog({
                 Money Receipt: {payment.moneyReceiptNumber}
               </span>
             )}
+            {payment.receiptUrl && (
+              <span className="block text-[11px] text-amber-600 dark:text-amber-400 font-medium">
+                Note: The attached receipt voucher ({payment.receiptFileName || "Voucher"}) will be unlinked and scheduled for deletion in accordance with chamber media retention policies.
+              </span>
+            )}
           </AlertDialogDescription>
         </AlertDialogHeader>
 

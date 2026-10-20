@@ -3,6 +3,7 @@ import {
   CaseExpensePageLimit,
   CaseExpenseSortOption,
 } from "@/const/case-expense.const";
+import { AssetType } from "@/const/asset.const";
 
 /**
  * Full Case Expense Data Transfer Object including case and client context.
@@ -22,8 +23,12 @@ export interface CaseExpenseItemDto {
   amount: number;
   currency: string;
   receiptAssetReferenceId: string | null;
+  receiptAssetreferenceId?: string | null; // camelCase / lowercase alias
   receiptUrl: string | null;
   receiptFileName: string | null;
+  receiptAssetType?: AssetType | null;
+  receiptMimeType?: string | null;
+  receiptSizeBytes?: number | null;
   recordedBy: {
     id: string;
     name: string;
@@ -81,6 +86,7 @@ export interface CreateCaseExpenseInput {
   amount: number;
   currency?: string;
   receiptAssetReferenceId?: string | null;
+  receiptAssetreferenceId?: string | null;
 }
 
 /**
@@ -130,6 +136,9 @@ export interface RawCaseExpenseReceiptInput {
     _id?: unknown;
     secureUrl?: string | null;
     originalFilename?: string | null;
+    assetType?: AssetType | string | null;
+    mimeType?: string | null;
+    bytes?: number | null;
   } | null;
 }
 

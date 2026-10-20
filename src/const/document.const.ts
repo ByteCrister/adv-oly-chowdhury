@@ -52,10 +52,7 @@ export const DOCUMENT_MAX_SIZE_MB = 2;
 export const DOCUMENT_ALLOWED_MIME_TYPES = [
   // PDF
   "application/pdf",
-  // Word Documents
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/msword",
-  // Images (scans, deeds, NID cards, receipts)
+  // Images (scans, deeds, NID cards, receipts, exhibits)
   "image/jpeg",
   "image/jpg",
   "image/png",
@@ -64,8 +61,6 @@ export const DOCUMENT_ALLOWED_MIME_TYPES = [
 
 export const DOCUMENT_ALLOWED_EXTENSIONS = [
   ".pdf",
-  ".doc",
-  ".docx",
   ".jpg",
   ".jpeg",
   ".png",

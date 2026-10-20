@@ -63,3 +63,24 @@ export const CASE_EXPENSE_QUERY_KEYS = {
   details: () => [...CASE_EXPENSE_QUERY_KEYS.all, "detail"] as const,
   detail: (id: string) => [...CASE_EXPENSE_QUERY_KEYS.details(), id] as const,
 };
+
+// Receipt voucher file constraints (Max 2MB, PDF and Images)
+export const CASE_EXPENSE_RECEIPT_MAX_SIZE_BYTES = 2 * 1024 * 1024; // 2 MB
+export const CASE_EXPENSE_RECEIPT_MAX_SIZE_MB = 2;
+
+export const CASE_EXPENSE_RECEIPT_ALLOWED_MIME_TYPES = [
+  "application/pdf",
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+] as const;
+
+export const CASE_EXPENSE_RECEIPT_ALLOWED_EXTENSIONS = [
+  ".pdf",
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".webp",
+] as const;
+

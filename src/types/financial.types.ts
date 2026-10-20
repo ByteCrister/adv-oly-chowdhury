@@ -6,6 +6,7 @@ import {
 } from "@/const/financial.const";
 import { PaymentMethod, PaymentType } from "@/const/client-payment.const";
 import { CaseExpenseCategory } from "@/const/case-expense.const";
+import { AssetType } from "@/const/asset.const";
 
 /**
  * Unified Financial Record DTO representing either a Client Payment (Income)
@@ -35,6 +36,9 @@ export interface UnifiedFinancialRecordDto {
   receiptAssetId: string | null;
   receiptUrl: string | null;
   receiptFileName: string | null;
+  receiptAssetType?: AssetType | null;
+  receiptMimeType?: string | null;
+  receiptSizeBytes?: number | null;
   recordedBy: {
     id: string;
     name: string;

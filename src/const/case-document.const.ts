@@ -72,9 +72,6 @@ export type CaseDocumentSortOption =
 export const CASE_DOCUMENT_ALLOWED_MIME_TYPES = [
   // PDF
   "application/pdf",
-  // Word Documents
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/msword",
   // Images
   "image/jpeg",
   "image/jpg",

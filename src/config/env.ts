@@ -57,6 +57,12 @@ export const envSchema = z.object({
   UPSTASH_REDIS_REST_TOKEN: z
     .string({ message: "UPSTASH_REDIS_REST_TOKEN is required" })
     .min(1, "UPSTASH_REDIS_REST_TOKEN cannot be empty"),
+
+  // Cron Job Authentication
+  CRON_SECRET: z
+    .string()
+    .min(16, "CRON_SECRET must be at least 16 characters for security")
+    .optional(),
 });
 
 /**
@@ -88,6 +94,9 @@ const rawEnv = {
   // Upstash Redis
   UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL,
   UPSTASH_REDIS_REST_TOKEN: process.env.UPSTASH_REDIS_REST_TOKEN,
+
+  // Cron Secret
+  CRON_SECRET: process.env.CRON_SECRET,
 };
 
 const parsedEnv = envSchema.safeParse(rawEnv);

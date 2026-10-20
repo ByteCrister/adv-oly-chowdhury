@@ -78,7 +78,7 @@ export function ClientDocumentReplaceDialog({
       setValidationError(
         err instanceof Error
           ? err.message
-          : "Invalid file. Max size 2MB (PDF, Word, Images)."
+          : "Invalid file. Max size 2MB (PDF and Image files only)."
       );
       return;
     }
@@ -160,7 +160,7 @@ export function ClientDocumentReplaceDialog({
                 ref={fileInputRef}
                 type="file"
                 onChange={handleFileChange}
-                accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp"
+                accept=".pdf,image/jpeg,image/png,image/webp,image/jpg"
                 className="hidden"
                 disabled={isProcessing}
               />
@@ -186,7 +186,7 @@ export function ClientDocumentReplaceDialog({
                     Click to select new replacement file
                   </p>
                   <p className="text-[11px] text-muted-foreground">
-                    Max: 2MB limit (PDF, Word, or image)
+                    PDF, PNG, JPG, or WebP (Maximum 2 MB • Lossless Compressed)
                   </p>
                 </div>
               )}

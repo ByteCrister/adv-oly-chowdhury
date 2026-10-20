@@ -33,6 +33,7 @@ import { CreateClientDocumentDialog } from "./CreateClientDocumentDialog";
 import { EditDocumentDialog } from "./EditDocumentDialog";
 import { ReplaceDocumentDialog } from "./ReplaceDocumentDialog";
 import { DeleteDocumentDialog } from "./DeleteDocumentDialog";
+import { DocumentViewerDialog } from "./DocumentViewerDialog";
 import type { UnifiedDocumentItemDto } from "@/types/document.types";
 
 export function DocumentsOverviewPage() {
@@ -52,6 +53,7 @@ export function DocumentsOverviewPage() {
   const [selectedEditDoc, setSelectedEditDoc] = React.useState<UnifiedDocumentItemDto | null>(null);
   const [selectedReplaceDoc, setSelectedReplaceDoc] = React.useState<UnifiedDocumentItemDto | null>(null);
   const [selectedDeleteDoc, setSelectedDeleteDoc] = React.useState<UnifiedDocumentItemDto | null>(null);
+  const [selectedViewDoc, setSelectedViewDoc] = React.useState<UnifiedDocumentItemDto | null>(null);
 
   // Reset page to 1 whenever filters or search change
   const handleScopeChange = (newScope: DocumentScope) => {
@@ -208,6 +210,7 @@ export function DocumentsOverviewPage() {
               <DocumentTable
                 documents={documents}
                 isLoading={isDocsFetching}
+                onViewDocument={(doc) => setSelectedViewDoc(doc)}
                 onEditDocument={(doc) => setSelectedEditDoc(doc)}
                 onReplaceDocument={(doc) => setSelectedReplaceDoc(doc)}
                 onDeleteDocument={(doc) => setSelectedDeleteDoc(doc)}
@@ -220,6 +223,7 @@ export function DocumentsOverviewPage() {
             {/* Mobile / Tablet Card View */}
             <DocumentCardView
               documents={documents}
+              onViewDocument={(doc) => setSelectedViewDoc(doc)}
               onEditDocument={(doc) => setSelectedEditDoc(doc)}
               onReplaceDocument={(doc) => setSelectedReplaceDoc(doc)}
               onDeleteDocument={(doc) => setSelectedDeleteDoc(doc)}
@@ -272,6 +276,12 @@ export function DocumentsOverviewPage() {
         isOpen={Boolean(selectedDeleteDoc)}
         onClose={() => setSelectedDeleteDoc(null)}
         onSuccess={() => refetch()}
+      />
+
+      <DocumentViewerDialog
+        document={selectedViewDoc}
+        isOpen={Boolean(selectedViewDoc)}
+        onClose={() => setSelectedViewDoc(null)}
       />
     </div>
   );

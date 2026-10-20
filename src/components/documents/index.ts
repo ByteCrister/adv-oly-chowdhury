@@ -9,4 +9,5 @@ export * from "./CreateClientDocumentDialog";
 export * from "./EditDocumentDialog";
 export * from "./ReplaceDocumentDialog";
 export * from "./DeleteDocumentDialog";
+export * from "./DocumentViewerDialog";
 export * from "./DocumentsOverviewPage";

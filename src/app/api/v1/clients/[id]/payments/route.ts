@@ -14,7 +14,7 @@ import { Client } from "@/db/models/Client.model";
 import { Case } from "@/db/models/Case.model";
 import { ClientPayment } from "@/db/models/ClientPayment.model";
 import { AssetReference } from "@/db/models/AssetReference.model";
-import { ASSET_OWNER_TYPES } from "@/const/asset-reference.const";
+import { ASSET_OWNER_TYPES, ASSET_PURPOSES } from "@/const/asset-reference.const";
 import {
   CLIENT_PAYMENT_DEFAULT_PAGE_LIMIT,
   CLIENT_PAYMENT_SORT_OPTIONS,
@@ -78,8 +78,14 @@ function formatClientPaymentItem(
     receiptAssetreferenceId: payment.receiptAssetreferenceId
       ? (payment.receiptAssetreferenceId as mongoose.Types.ObjectId).toString()
       : null,
+    receiptAssetReferenceId: payment.receiptAssetreferenceId
+      ? (payment.receiptAssetreferenceId as mongoose.Types.ObjectId).toString()
+      : null,
     receiptUrl: asset?.secureUrl || null,
     receiptFileName: receiptRef?.originalFileName || asset?.originalFilename || null,
+    receiptAssetType: asset?.assetType || null,
+    receiptMimeType: asset?.mimeType || null,
+    receiptSizeBytes: asset?.bytes || null,
     notes: (payment.notes as string) || null,
     receivedBy: receivedByUser
       ? {
@@ -325,10 +331,11 @@ export const POST = withErrorHandler(
       }
     }
 
-    // If receipt asset reference is provided, verify it exists and is active
+    // If receipt asset reference is provided, verify it exists, is active, and belongs to this client
+    const receiptRefId = validated.receiptAssetreferenceId ?? validated.receiptAssetReferenceId;
     let receiptObjectId: mongoose.Types.ObjectId | null = null;
-    if (validated.receiptAssetreferenceId) {
-      receiptObjectId = new mongoose.Types.ObjectId(validated.receiptAssetreferenceId);
+    if (receiptRefId) {
+      receiptObjectId = new mongoose.Types.ObjectId(receiptRefId);
       const receiptRef = await AssetReference.findOne({
         _id: receiptObjectId,
         deletedAt: null,
@@ -336,6 +343,16 @@ export const POST = withErrorHandler(
 
       if (!receiptRef) {
         throw ApiError.badRequest("The referenced receipt file does not exist or was deleted.");
+      }
+
+      // Security: Ensure the asset reference is not owned by a different client
+      if (
+        receiptRef.ownerId &&
+        (receiptRef.ownerType === ASSET_OWNER_TYPES.CLIENT_PAYMENT ||
+          receiptRef.ownerType === ASSET_OWNER_TYPES.CLIENT) &&
+        !receiptRef.ownerId.equals(objectId)
+      ) {
+        throw ApiError.badRequest("The referenced receipt file belongs to another client.");
       }
     }
 
@@ -350,6 +367,7 @@ export const POST = withErrorHandler(
           {
             ownerType: ASSET_OWNER_TYPES.CLIENT_PAYMENT,
             ownerId: objectId,
+            purpose: ASSET_PURPOSES.PAYMENT_MONEY_RECEIPT,
           },
           { session: dbSession }
         );

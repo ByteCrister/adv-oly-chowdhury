@@ -19,6 +19,7 @@ import type { UnifiedDocumentItemDto } from "@/types/document.types";
 
 export interface DocumentCardViewProps {
   documents: UnifiedDocumentItemDto[];
+  onViewDocument?: (doc: UnifiedDocumentItemDto) => void;
   onEditDocument: (doc: UnifiedDocumentItemDto) => void;
   onReplaceDocument: (doc: UnifiedDocumentItemDto) => void;
   onDeleteDocument: (doc: UnifiedDocumentItemDto) => void;
@@ -26,6 +27,7 @@ export interface DocumentCardViewProps {
 
 export function DocumentCardView({
   documents,
+  onViewDocument,
   onEditDocument,
   onReplaceDocument,
   onDeleteDocument,
@@ -91,9 +93,13 @@ export function DocumentCardView({
                 </div>
 
                 <div className="min-w-0">
-                  <h4 className="font-semibold text-xs text-foreground truncate">
+                  <button
+                    type="button"
+                    onClick={() => onViewDocument?.(doc)}
+                    className="font-semibold text-xs text-foreground truncate hover:text-gold-500 hover:underline text-left cursor-pointer transition-colors block max-w-[170px]"
+                  >
                     {doc.title}
-                  </h4>
+                  </button>
                   <p className="text-[10px] text-muted-foreground font-mono truncate">
                     {doc.originalFileName}
                   </p>
@@ -118,16 +124,21 @@ export function DocumentCardView({
                 {activeMenuId === doc.id && (
                   <div className="absolute right-0 mt-1 w-44 rounded-xl bg-card/95 backdrop-blur-2xl border border-border/80 dark:border-white/10 shadow-xl py-1 z-50">
                     {doc.fileUrl && (
-                      <a
-                        href={doc.fileUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 px-3 py-2 text-xs text-foreground hover:bg-muted/80 transition-colors"
-                        onClick={() => setActiveMenuId(null)}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveMenuId(null);
+                          if (onViewDocument) {
+                            onViewDocument(doc);
+                          } else {
+                            window.open(doc.fileUrl, "_blank");
+                          }
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-foreground hover:bg-muted/80 transition-colors text-left cursor-pointer"
                       >
                         <ExternalLink className="w-3.5 h-3.5 text-blue-500" />
                         <span>View Document</span>
-                      </a>
+                      </button>
                     )}
                     <button
                       type="button"

@@ -60,16 +60,13 @@ export type ClientDocumentSortOption =
   (typeof CLIENT_DOCUMENT_SORT_OPTIONS)[keyof typeof CLIENT_DOCUMENT_SORT_OPTIONS];
 
 export const CLIENT_DOCUMENT_ALLOWED_MIME_TYPES = [
+  // PDF
+  "application/pdf",
   // Images
   "image/jpeg",
   "image/jpg",
   "image/png",
   "image/webp",
-  // PDF
-  "application/pdf",
-  // Word Documents
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/msword",
 ] as const;
 
 export const CLIENT_DOCUMENT_QUERY_KEYS = {

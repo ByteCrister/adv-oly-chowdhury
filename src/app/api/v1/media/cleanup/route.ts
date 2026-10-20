@@ -3,76 +3,80 @@ import { withErrorHandler } from "@/lib/helpers/withErrorHandler";
 import { Asset } from "@/db/models/Asset.model";
 import { AssetReference } from "@/db/models/AssetReference.model";
 import { User } from "@/db/models/User.model";
-import { CaseDocument } from "@/db/models/CaseDocument.model";
-import { ClientDocument } from "@/db/models/ClientDocument.model";
-import { CaseExpense } from "@/db/models/CaseExpense.model";
-import { ClientPayment } from "@/db/models/ClientPayment.model";
-import { CaseEvent } from "@/db/models/CaseEvent.model";
 import { deleteFromCloudinary } from "@/lib/services/cloudinary.service";
 import { ASSET_STATUSES } from "@/const/asset.const";
 import { CleanupApiResponse } from "@/types/media.types";
+import { getOneMonthRetentionCutoff } from "@/lib/helpers/cron.helper";
 
 export const POST = withErrorHandler(async () => {
-  // 1. Scan all physical assets marked as ready
-  const assets = await Asset.find({ status: ASSET_STATUSES.READY });
+  const cutoffDate = getOneMonthRetentionCutoff();
+
+  // Scan physical assets that have completed the 1-month retention period
+  const assets = await Asset.find({
+    status: ASSET_STATUSES.READY,
+    createdAt: { $lte: cutoffDate },
+  }).limit(50);
+
   let deletedCount = 0;
   const scannedCount = assets.length;
 
   for (const asset of assets) {
-    // 2. Count active (non-soft-deleted) AssetReference records
-    const activeRefCounts = await AssetReference.countDocuments({
-      assetId: asset._id,
-      deletedAt: null,
-    });
-
-    if (activeRefCounts > 0) {
+    // 1. Check whether any AssetReference records exist (active or within retention window)
+    const refCount = await AssetReference.countDocuments({ assetId: asset._id });
+    if (refCount > 0) {
       continue;
     }
 
-    // 3. Safety Check: Verify no other system model has a direct reference
-    const [
-      userRef,
-      caseDocRef,
-      clientDocRef,
-      expenseRef,
-      paymentRef,
-      eventRef,
-    ] = await Promise.all([
-      User.exists({
-        $or: [{ profileAssetId: asset._id }, { signatureAssetId: asset._id }],
-      }),
-      CaseDocument.exists({ assetId: asset._id }),
-      ClientDocument.exists({ assetId: asset._id }),
-      CaseExpense.exists({ receiptAssetId: asset._id }),
-      ClientPayment.exists({ receiptAssetId: asset._id }),
-      CaseEvent.exists({ attachmentAssetId: asset._id }),
-    ]);
+    // 2. Check direct model references
+    const userRef = await User.exists({ signatureAssetId: asset._id });
+    if (userRef) {
+      continue;
+    }
 
-    const hasAnyDirectEntityRef = Boolean(
-      userRef ||
-        caseDocRef ||
-        clientDocRef ||
-        expenseRef ||
-        paymentRef ||
-        eventRef
+    // 3. Atomically transition status to DELETED
+    const claimed = await Asset.findOneAndUpdate(
+      {
+        _id: asset._id,
+        status: ASSET_STATUSES.READY,
+        createdAt: { $lte: cutoffDate },
+      },
+      { $set: { status: ASSET_STATUSES.DELETED } },
+      { new: true }
     );
 
-    if (hasAnyDirectEntityRef) {
+    if (!claimed) {
       continue;
     }
 
-    // 4. Zero references exist: Destroy from Cloudinary and mark as deleted
-    try {
-      await deleteFromCloudinary(
-        asset.publicId,
-        asset.resourceType as "image" | "video" | "raw" | "auto"
+    // Recheck references inside claimed state
+    const postClaimRefCount = await AssetReference.countDocuments({
+      assetId: claimed._id,
+    });
+    if (postClaimRefCount > 0) {
+      await Asset.updateOne(
+        { _id: claimed._id },
+        { $set: { status: ASSET_STATUSES.READY } }
       );
-      asset.status = ASSET_STATUSES.DELETED;
-      await asset.save();
-      deletedCount++;
+      continue;
+    }
+
+    // 4. Destroy on Cloudinary
+    try {
+      const cloudRes = await deleteFromCloudinary(
+        claimed.publicId,
+        claimed.resourceType as "image" | "video" | "raw" | "auto"
+      );
+
+      if (cloudRes.result === "ok" || cloudRes.result === "not found") {
+        await Asset.deleteOne({
+          _id: claimed._id,
+          status: ASSET_STATUSES.DELETED,
+        });
+        deletedCount++;
+      }
     } catch (err: unknown) {
       console.error(
-        `Failed to delete Cloudinary asset ${asset.publicId} during cleanup:`,
+        `Failed to delete Cloudinary asset ${claimed.publicId} during cleanup:`,
         err
       );
     }

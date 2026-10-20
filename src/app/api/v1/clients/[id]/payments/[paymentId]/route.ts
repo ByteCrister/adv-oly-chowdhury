@@ -7,7 +7,7 @@ import { withTransaction } from "@/lib/helpers/withTransaction";
 import { ClientPayment } from "@/db/models/ClientPayment.model";
 import { Case } from "@/db/models/Case.model";
 import { AssetReference } from "@/db/models/AssetReference.model";
-import { ASSET_OWNER_TYPES } from "@/const/asset-reference.const";
+import { ASSET_OWNER_TYPES, ASSET_PURPOSES } from "@/const/asset-reference.const";
 import {
   recordAuditLog,
   calculateAuditDiff,
@@ -69,8 +69,14 @@ function formatClientPaymentItem(
     receiptAssetreferenceId: payment.receiptAssetreferenceId
       ? (payment.receiptAssetreferenceId as mongoose.Types.ObjectId).toString()
       : null,
+    receiptAssetReferenceId: payment.receiptAssetreferenceId
+      ? (payment.receiptAssetreferenceId as mongoose.Types.ObjectId).toString()
+      : null,
     receiptUrl: asset?.secureUrl || null,
     receiptFileName: receiptRef?.originalFileName || asset?.originalFilename || null,
+    receiptAssetType: asset?.assetType || null,
+    receiptMimeType: asset?.mimeType || null,
+    receiptSizeBytes: asset?.bytes || null,
     notes: (payment.notes as string) || null,
     receivedBy: receivedByUser
       ? {
@@ -195,10 +201,18 @@ export const PATCH = withErrorHandler(
 
       const beforeState = payment.toObject();
 
-      // Handle receipt file update / replacement
-      if (validated.receiptAssetreferenceId !== undefined) {
-        if (validated.receiptAssetreferenceId) {
-          const newReceiptId = new mongoose.Types.ObjectId(validated.receiptAssetreferenceId);
+      // Handle receipt file update / replacement / removal
+      const receiptFieldSpecified =
+        validated.receiptAssetreferenceId !== undefined ||
+        validated.receiptAssetReferenceId !== undefined;
+      const targetReceiptId =
+        validated.receiptAssetreferenceId !== undefined
+          ? validated.receiptAssetreferenceId
+          : validated.receiptAssetReferenceId;
+
+      if (receiptFieldSpecified) {
+        if (targetReceiptId) {
+          const newReceiptId = new mongoose.Types.ObjectId(targetReceiptId);
           const newReceipt = await AssetReference.findOne({
             _id: newReceiptId,
             deletedAt: null,
@@ -206,6 +220,16 @@ export const PATCH = withErrorHandler(
 
           if (!newReceipt) {
             throw ApiError.badRequest("The specified receipt file does not exist or was deleted.");
+          }
+
+          // Security: Ensure the new asset reference is not owned by a different client
+          if (
+            newReceipt.ownerId &&
+            (newReceipt.ownerType === ASSET_OWNER_TYPES.CLIENT_PAYMENT ||
+              newReceipt.ownerType === ASSET_OWNER_TYPES.CLIENT) &&
+            !newReceipt.ownerId.equals(clientObjectId)
+          ) {
+            throw ApiError.badRequest("The referenced receipt file belongs to another client.");
           }
 
           // If replacing previous receipt, soft-delete old reference
@@ -222,6 +246,7 @@ export const PATCH = withErrorHandler(
 
           newReceipt.ownerType = ASSET_OWNER_TYPES.CLIENT_PAYMENT;
           newReceipt.ownerId = clientObjectId;
+          newReceipt.purpose = ASSET_PURPOSES.PAYMENT_MONEY_RECEIPT;
           await newReceipt.save({ session: dbSession });
 
           payment.receiptAssetreferenceId = newReceiptId;

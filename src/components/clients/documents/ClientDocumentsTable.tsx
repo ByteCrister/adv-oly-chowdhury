@@ -11,6 +11,7 @@ import {
   Calendar,
   UploadCloud,
   FileCheck,
+  Eye,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ClientDocumentTypeBadge } from "@/components/clients/shared/ClientBadges";
@@ -24,6 +25,7 @@ export interface ClientDocumentsTableProps {
   onDeleteDocument: (doc: ClientDocumentItemDto) => void;
   onUploadNew: () => void;
   onResetFilters: () => void;
+  onViewDocument?: (doc: ClientDocumentItemDto) => void;
 }
 
 export function ClientDocumentsTable({
@@ -34,6 +36,7 @@ export function ClientDocumentsTable({
   onDeleteDocument,
   onUploadNew,
   onResetFilters,
+  onViewDocument,
 }: ClientDocumentsTableProps) {
   const [activeMenuId, setActiveMenuId] = React.useState<string | null>(null);
 
@@ -142,9 +145,20 @@ export function ClientDocumentsTable({
                         <FileCheck className="w-4 h-4" />
                       </div>
                       <div className="space-y-1 min-w-0 max-w-xs sm:max-w-sm">
-                        <span className="font-semibold text-foreground text-xs block truncate">
-                          {doc.title}
-                        </span>
+                        {onViewDocument ? (
+                          <button
+                            type="button"
+                            onClick={() => onViewDocument(doc)}
+                            className="font-semibold text-foreground text-xs block truncate hover:text-gold-500 transition-colors text-left"
+                            title="Click to preview document"
+                          >
+                            {doc.title}
+                          </button>
+                        ) : (
+                          <span className="font-semibold text-foreground text-xs block truncate">
+                            {doc.title}
+                          </span>
+                        )}
                         <span className="text-[11px] text-muted-foreground font-mono block truncate">
                           {doc.originalFileName}
                         </span>
@@ -200,6 +214,20 @@ export function ClientDocumentsTable({
                   <td className="py-3.5 px-4 align-top text-right">
                     <div className="relative inline-block doc-action-menu-container">
                       <div className="flex items-center justify-end gap-1.5">
+                        {/* Interactive In-App Document Preview */}
+                        {onViewDocument && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => onViewDocument(doc)}
+                            className="p-1.5 h-8 w-8 rounded-lg border border-border/70 hover:bg-gold-500/10 text-muted-foreground hover:text-gold-500 transition-colors"
+                            title="Preview Document"
+                          >
+                            <Eye className="w-3.5 h-3.5 text-gold-500" />
+                          </Button>
+                        )}
+
                         {/* Direct File View Link */}
                         {doc.fileUrl && (
                           <a
@@ -228,7 +256,21 @@ export function ClientDocumentsTable({
 
                       {/* Dropdown Menu */}
                       {activeMenuId === doc.id && (
-                        <div className="absolute right-0 mt-1 w-44 rounded-xl bg-popover/95 backdrop-blur-xl border border-border/80 dark:border-white/10 shadow-lg py-1 z-30 animate-in fade-in-50 zoom-in-95">
+                        <div className="absolute right-0 mt-1 w-44 rounded-xl bg-popover/95 backdrop-blur-xl border border-border/80 dark:border-white/10 shadow-lg py-1 z-30 animate-in fade-in-50 zoom-in-95 text-left">
+                          {onViewDocument && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveMenuId(null);
+                                onViewDocument(doc);
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-foreground hover:bg-muted/80 transition-colors cursor-pointer"
+                            >
+                              <Eye className="w-3.5 h-3.5 text-gold-500" />
+                              <span>Preview Document</span>
+                            </button>
+                          )}
+
                           {doc.fileUrl && (
                             <a
                               href={doc.fileUrl}
@@ -334,6 +376,19 @@ export function ClientDocumentsTable({
 
               {/* Action Buttons for Mobile */}
               <div className="flex items-center gap-2 pt-2 border-t border-border/30">
+                {onViewDocument && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onViewDocument(doc)}
+                    className="flex-1 rounded-xl text-[11px] h-7 gap-1"
+                  >
+                    <Eye className="w-3 h-3 text-gold-500" />
+                    <span>Preview</span>
+                  </Button>
+                )}
+
                 <Button
                   type="button"
                   variant="outline"

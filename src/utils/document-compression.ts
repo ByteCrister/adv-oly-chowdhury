@@ -1,25 +1,33 @@
 /**
  * Legal & Client Document Compression and Validation Utility
  *
+ * Exclusively supports:
+ * 1. PDF documents (.pdf, application/pdf)
+ * 2. High-resolution raster images (.jpg, .jpeg, .png, .webp)
+ *
  * Provides:
- * 1. Strict pre-upload file validation (Max 2MB, allowed MIME types / extensions)
- * 2. Client-side canvas compression for scanned image documents (JPEG, PNG, WebP)
- *    compressing high-resolution multi-megabyte photos/scans into lightweight,
- *    tolerable KB sizes (typically 150KB - 400KB) while preserving crisp text readability.
- * 3. Safe pass-through for binary vector documents (PDF, DOCX).
+ * - Strict pre-upload file validation (Max 2MB, PDF & Images only)
+ * - Lossless / high-fidelity client-side compression:
+ *   • For Images: Uses the enhanced `compressImage` utility (Web Worker, WebP, EXIF normalization, text sharpness)
+ *   • For PDFs: Uses `pdf-lib` object-stream compaction and orphaned-object elimination for lossless size reduction
  */
 
+import { PDFDocument } from "pdf-lib";
 import {
   DOCUMENT_MAX_SIZE_BYTES,
   DOCUMENT_ALLOWED_MIME_TYPES,
   DOCUMENT_ALLOWED_EXTENSIONS,
 } from "@/const/document.const";
+import {
+  compressImage,
+  CompressImageOptions,
+} from "@/utils/image-compression";
 
-export interface CompressDocumentOptions {
+export interface CompressDocumentOptions extends CompressImageOptions {
   maxWidth?: number;
   maxHeight?: number;
-  quality?: number; // 0.0 to 1.0 (recommended: 0.82 for readable legal docs)
-  targetMimeType?: "image/webp" | "image/jpeg";
+  quality?: number;
+  targetMimeType?: "image/webp" | "image/jpeg" | "image/png";
 }
 
 export interface DocumentCompressionResult {
@@ -28,7 +36,7 @@ export interface DocumentCompressionResult {
   compressedSizeBytes: number;
   compressionRatio: number;
   didCompress: boolean;
-  type: "image" | "pdf" | "docx" | "other";
+  type: "image" | "pdf";
 }
 
 /**
@@ -42,7 +50,7 @@ export function formatByteSize(bytes: number): string {
 }
 
 /**
- * Checks whether a given file matches allowed document extensions.
+ * Checks whether a given file matches allowed document extensions (.pdf, .jpg, .jpeg, .png, .webp).
  */
 export function hasAllowedExtension(fileName: string): boolean {
   const lowerName = fileName.toLowerCase();
@@ -52,13 +60,12 @@ export function hasAllowedExtension(fileName: string): boolean {
 }
 
 /**
- * Determines logical document category for processing.
+ * Determines logical document category for processing: 'image', 'pdf', or 'unsupported'.
  */
-export function getDocumentCategory(
-  file: File
-): "image" | "pdf" | "docx" | "other" {
-  const mime = file.type.toLowerCase();
-  const name = file.name.toLowerCase();
+export function getDocumentCategory(file: File): "image" | "pdf" | "unsupported" {
+  if (!file) return "unsupported";
+  const mime = (file.type || "").toLowerCase();
+  const name = (file.name || "").toLowerCase();
 
   if (
     mime.startsWith("image/") ||
@@ -74,20 +81,11 @@ export function getDocumentCategory(
     return "pdf";
   }
 
-  if (
-    mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-    mime === "application/msword" ||
-    name.endsWith(".docx") ||
-    name.endsWith(".doc")
-  ) {
-    return "docx";
-  }
-
-  return "other";
+  return "unsupported";
 }
 
 /**
- * Validates a document file against strict size (Max 2MB) and format rules.
+ * Validates a document file against strict size (Max 2MB) and format rules (PDF and Image only).
  * Throws an Error with a user-friendly message if validation fails.
  */
 export function validateDocumentFile(
@@ -106,154 +104,51 @@ export function validateDocumentFile(
     );
   }
 
-  // 2. MIME / Extension Format Check
+  // 2. MIME / Extension Format Check (PDF and Image only)
   const isMimeAllowed = (DOCUMENT_ALLOWED_MIME_TYPES as readonly string[]).includes(
     file.type
   );
   const isExtAllowed = hasAllowedExtension(file.name);
 
-  // Pass if either MIME type or extension matches (guards against browser MIME misreporting)
   if (!isMimeAllowed && !isExtAllowed) {
     throw new Error(
-      `File "${file.name}" is not a supported format. Please upload PDF, Word (DOC/DOCX), or image files (JPEG, PNG, WebP).`
+      `File "${file.name}" is not supported. Only PDF documents and image files (JPEG, PNG, WebP) are allowed.`
     );
   }
 }
 
 /**
- * Loads an image File into an HTMLImageElement asynchronously.
- */
-function loadImageElement(file: File): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const objectUrl = URL.createObjectURL(file);
-    const img = new Image();
-
-    img.onload = () => {
-      URL.revokeObjectURL(objectUrl);
-      resolve(img);
-    };
-
-    img.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error(`Failed to decode image from "${file.name}".`));
-    };
-
-    img.src = objectUrl;
-  });
-}
-
-/**
- * Compresses an image document to under a tolerable KB size while preserving text legibility.
+ * Compresses an image document using the newly updated `compressImage` helper.
+ * Maintains higher resolution (up to 2048x2048) and quality (0.88) to preserve
+ * legal seal details, signatures, and fine text while shrinking byte size significantly.
  */
 async function compressImageDocument(
   file: File,
   options?: CompressDocumentOptions
 ): Promise<DocumentCompressionResult> {
   const originalSizeBytes = file.size;
-  const maxWidth = options?.maxWidth ?? 1920;
-  const maxHeight = options?.maxHeight ?? 1920;
-  const quality = options?.quality ?? 0.82;
-  const targetMimeType = options?.targetMimeType ?? "image/webp";
-
-  // Check if browser environment has canvas
-  if (typeof window === "undefined" || typeof document === "undefined") {
-    return {
-      file,
-      originalSizeBytes,
-      compressedSizeBytes: originalSizeBytes,
-      compressionRatio: 0,
-      didCompress: false,
-      type: "image",
-    };
-  }
 
   try {
-    const img = await loadImageElement(file);
-    const { naturalWidth: srcWidth, naturalHeight: srcHeight } = img;
-
-    // Calculate aspect ratio fit
-    const ratio = Math.min(1, maxWidth / srcWidth, maxHeight / srcHeight);
-    const targetWidth = Math.max(1, Math.round(srcWidth * ratio));
-    const targetHeight = Math.max(1, Math.round(srcHeight * ratio));
-
-    const canvas = document.createElement("canvas");
-    canvas.width = targetWidth;
-    canvas.height = targetHeight;
-
-    const ctx = canvas.getContext("2d", { alpha: false });
-    if (!ctx) {
-      return {
-        file,
-        originalSizeBytes,
-        compressedSizeBytes: originalSizeBytes,
-        compressionRatio: 0,
-        didCompress: false,
-        type: "image",
-      };
-    }
-
-    // High quality downscaling
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-
-    // Fill white background in case source had transparency
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, targetWidth, targetHeight);
-    ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
-
-    // Export compressed blob
-    const blob = await new Promise<Blob | null>((resolve) => {
-      canvas.toBlob((b) => resolve(b), targetMimeType, quality);
+    const result = await compressImage(file, {
+      maxWidth: options?.maxWidth ?? 2048,
+      maxHeight: options?.maxHeight ?? 2048,
+      quality: options?.quality ?? 0.88,
+      maxSizeBytes: options?.maxSizeBytes ?? 1.5 * 1024 * 1024,
+      targetMimeType: options?.targetMimeType ?? "image/webp",
+      useWebWorker: options?.useWebWorker ?? true,
+      signal: options?.signal,
     });
-
-    if (!blob) {
-      return {
-        file,
-        originalSizeBytes,
-        compressedSizeBytes: originalSizeBytes,
-        compressionRatio: 0,
-        didCompress: false,
-        type: "image",
-      };
-    }
-
-    // Only use compressed result if it actually reduced file size
-    if (blob.size >= originalSizeBytes) {
-      return {
-        file,
-        originalSizeBytes,
-        compressedSizeBytes: originalSizeBytes,
-        compressionRatio: 0,
-        didCompress: false,
-        type: "image",
-      };
-    }
-
-    // Construct new File preserving name with updated extension if changed
-    const baseName = file.name.substring(0, file.name.lastIndexOf(".")) || file.name;
-    const extension = targetMimeType === "image/webp" ? ".webp" : ".jpg";
-    const compressedFileName = `${baseName}${extension}`;
-
-    const compressedFile = new File([blob], compressedFileName, {
-      type: targetMimeType,
-      lastModified: Date.now(),
-    });
-
-    const compressionRatio = Math.max(
-      0,
-      (originalSizeBytes - compressedFile.size) / originalSizeBytes
-    );
 
     return {
-      file: compressedFile,
-      originalSizeBytes,
-      compressedSizeBytes: compressedFile.size,
-      compressionRatio,
-      didCompress: true,
+      file: result.file,
+      originalSizeBytes: result.originalSizeBytes,
+      compressedSizeBytes: result.compressedSizeBytes,
+      compressionRatio: result.compressionRatio,
+      didCompress: result.didCompress,
       type: "image",
     };
-  } catch {
-    // If canvas fails (e.g. corrupted image), fallback safely to original file
+  } catch (err) {
+    console.warn("[document-compression] Image compression fallback to original:", err);
     return {
       file,
       originalSizeBytes,
@@ -266,16 +161,85 @@ async function compressImageDocument(
 }
 
 /**
+ * Losslessly optimizes a PDF document using `pdf-lib`.
+ * - Groups loose objects into compressed object streams (PDF 1.5+ standard).
+ * - Eliminates unreferenced revisions and duplicate catalog metadata.
+ * - Leaves text, vector paths, embedded fonts, and layout 100% bit-exact and unaltered.
+ */
+export async function compressPdfDocument(
+  file: File
+): Promise<DocumentCompressionResult> {
+  const originalSizeBytes = file.size;
+
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdfDoc = await PDFDocument.load(arrayBuffer, {
+      ignoreEncryption: true,
+      updateMetadata: false,
+    });
+
+    // Save with object streams to group and compress PDF objects losslessly
+    const compressedBytes = await pdfDoc.save({
+      useObjectStreams: true,
+      addDefaultPage: false,
+    });
+
+    // Only adopt compressed output if it is actually smaller
+    if (compressedBytes.byteLength < originalSizeBytes) {
+      const pdfBlob = new Blob([compressedBytes.buffer as ArrayBuffer], {
+        type: "application/pdf",
+      });
+      const compressedFile = new File([pdfBlob], file.name, {
+        type: "application/pdf",
+        lastModified: Date.now(),
+      });
+      const compressionRatio = Math.max(
+        0,
+        (originalSizeBytes - compressedBytes.byteLength) / originalSizeBytes
+      );
+
+      return {
+        file: compressedFile,
+        originalSizeBytes,
+        compressedSizeBytes: compressedBytes.byteLength,
+        compressionRatio,
+        didCompress: true,
+        type: "pdf",
+      };
+    }
+
+    return {
+      file,
+      originalSizeBytes,
+      compressedSizeBytes: originalSizeBytes,
+      compressionRatio: 0,
+      didCompress: false,
+      type: "pdf",
+    };
+  } catch (err) {
+    console.warn("[document-compression] PDF lossless compression fallback to original:", err);
+    return {
+      file,
+      originalSizeBytes,
+      compressedSizeBytes: originalSizeBytes,
+      compressionRatio: 0,
+      didCompress: false,
+      type: "pdf",
+    };
+  }
+}
+
+/**
  * Universal document optimization function.
- * - Validates document format and 2MB maximum size.
- * - For raster scans/photos (JPEG, PNG, WebP), compresses them into a lightweight KB size.
- * - For PDF and Word documents, safely validates constraints and passes through intact.
+ * - Strictly validates format (PDF and Image only) and 2MB maximum size.
+ * - For raster images (JPEG, PNG, WebP): compresses via `compressImage` using Web Workers.
+ * - For PDF documents: compresses losslessly via `pdf-lib` object stream packing.
  */
 export async function compressDocumentFile(
   file: File,
   options?: CompressDocumentOptions
 ): Promise<DocumentCompressionResult> {
-  // Validate constraints first
+  // 1. Validate constraints first
   validateDocumentFile(file);
 
   const category = getDocumentCategory(file);
@@ -284,13 +248,13 @@ export async function compressDocumentFile(
     return await compressImageDocument(file, options);
   }
 
-  // PDF or DOCX: pass-through with metadata
-  return {
-    file,
-    originalSizeBytes: file.size,
-    compressedSizeBytes: file.size,
-    compressionRatio: 0,
-    didCompress: false,
-    type: category,
-  };
+  if (category === "pdf") {
+    return await compressPdfDocument(file);
+  }
+
+  throw new Error(
+    `Unsupported document format for "${file.name}". Only PDF and image files (JPEG, PNG, WebP) are allowed.`
+  );
 }
+
+export default compressDocumentFile;

@@ -14,6 +14,7 @@ import { ClientDocumentUploadDialog } from "./ClientDocumentUploadDialog";
 import { ClientDocumentReplaceDialog } from "./ClientDocumentReplaceDialog";
 import { ClientDocumentEditDialog } from "./ClientDocumentEditDialog";
 import { ClientDocumentDeleteDialog } from "./ClientDocumentDeleteDialog";
+import { DocumentViewerDialog } from "@/components/documents/DocumentViewerDialog";
 import type { ClientDocumentItemDto } from "@/types/client-document.types";
 import { AlertCircle, ArrowLeft, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -70,6 +71,7 @@ export function ClientDocumentsPage({ clientId }: ClientDocumentsPageProps) {
   const [replacingDoc, setReplacingDoc] = React.useState<ClientDocumentItemDto | null>(null);
   const [editingDoc, setEditingDoc] = React.useState<ClientDocumentItemDto | null>(null);
   const [deletingDoc, setDeletingDoc] = React.useState<ClientDocumentItemDto | null>(null);
+  const [selectedViewDoc, setSelectedViewDoc] = React.useState<ClientDocumentItemDto | null>(null);
 
   if (isClientLoading) {
     return <ClientDocumentsSkeleton />;
@@ -146,6 +148,7 @@ export function ClientDocumentsPage({ clientId }: ClientDocumentsPageProps) {
           <ClientDocumentsTable
             documents={docsData?.items || []}
             isLoading={isFetching}
+            onViewDocument={(doc) => setSelectedViewDoc(doc)}
             onEditDocument={(doc) => setEditingDoc(doc)}
             onReplaceDocument={(doc) => setReplacingDoc(doc)}
             onDeleteDocument={(doc) => setDeletingDoc(doc)}
@@ -200,6 +203,13 @@ export function ClientDocumentsPage({ clientId }: ClientDocumentsPageProps) {
         clientId={client.id}
         document={deletingDoc}
         onSuccess={() => refetch()}
+      />
+
+      {/* Document In-App Viewer Modal */}
+      <DocumentViewerDialog
+        isOpen={Boolean(selectedViewDoc)}
+        onClose={() => setSelectedViewDoc(null)}
+        document={selectedViewDoc}
       />
     </div>
   );

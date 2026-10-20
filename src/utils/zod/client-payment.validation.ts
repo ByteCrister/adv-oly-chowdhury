@@ -72,6 +72,7 @@ export const baseClientPaymentSchema = z.object({
     .nullable()
     .optional(),
   receiptAssetreferenceId: optionalObjectIdValidator,
+  receiptAssetReferenceId: optionalObjectIdValidator,
   moneyReceiptNumber: z
     .string()
     .trim()

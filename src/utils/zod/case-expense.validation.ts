@@ -92,6 +92,7 @@ export const baseCaseExpenseSchema = z.object({
     .min(2, "Currency code must be at least 2 characters")
     .max(10, "Currency code cannot exceed 10 characters"),
   receiptAssetReferenceId: optionalObjectIdValidator,
+  receiptAssetreferenceId: optionalObjectIdValidator,
 });
 
 /**

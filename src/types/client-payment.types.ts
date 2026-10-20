@@ -4,6 +4,7 @@ import {
   ClientPaymentPageLimit,
   ClientPaymentSortOption,
 } from "@/const/client-payment.const";
+import { AssetType } from "@/const/asset.const";
 
 /**
  * Full Client Payment Data Transfer Object including case and receipt asset details.
@@ -24,8 +25,12 @@ export interface ClientPaymentItemDto {
   referenceNumber: string | null;
   moneyReceiptNumber: string | null;
   receiptAssetreferenceId: string | null;
+  receiptAssetReferenceId?: string | null; // camelCase alias for reference
   receiptUrl: string | null;
   receiptFileName: string | null;
+  receiptAssetType?: AssetType | null;
+  receiptMimeType?: string | null;
+  receiptSizeBytes?: number | null;
   notes: string | null;
   receivedBy: {
     id: string;
@@ -86,6 +91,7 @@ export interface CreateClientPaymentInput {
   paymentType: PaymentType;
   referenceNumber?: string | null;
   receiptAssetreferenceId?: string | null;
+  receiptAssetReferenceId?: string | null;
   moneyReceiptNumber?: string | null;
   notes?: string | null;
 }

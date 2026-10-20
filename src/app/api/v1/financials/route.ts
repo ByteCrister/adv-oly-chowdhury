@@ -22,6 +22,7 @@ import {
   CASE_EXPENSE_CATEGORY_LABELS,
   CaseExpenseCategory,
 } from "@/const/case-expense.const";
+import { AssetType } from "@/const/asset.const";
 import { financialQueryFilterSchema } from "@/utils/zod/financial.validation";
 import type {
   UnifiedFinancialRecordDto,
@@ -49,7 +50,16 @@ interface RawAggregatedRecord {
   description?: string | null;
   receiptAssetId?: mongoose.Types.ObjectId | null;
   /** Single object produced by $arrayElemAt in the items facet pipeline. */
-  receiptDoc?: { originalFileName?: string; assetDoc?: { secureUrl?: string; originalFilename?: string } };
+  receiptDoc?: {
+    originalFileName?: string;
+    assetDoc?: {
+      secureUrl?: string;
+      originalFilename?: string;
+      assetType?: AssetType | string;
+      mimeType?: string;
+      bytes?: number;
+    };
+  };
   userDoc?: { _id: mongoose.Types.ObjectId; name: string; email: string }[];
   createdAt: Date;
   updatedAt: Date;
@@ -307,6 +317,18 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
             from: "assets",
             localField: "receiptDoc.assetId",
             foreignField: "_id",
+            pipeline: [
+              {
+                $project: {
+                  _id: 1,
+                  secureUrl: 1,
+                  originalFilename: 1,
+                  assetType: 1,
+                  mimeType: 1,
+                  bytes: 1,
+                },
+              },
+            ],
             as: "assetDocs",
           },
         },
@@ -459,6 +481,9 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       receiptAssetId: record.receiptAssetId ? record.receiptAssetId.toString() : null,
       receiptUrl: receiptRef?.assetDoc?.secureUrl || null,
       receiptFileName: receiptRef?.originalFileName || receiptRef?.assetDoc?.originalFilename || null,
+      receiptAssetType: (receiptRef?.assetDoc?.assetType as AssetType) || null,
+      receiptMimeType: receiptRef?.assetDoc?.mimeType || null,
+      receiptSizeBytes: receiptRef?.assetDoc?.bytes || null,
       recordedBy: user
         ? {
             id: user._id.toString(),

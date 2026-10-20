@@ -13,7 +13,8 @@ import { Case } from "@/db/models/Case.model";
 import { Client } from "@/db/models/Client.model";
 import { CaseExpense } from "@/db/models/CaseExpense.model";
 import { AssetReference } from "@/db/models/AssetReference.model";
-import { ASSET_OWNER_TYPES } from "@/const/asset-reference.const";
+import { ASSET_OWNER_TYPES, ASSET_PURPOSES } from "@/const/asset-reference.const";
+import { AssetType } from "@/const/asset.const";
 import { COLLECTIONS } from "@/const/collection.const";
 import {
   CASE_EXPENSE_CATEGORIES,
@@ -133,8 +134,12 @@ export function formatCaseExpenseItem(doc: CaseExpenseDocInput): CaseExpenseItem
     amount: typeof doc.amount === "number" ? doc.amount : Number(doc.amount) || 0,
     currency: doc.currency || DEFAULT_CURRENCY,
     receiptAssetReferenceId: receiptRefIdStr,
+    receiptAssetreferenceId: receiptRefIdStr,
     receiptUrl: asset?.secureUrl || null,
     receiptFileName: rawReceipt?.originalFileName || asset?.originalFilename || null,
+    receiptAssetType: (asset?.assetType as AssetType) || null,
+    receiptMimeType: asset?.mimeType || null,
+    receiptSizeBytes: asset?.bytes || null,
     recordedBy: rawUser?._id
       ? {
           id: String(rawUser._id),
@@ -374,6 +379,9 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
                           _id: 1,
                           secureUrl: 1,
                           originalFilename: 1,
+                          assetType: 1,
+                          mimeType: 1,
+                          bytes: 1,
                         },
                       },
                     ],
@@ -519,17 +527,28 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     throw ApiError.notFound("The specified legal case was not found or has been deleted.");
   }
 
+  const receiptRefId = validated.receiptAssetReferenceId ?? validated.receiptAssetreferenceId;
   let receiptObjectId: mongoose.Types.ObjectId | null = null;
-  if (validated.receiptAssetReferenceId) {
-    receiptObjectId = new mongoose.Types.ObjectId(validated.receiptAssetReferenceId);
+  if (receiptRefId) {
+    receiptObjectId = new mongoose.Types.ObjectId(receiptRefId);
     const receiptRef = await AssetReference.findOne({
       _id: receiptObjectId,
       deletedAt: null,
     })
-      .select("_id")
+      .select("_id ownerType ownerId")
       .lean();
     if (!receiptRef) {
       throw ApiError.badRequest("The referenced receipt voucher file does not exist or was deleted.");
+    }
+
+    // Security guard: Ensure the asset reference is not owned by a different case
+    if (
+      receiptRef.ownerId &&
+      (receiptRef.ownerType === ASSET_OWNER_TYPES.CASE_EXPENSE ||
+        receiptRef.ownerType === ASSET_OWNER_TYPES.CASE) &&
+      !receiptRef.ownerId.equals(caseObjectId)
+    ) {
+      throw ApiError.badRequest("The referenced receipt file belongs to another legal case.");
     }
   }
 
@@ -543,6 +562,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
         {
           ownerType: ASSET_OWNER_TYPES.CASE_EXPENSE,
           ownerId: caseObjectId,
+          purpose: ASSET_PURPOSES.EXPENSE_RECEIPT,
         },
         { session: dbSession }
       );
@@ -593,7 +613,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
       select: "originalFileName assetId",
       populate: {
         path: "assetId",
-        select: "secureUrl originalFilename",
+        select: "secureUrl originalFilename assetType mimeType bytes",
       },
     })
     .populate("recordedBy", "name email")

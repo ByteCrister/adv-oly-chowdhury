@@ -78,6 +78,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   const existingAsset = await Asset.findOne({
     fileHash,
     assetType: ASSET_TYPES.IMAGE,
+    status: ASSET_STATUSES.READY,
   });
 
   if (existingAsset) {
