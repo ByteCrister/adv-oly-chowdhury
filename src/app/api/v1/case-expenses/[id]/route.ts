@@ -3,6 +3,8 @@ import mongoose from "mongoose";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
+// Ensure models are registered in Mongoose schema cache for nested populate
+import "@/db/models/Asset.model";
 import { CaseExpense } from "@/db/models/CaseExpense.model";
 import { Case } from "@/db/models/Case.model";
 import { AssetReference } from "@/db/models/AssetReference.model";

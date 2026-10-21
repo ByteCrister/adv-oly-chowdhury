@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
-import { sanitizeSearchParam, buildSearchRegex } from "@/lib/helpers/search.helper";
+import { sanitizeSearchParam } from "@/lib/helpers/search.helper";
+import {
+  buildFuzzySearchPatterns,
+  buildFinancialRelevanceStages,
+  matchFinancialMetadata,
+} from "@/lib/helpers/fuzzy-searching";
 import { ClientPayment } from "@/db/models/ClientPayment.model";
 import { COLLECTIONS } from "@/const/collection.const";
 import {
@@ -49,6 +54,7 @@ interface RawAggregatedRecord {
   moneyReceiptNumber?: string | null;
   description?: string | null;
   receiptAssetId?: mongoose.Types.ObjectId | null;
+  relevanceScore?: number;
   /** Single object produced by $arrayElemAt in the items facet pipeline. */
   receiptDoc?: {
     originalFileName?: string;
@@ -259,42 +265,49 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     matchConditions.transactionDate = dateQuery;
   }
 
-  if (search) {
-    const searchRegex = buildSearchRegex(search);
-    if (searchRegex) {
-      matchConditions.$or = [
-        { clientName: searchRegex },
-        { clientNumber: searchRegex },
-        { caseTitle: searchRegex },
-        { caseReference: searchRegex },
-        { description: searchRegex },
-        { referenceNumber: searchRegex },
-        { moneyReceiptNumber: searchRegex },
-      ];
-    }
+  // Typo-tolerant fuzzy search across financial identifiers, case numbers/titles/narrative,
+  // client names/numbers/contacts, descriptions, payment methods, payment types, and expense categories
+  let isSearching = false;
+  let relevanceStages: mongoose.PipelineStage[] = [];
+
+  const searchPatterns = buildFuzzySearchPatterns(search);
+  if (searchPatterns) {
+    isSearching = true;
+    const metadataMatches = matchFinancialMetadata(searchPatterns.sanitizedQuery);
+    relevanceStages = buildFinancialRelevanceStages(searchPatterns, metadataMatches);
   }
 
+  // Apply explicit financial filters first
   if (Object.keys(matchConditions).length > 0) {
     pipeline.push({ $match: matchConditions });
   }
 
-  // Sorting
+  // Apply dynamic relevance scoring and positive relevance match
+  if (isSearching && relevanceStages.length > 0) {
+    pipeline.push(...relevanceStages);
+  }
+
+  // Deterministic sorting with stable tie-breaker
   const sortMap: Record<FinancialSortOption, Record<string, 1 | -1>> = {
     [FINANCIAL_SORT_OPTIONS.NEWEST_DATE]: { transactionDate: -1, _id: -1 },
     [FINANCIAL_SORT_OPTIONS.OLDEST_DATE]: { transactionDate: 1, _id: 1 },
-    [FINANCIAL_SORT_OPTIONS.AMOUNT_DESC]: { amount: -1, transactionDate: -1 },
-    [FINANCIAL_SORT_OPTIONS.AMOUNT_ASC]: { amount: 1, transactionDate: -1 },
-    [FINANCIAL_SORT_OPTIONS.NEWEST_CREATED]: { createdAt: -1 },
+    [FINANCIAL_SORT_OPTIONS.AMOUNT_DESC]: { amount: -1, transactionDate: -1, _id: -1 },
+    [FINANCIAL_SORT_OPTIONS.AMOUNT_ASC]: { amount: 1, transactionDate: 1, _id: 1 },
+    [FINANCIAL_SORT_OPTIONS.NEWEST_CREATED]: { createdAt: -1, _id: -1 },
   };
 
-  const sortOption = sortMap[sort];
+  const sortOption = sortMap[sort] || { transactionDate: -1, _id: -1 };
+  const itemsSort: Record<string, 1 | -1> = isSearching
+    ? { relevanceScore: -1, ...sortOption }
+    : sortOption;
+
   const skip = (page - 1) * limit;
 
   // Facet pipeline for items, totalCount, and financial statistics
   pipeline.push({
     $facet: {
       items: [
-        { $sort: sortOption },
+        { $sort: itemsSort },
         { $skip: skip },
         { $limit: limit },
         // Lookup receipt asset reference

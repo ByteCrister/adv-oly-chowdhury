@@ -1,10 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
-import ConnectDB from "@/db";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
-import { sanitizeSearchParam, buildSearchRegex } from "@/lib/helpers/search.helper";
+import { sanitizeSearchParam } from "@/lib/helpers/search.helper";
+import {
+  buildFuzzySearchPatterns,
+  bucketScoredEntityIds,
+} from "@/lib/helpers/fuzzy-searching/shared-fuzzy-search.helper";
+// Ensure models are registered in Mongoose schema cache for nested populate
+import "@/db/models/Asset.model";
+import {
+  calculateClientCaseMatchScore,
+  calculateClientCourtMatchScore,
+  calculateClientDocumentMatchScore,
+  calculateClientPaymentMatchScore,
+  buildClientRelevanceStages,
+  ClientRelatedCaseCandidate,
+  ClientRelatedCourtCandidate,
+  ClientRelatedDocumentCandidate,
+  ClientRelatedPaymentCandidate,
+} from "@/lib/helpers/fuzzy-searching/client-fuzzy-search.helper";
 import {
   recordAuditLog,
   AUDIT_ACTIONS,
@@ -12,8 +28,10 @@ import {
 } from "@/lib/helpers/audit.helper";
 import { Client } from "@/db/models/Client.model";
 import { Case } from "@/db/models/Case.model";
+import { Court } from "@/db/models/Court.model";
 import { ClientDocument } from "@/db/models/ClientDocument.model";
 import { ClientPayment } from "@/db/models/ClientPayment.model";
+import { COLLECTIONS } from "@/const/collection.const";
 import {
   CLIENT_DEFAULT_PAGE_LIMIT,
   CLIENT_SORT_OPTIONS,
@@ -130,7 +148,8 @@ function formatClientListItem(
 /**
  * GET /api/v1/clients
  *
- * Paginated list of clients with search, sorting, filtering, and relation counts.
+ * Paginated list of clients with typo-tolerant fuzzy search, multi-field filtering,
+ * relevance ranking across direct and referenced models, and live summary statistics.
  */
 export const GET = withErrorHandler(async (req: NextRequest) => {
   await getUserId();
@@ -155,8 +174,6 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   }
 
   const { search, clientType, status, startDate, endDate, sort, page, limit } = parsed.data;
-
-  await ConnectDB();
 
   // Build MongoDB query filter (only active, non-deleted clients)
   const filter: Record<string, unknown> = {
@@ -185,20 +202,172 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     filter.createdAt = dateQuery;
   }
 
-  // Search across name, organizationName, clientNumber, phone, alternatePhone, nationalId, email
-  if (search) {
-    const searchRegex = buildSearchRegex(search);
-    if (searchRegex) {
-      filter.$or = [
-        { name: searchRegex },
-        { organizationName: searchRegex },
-        { clientNumber: searchRegex },
-        { phone: searchRegex },
-        { alternatePhone: searchRegex },
-        { nationalId: searchRegex },
-        { email: searchRegex },
-      ];
+  // Search Filter: typo-tolerant fuzzy search across client fields
+  // (name, organizationName, clientNumber, phone, alternatePhone, nationalId, email)
+  // and related models (Cases, Courts, ClientDocuments, ClientPayments) with relevance ranking
+  let relevanceStages: mongoose.PipelineStage[] = [];
+  let isSearching = false;
+
+  const searchPatterns = buildFuzzySearchPatterns(search);
+  if (searchPatterns) {
+    isSearching = true;
+
+    // 1. Concurrently query Court, ClientDocument, and ClientPayment candidates
+    const courtSearchFilter: Record<string, unknown> = {
+      deletedAt: null,
+      $or: [
+        { name: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+        { district: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      ],
+    };
+
+    const documentSearchFilter: Record<string, unknown> = {
+      deletedAt: null,
+      $or: [
+        { title: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+        { notes: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      ],
+    };
+
+    const paymentSearchFilter: Record<string, unknown> = {
+      $or: [
+        { moneyReceiptNumber: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+        { referenceNumber: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+        { notes: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      ],
+    };
+
+    const [matchingCourts, matchingDocuments, matchingPayments] = await Promise.all([
+      Court.find(courtSearchFilter, {
+        _id: 1,
+        name: 1,
+        district: 1,
+      })
+        .limit(200)
+        .lean<ClientRelatedCourtCandidate[]>(),
+      ClientDocument.find(documentSearchFilter, {
+        _id: 1,
+        clientId: 1,
+        title: 1,
+        documentType: 1,
+        notes: 1,
+      })
+        .limit(500)
+        .lean<ClientRelatedDocumentCandidate[]>(),
+      ClientPayment.find(paymentSearchFilter, {
+        _id: 1,
+        clientId: 1,
+        moneyReceiptNumber: 1,
+        referenceNumber: 1,
+        notes: 1,
+      })
+        .limit(500)
+        .lean<ClientRelatedPaymentCandidate[]>(),
+    ]);
+
+    // Score courts to assist case-level matching
+    const courtScoreMap = new Map<string, number>();
+    const matchingCourtIds: mongoose.Types.ObjectId[] = [];
+    for (const co of matchingCourts) {
+      const score = calculateClientCourtMatchScore(co, searchPatterns.sanitizedQuery);
+      if (score > 0) {
+        courtScoreMap.set(String(co._id), score);
+        matchingCourtIds.push(co._id);
+      }
     }
+
+    // 2. Query Case candidates matching case fields OR associated with matching courts
+    const caseConditions: Record<string, unknown>[] = [
+      { title: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { caseNumber: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { internalReference: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { description: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { legalIssues: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { opposingCounsel: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { opposingParties: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { caseCategory: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+    ];
+
+    if (matchingCourtIds.length > 0) {
+      caseConditions.push({ courtId: { $in: matchingCourtIds } });
+    }
+
+    const matchingCases = await Case.find(
+      {
+        deletedAt: null,
+        $or: caseConditions,
+      },
+      {
+        _id: 1,
+        clientId: 1,
+        courtId: 1,
+        title: 1,
+        caseNumber: 1,
+        internalReference: 1,
+        caseCategory: 1,
+        opposingCounsel: 1,
+        opposingParties: 1,
+        description: 1,
+        legalIssues: 1,
+      }
+    )
+      .limit(1000)
+      .lean<ClientRelatedCaseCandidate[]>();
+
+    // 3. Score all related candidates and aggregate the strongest score per clientId
+    const clientRelatedScores = new Map<string, number>();
+
+    for (const c of matchingCases) {
+      if (!c.clientId) continue;
+      const score = calculateClientCaseMatchScore(c, searchPatterns.sanitizedQuery, courtScoreMap);
+      if (score > 0) {
+        const idStr = String(c.clientId);
+        const existing = clientRelatedScores.get(idStr) || 0;
+        clientRelatedScores.set(idStr, Math.max(existing, score));
+      }
+    }
+
+    for (const d of matchingDocuments) {
+      if (!d.clientId) continue;
+      const score = calculateClientDocumentMatchScore(d, searchPatterns.sanitizedQuery);
+      if (score > 0) {
+        const idStr = String(d.clientId);
+        const existing = clientRelatedScores.get(idStr) || 0;
+        clientRelatedScores.set(idStr, Math.max(existing, score));
+      }
+    }
+
+    for (const p of matchingPayments) {
+      if (!p.clientId) continue;
+      const score = calculateClientPaymentMatchScore(p, searchPatterns.sanitizedQuery);
+      if (score > 0) {
+        const idStr = String(p.clientId);
+        const existing = clientRelatedScores.get(idStr) || 0;
+        clientRelatedScores.set(idStr, Math.max(existing, score));
+      }
+    }
+
+    // Bucket related candidate IDs into 5 relevance priority tiers
+    const relatedBuckets = bucketScoredEntityIds(clientRelatedScores);
+
+    // Build $or match conditions: direct client fields + matching related client IDs
+    const searchConditions: Record<string, unknown>[] = [
+      { name: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { organizationName: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { clientNumber: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { phone: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { alternatePhone: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { nationalId: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { email: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+    ];
+
+    if (relatedBuckets.allMatchingIds.length > 0) {
+      searchConditions.push({ _id: { $in: relatedBuckets.allMatchingIds } });
+    }
+
+    filter.$or = searchConditions;
+
+    relevanceStages = buildClientRelevanceStages(relatedBuckets, searchPatterns);
   }
 
   // Determine sorting
@@ -212,6 +381,10 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   };
 
   const sortOption = sortMap[sort as ClientSortOption] || { createdAt: -1 };
+  const itemsSort: Record<string, 1 | -1> = isSearching
+    ? { relevanceScore: -1, ...sortOption, _id: -1 }
+    : { ...sortOption, _id: -1 };
+
   const skip = (page - 1) * limit;
 
   const now = new Date();
@@ -219,59 +392,117 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
 
   // Check if filtering beyond standard active clients is active
   const isFiltered = Boolean(
-    search ||
+    isSearching ||
       (clientType && clientType !== "ALL") ||
       (status && status !== "ALL") ||
       startDate ||
       endDate
   );
 
-  // Execute client aggregation (for counts and stats) and paginated find queries in parallel
-  const [statsAggResult, clients] = await Promise.all([
-    Client.aggregate<{
-      total: number;
-      active: number;
-      inactive: number;
-      archived: number;
-      individual: number;
-      corporate: number;
-      newThisMonth: number;
-    }>([
-      { $match: filter },
-      {
-        $group: {
-          _id: null,
-          total: { $sum: 1 },
-          active: {
-            $sum: { $cond: [{ $eq: ["$status", CLIENT_STATUSES.ACTIVE] }, 1, 0] },
+  type RawStatsType = {
+    total: number;
+    active: number;
+    inactive: number;
+    archived: number;
+    individual: number;
+    corporate: number;
+    newThisMonth: number;
+  };
+
+  let rawStats: RawStatsType | undefined;
+  let clients: (IClientDocument | Record<string, unknown>)[] = [];
+
+  if (isSearching) {
+    const pipeline: mongoose.PipelineStage[] = [{ $match: filter }];
+
+    if (relevanceStages.length > 0) {
+      pipeline.push(...relevanceStages);
+    }
+
+    pipeline.push({
+      $facet: {
+        items: [
+          { $sort: itemsSort },
+          { $skip: skip },
+          { $limit: limit },
+        ],
+        stats: [
+          {
+            $group: {
+              _id: null,
+              total: { $sum: 1 },
+              active: {
+                $sum: { $cond: [{ $eq: ["$status", CLIENT_STATUSES.ACTIVE] }, 1, 0] },
+              },
+              inactive: {
+                $sum: { $cond: [{ $eq: ["$status", CLIENT_STATUSES.INACTIVE] }, 1, 0] },
+              },
+              archived: {
+                $sum: { $cond: [{ $eq: ["$status", CLIENT_STATUSES.ARCHIVED] }, 1, 0] },
+              },
+              individual: {
+                $sum: { $cond: [{ $eq: ["$clientType", CLIENT_TYPES.INDIVIDUAL] }, 1, 0] },
+              },
+              corporate: {
+                $sum: { $cond: [{ $eq: ["$clientType", CLIENT_TYPES.ORGANIZATION] }, 1, 0] },
+              },
+              newThisMonth: {
+                $sum: { $cond: [{ $gte: ["$createdAt", startOfMonth] }, 1, 0] },
+              },
+            },
           },
-          inactive: {
-            $sum: { $cond: [{ $eq: ["$status", CLIENT_STATUSES.INACTIVE] }, 1, 0] },
-          },
-          archived: {
-            $sum: { $cond: [{ $eq: ["$status", CLIENT_STATUSES.ARCHIVED] }, 1, 0] },
-          },
-          individual: {
-            $sum: { $cond: [{ $eq: ["$clientType", CLIENT_TYPES.INDIVIDUAL] }, 1, 0] },
-          },
-          corporate: {
-            $sum: { $cond: [{ $eq: ["$clientType", CLIENT_TYPES.ORGANIZATION] }, 1, 0] },
-          },
-          newThisMonth: {
-            $sum: { $cond: [{ $gte: ["$createdAt", startOfMonth] }, 1, 0] },
+        ],
+      },
+    });
+
+    const facetResult = await Client.aggregate<{
+      items: Record<string, unknown>[];
+      stats: RawStatsType[];
+    }>(pipeline);
+
+    const result = facetResult[0];
+    clients = result?.items || [];
+    rawStats = result?.stats?.[0];
+  } else {
+    const [statsAggResult, nonSearchClients] = await Promise.all([
+      Client.aggregate<RawStatsType>([
+        { $match: filter },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: 1 },
+            active: {
+              $sum: { $cond: [{ $eq: ["$status", CLIENT_STATUSES.ACTIVE] }, 1, 0] },
+            },
+            inactive: {
+              $sum: { $cond: [{ $eq: ["$status", CLIENT_STATUSES.INACTIVE] }, 1, 0] },
+            },
+            archived: {
+              $sum: { $cond: [{ $eq: ["$status", CLIENT_STATUSES.ARCHIVED] }, 1, 0] },
+            },
+            individual: {
+              $sum: { $cond: [{ $eq: ["$clientType", CLIENT_TYPES.INDIVIDUAL] }, 1, 0] },
+            },
+            corporate: {
+              $sum: { $cond: [{ $eq: ["$clientType", CLIENT_TYPES.ORGANIZATION] }, 1, 0] },
+            },
+            newThisMonth: {
+              $sum: { $cond: [{ $gte: ["$createdAt", startOfMonth] }, 1, 0] },
+            },
           },
         },
-      },
-    ]),
-    Client.find(filter).sort(sortOption).skip(skip).limit(limit).lean(),
-  ]);
+      ]),
+      Client.find(filter).sort(itemsSort).skip(skip).limit(limit).lean(),
+    ]);
 
-  const rawStats = statsAggResult[0];
+    clients = nonSearchClients;
+    rawStats = statsAggResult[0];
+  }
+
   const total = rawStats?.total ?? 0;
-
   const clientIds = clients.map((c) => c._id as mongoose.Types.ObjectId);
 
-  // Prepare cross-collection aggregates without unbounded in-memory ID arrays
+  // Prepare cross-collection aggregates without arbitrary candidate limits or unbounded in-memory arrays
   const fetchGlobalStats = async () => {
     if (!isFiltered) {
       const [activeCaseClients, revenueAgg, thisMonthRevenueAgg] = await Promise.all([
@@ -307,35 +538,75 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       };
     }
 
-    // When filtered, fetch matched client IDs bounded to 500 to prevent oversized $in arrays
-    const matchedDocs = await Client.find(filter, { _id: 1 }).limit(500).lean();
-    const matchedIds = matchedDocs.map((d) => d._id);
-
-    const [activeCaseClients, revenueAgg, thisMonthRevenueAgg] = await Promise.all([
-      Case.distinct("clientId", {
-        clientId: { $in: matchedIds },
-        caseStatus: CASE_STATUSES.ACTIVE,
-        deletedAt: null,
-      }),
-      ClientPayment.aggregate<{ total: number }>([
-        { $match: { clientId: { $in: matchedIds } } },
-        { $group: { _id: null, total: { $sum: "$amount" } } },
-      ]),
-      ClientPayment.aggregate<{ total: number }>([
+    // When filtered or searching, execute scalable cross-collection aggregations
+    // using MongoDB indexes without arbitrary candidate limits or unbounded $in arrays
+    const [activeCasesResult, revenueResult] = await Promise.all([
+      Client.aggregate<{ count: number }>([
+        { $match: filter },
+        ...(relevanceStages.length > 0 ? relevanceStages : []),
         {
-          $match: {
-            clientId: { $in: matchedIds },
-            paymentDate: { $gte: startOfMonth },
+          $lookup: {
+            from: COLLECTIONS.CASES,
+            let: { clientId: "$_id" },
+            pipeline: [
+              {
+                $match: {
+                  $expr: { $eq: ["$clientId", "$$clientId"] },
+                  caseStatus: CASE_STATUSES.ACTIVE,
+                  deletedAt: null,
+                },
+              },
+              { $limit: 1 },
+              { $project: { _id: 1 } },
+            ],
+            as: "activeCase",
           },
         },
-        { $group: { _id: null, total: { $sum: "$amount" } } },
+        { $match: { "activeCase.0": { $exists: true } } },
+        { $count: "count" },
+      ]),
+      Client.aggregate<{ totalRevenue: number; thisMonthRevenue: number }>([
+        { $match: filter },
+        ...(relevanceStages.length > 0 ? relevanceStages : []),
+        {
+          $lookup: {
+            from: COLLECTIONS.CLIENT_PAYMENTS,
+            localField: "_id",
+            foreignField: "clientId",
+            pipeline: [
+              {
+                $project: {
+                  amount: 1,
+                  paymentDate: 1,
+                },
+              },
+            ],
+            as: "payments",
+          },
+        },
+        { $unwind: "$payments" },
+        {
+          $group: {
+            _id: null,
+            totalRevenue: { $sum: "$payments.amount" },
+            thisMonthRevenue: {
+              $sum: {
+                $cond: [
+                  { $gte: ["$payments.paymentDate", startOfMonth] },
+                  "$payments.amount",
+                  0,
+                ],
+              },
+            },
+          },
+        },
       ]),
     ]);
 
     return {
-      clientsWithActiveCases: activeCaseClients.length,
-      totalRevenueCollected: revenueAgg[0]?.total ?? 0,
-      thisMonthRevenue: thisMonthRevenueAgg[0]?.total ?? 0,
+      clientsWithActiveCases: activeCasesResult[0]?.count ?? 0,
+      totalRevenueCollected: revenueResult[0]?.totalRevenue ?? 0,
+      thisMonthRevenue: revenueResult[0]?.thisMonthRevenue ?? 0,
     };
   };
 
@@ -458,8 +729,6 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
 
   const body = await req.json();
   const validated = createClientSchema.parse(body);
-
-  await ConnectDB();
 
   // If clientNumber is provided, check for uniqueness upfront
   const isAutoGenerated = !validated.clientNumber?.trim();

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
-import ConnectDB from "@/db";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
@@ -13,6 +12,8 @@ import {
   AUDIT_ACTIONS,
   AUDIT_ENTITY_TYPES,
 } from "@/lib/helpers/audit.helper";
+// Ensure models are registered in Mongoose schema cache for nested populate
+import "@/db/models/Asset.model";
 import {
   CLIENT_DOCUMENT_TYPE_LABELS,
   ClientDocumentType,
@@ -86,8 +87,6 @@ export const GET = withErrorHandler(
     const clientObjectId = new mongoose.Types.ObjectId(id);
     const docObjectId = new mongoose.Types.ObjectId(docId);
 
-    await ConnectDB();
-
     const doc = await ClientDocument.findOne({
       _id: docObjectId,
       clientId: clientObjectId,
@@ -138,8 +137,6 @@ export const PATCH = withErrorHandler(
 
     const body = await req.json();
     const validated = updateClientDocumentSchema.parse(body);
-
-    await ConnectDB();
 
     await withTransaction(async (dbSession) => {
       const doc = await ClientDocument.findOne({
@@ -267,8 +264,6 @@ export const DELETE = withErrorHandler(
 
     const clientObjectId = new mongoose.Types.ObjectId(id);
     const docObjectId = new mongoose.Types.ObjectId(docId);
-
-    await ConnectDB();
 
     const doc = await ClientDocument.findOne({
       _id: docObjectId,

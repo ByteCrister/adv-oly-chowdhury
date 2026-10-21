@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
-import ConnectDB from "@/db";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
@@ -9,7 +8,22 @@ import {
   AUDIT_ACTIONS,
   AUDIT_ENTITY_TYPES,
 } from "@/lib/helpers/audit.helper";
-import { sanitizeSearchParam, buildSearchRegex } from "@/lib/helpers/search.helper";
+import { sanitizeSearchParam } from "@/lib/helpers/search.helper";
+import {
+  buildFuzzySearchPatterns,
+  bucketScoredEntityIds,
+} from "@/lib/helpers/fuzzy-searching/shared-fuzzy-search.helper";
+import {
+  calculateClientMatchScore,
+  ClientMatchCandidate,
+} from "@/lib/helpers/fuzzy-searching/case-fuzzy-search.helper";
+import {
+  HearingCaseCandidate,
+  HearingCourtCandidate,
+  calculateHearingCaseMatchScore,
+  calculateHearingCourtMatchScore,
+  buildHearingRelevanceStages,
+} from "@/lib/helpers/fuzzy-searching/hearing-fuzzy-search.helper";
 import { Hearing } from "@/db/models/Hearing.model";
 import { Case } from "@/db/models/Case.model";
 import { Court } from "@/db/models/Court.model";
@@ -209,7 +223,6 @@ export function formatHearingListItem(
  */
 export const GET = withErrorHandler(async (req: NextRequest) => {
   await getUserId();
-  await ConnectDB();
 
   const { searchParams } = new URL(req.url);
 
@@ -302,85 +315,178 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     filter.hearingDate = dateQuery;
   }
 
-  // Safe search across hearing fields, case numbers/titles, client names, and court details
-  if (search) {
-    const searchRegex = buildSearchRegex(search);
-    if (searchRegex) {
-      // Find matching clients and courts in parallel, bounded to 100 results
-      const [matchedClients, matchedCourts] = await Promise.all([
-        Client.find(
-          {
-            deletedAt: null,
-            $or: [
-              { name: searchRegex },
-              { clientNumber: searchRegex },
-              { organizationName: searchRegex },
-              { phone: searchRegex },
-            ],
-          },
-          { _id: 1 }
-        )
-          .limit(100)
-          .lean(),
-        Court.find(
-          {
-            deletedAt: null,
-            $or: [
-              { name: searchRegex },
-              { district: searchRegex },
-              { roomOrHall: searchRegex },
-              { presidingJudgeTitle: searchRegex },
-            ],
-          },
-          { _id: 1 }
-        )
-          .limit(100)
-          .lean(),
-      ]);
+  // Search Filter: typo-tolerant fuzzy search across hearing fields,
+  // case numbers/titles, client names, and court details with relevance-based ranking
+  let relevanceStages: mongoose.PipelineStage[] = [];
+  let isSearching = false;
 
-      const matchedClientIds = matchedClients.map((c) => c._id);
-      const matchedCourtIds = matchedCourts.map((c) => c._id);
+  const searchPatterns = buildFuzzySearchPatterns(search);
+  if (searchPatterns) {
+    isSearching = true;
 
-      // Find matching cases
-      const caseSearchConditions: Record<string, unknown>[] = [
-        { title: searchRegex },
-        { caseNumber: searchRegex },
-        { internalReference: searchRegex },
-      ];
-      if (matchedClientIds.length > 0) {
-        caseSearchConditions.push({ clientId: { $in: matchedClientIds } });
-      }
-      if (matchedCourtIds.length > 0) {
-        caseSearchConditions.push({ courtId: { $in: matchedCourtIds } });
-      }
+    // 1. Find matching clients and courts in parallel with bounded limits
+    const clientSearchFilter: Record<string, unknown> = {
+      deletedAt: null,
+      $or: [
+        { name: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+        { clientNumber: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+        { organizationName: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+        { phone: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      ],
+    };
 
-      const matchedCases = await Case.find(
-        {
-          deletedAt: null,
-          $or: caseSearchConditions,
-        },
-        { _id: 1 }
-      )
-        .limit(100)
-        .lean();
-      const matchedCaseIds = matchedCases.map((c) => c._id);
-
-      const directConditions: Record<string, unknown>[] = [
-        { purpose: searchRegex },
-        { outcome: searchRegex },
-        { notes: searchRegex },
-        { hearingType: searchRegex },
-        { adjournmentReason: searchRegex },
-      ];
-      if (matchedCaseIds.length > 0) {
-        directConditions.push({ caseId: { $in: matchedCaseIds } });
-      }
-      if (matchedCourtIds.length > 0) {
-        directConditions.push({ courtId: { $in: matchedCourtIds } });
-      }
-
-      filter.$or = directConditions;
+    if (clientId && clientId !== "ALL") {
+      clientSearchFilter._id = new mongoose.Types.ObjectId(clientId);
     }
+
+    const courtSearchFilter: Record<string, unknown> = {
+      deletedAt: null,
+      $or: [
+        { name: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+        { district: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+        { roomOrHall: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+        { presidingJudgeTitle: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+        { address: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      ],
+    };
+
+    if (courtId && courtId !== "ALL") {
+      courtSearchFilter._id = new mongoose.Types.ObjectId(courtId);
+    }
+
+    const [matchingClients, matchingCourts] = await Promise.all([
+      Client.find(clientSearchFilter, {
+        _id: 1,
+        name: 1,
+        clientNumber: 1,
+        organizationName: 1,
+        phone: 1,
+      })
+        .limit(500)
+        .lean<ClientMatchCandidate[]>(),
+      Court.find(courtSearchFilter, {
+        _id: 1,
+        name: 1,
+        courtType: 1,
+        district: 1,
+        roomOrHall: 1,
+        address: 1,
+        presidingJudgeTitle: 1,
+      })
+        .limit(500)
+        .lean<HearingCourtCandidate[]>(),
+    ]);
+
+    // Score client candidates
+    const clientScores = new Map<string, number>();
+    const matchingClientIds: mongoose.Types.ObjectId[] = [];
+    for (const cl of matchingClients) {
+      const score = calculateClientMatchScore(cl, searchPatterns.sanitizedQuery);
+      if (score > 0) {
+        clientScores.set(String(cl._id), score);
+        matchingClientIds.push(cl._id);
+      }
+    }
+
+    // Score court candidates
+    const courtScores = new Map<string, number>();
+    const matchingCourtIds: mongoose.Types.ObjectId[] = [];
+    for (const co of matchingCourts) {
+      const score = calculateHearingCourtMatchScore(co, searchPatterns.sanitizedQuery);
+      if (score > 0) {
+        courtScores.set(String(co._id), score);
+        matchingCourtIds.push(co._id);
+      }
+    }
+
+    const courtBuckets = bucketScoredEntityIds(courtScores);
+
+    // 2. Find matching cases (directly or via matched clients / courts)
+    const caseSearchConditions: Record<string, unknown>[] = [
+      { title: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { caseNumber: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { internalReference: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { description: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { legalIssues: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { opposingCounsel: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { opposingParties: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { caseCategory: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+    ];
+
+    if (matchingClientIds.length > 0) {
+      caseSearchConditions.push({ clientId: { $in: matchingClientIds } });
+    }
+
+    if (matchingCourtIds.length > 0) {
+      caseSearchConditions.push({ courtId: { $in: matchingCourtIds } });
+    }
+
+    const caseSearchFilter: Record<string, unknown> = {
+      deletedAt: null,
+      $or: caseSearchConditions,
+    };
+
+    if (caseId && caseId !== "ALL") {
+      caseSearchFilter._id = new mongoose.Types.ObjectId(caseId);
+    } else if (clientId && clientId !== "ALL") {
+      caseSearchFilter.clientId = new mongoose.Types.ObjectId(clientId);
+    }
+
+    const matchingCases = await Case.find(caseSearchFilter, {
+      _id: 1,
+      title: 1,
+      caseNumber: 1,
+      internalReference: 1,
+      caseCategory: 1,
+      opposingCounsel: 1,
+      opposingParties: 1,
+      description: 1,
+      legalIssues: 1,
+      clientId: 1,
+      courtId: 1,
+    })
+      .limit(1000)
+      .lean<HearingCaseCandidate[]>();
+
+    const caseScoreMap = new Map<string, number>();
+    for (const c of matchingCases) {
+      const score = calculateHearingCaseMatchScore(
+        c,
+        searchPatterns.sanitizedQuery,
+        clientScores,
+        courtScores
+      );
+      if (score > 0) {
+        caseScoreMap.set(String(c._id), score);
+      }
+    }
+
+    const caseBuckets = bucketScoredEntityIds(caseScoreMap);
+
+    // 3. Construct hearing-level search conditions
+    const directConditions: Record<string, unknown>[] = [
+      { purpose: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { outcome: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { notes: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { hearingType: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { adjournmentReason: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+    ];
+
+    if (caseBuckets.allMatchingIds.length > 0) {
+      directConditions.push({ caseId: { $in: caseBuckets.allMatchingIds } });
+    }
+
+    if (courtBuckets.allMatchingIds.length > 0) {
+      directConditions.push({ courtId: { $in: courtBuckets.allMatchingIds } });
+    }
+
+    filter.$or = directConditions;
+
+    relevanceStages = buildHearingRelevanceStages(
+      caseBuckets,
+      courtBuckets,
+      searchPatterns
+    );
   }
 
   // Sorting definitions
@@ -393,123 +499,259 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   };
 
   const sortOption = sortMap[sort as HearingSortOption] || { hearingDate: 1 };
+  const itemsSort: Record<string, 1 | -1> = isSearching
+    ? { relevanceScore: -1, ...sortOption, _id: -1 }
+    : { ...sortOption, _id: -1 };
+
   const skip = (page - 1) * limit;
 
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
   const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 
-  // Execute stats aggregation and paginated records in parallel using common filter
-  const [statsAggResult, hearings] = await Promise.all([
-    Hearing.aggregate<{
-      total: number;
-      upcoming: number;
-      past: number;
-      today: number;
-      scheduled: number;
-      inProgress: number;
-      completed: number;
-      adjourned: number;
-      cancelled: number;
-    }>([
-      { $match: filter },
-      {
-        $group: {
-          _id: null,
-          total: { $sum: 1 },
-          upcoming: {
-            $sum: {
-              $cond: [
-                {
-                  $and: [
-                    { $gte: ["$hearingDate", startOfToday] },
-                    { $ne: ["$status", HEARING_STATUSES.CANCELLED] },
+  type RawStatsType = {
+    total: number;
+    upcoming: number;
+    past: number;
+    today: number;
+    scheduled: number;
+    inProgress: number;
+    completed: number;
+    adjourned: number;
+    cancelled: number;
+  };
+
+  let rawStats: RawStatsType | undefined;
+  let hearings: (IPopulatedHearingDoc | Record<string, unknown>)[] = [];
+
+  const populateOptions = [
+    {
+      path: "caseId",
+      select:
+        "internalReference caseNumber title caseType caseStatus priority courtId clientId filingDate nextHearingDate",
+      populate: [
+        {
+          path: "clientId",
+          select: "name clientNumber organizationName clientType phone email",
+        },
+        {
+          path: "courtId",
+          select: "name courtType district roomOrHall address presidingJudgeTitle",
+        },
+      ],
+    },
+    {
+      path: "courtId",
+      select: "name courtType district roomOrHall address presidingJudgeTitle",
+    },
+  ];
+
+  if (isSearching) {
+    // Single consolidated MongoDB aggregation pipeline executing search, scoring, pagination,
+    // and live summary statistics
+    const pipeline: mongoose.PipelineStage[] = [{ $match: filter }];
+
+    if (relevanceStages.length > 0) {
+      pipeline.push(...relevanceStages);
+    }
+
+    pipeline.push({
+      $facet: {
+        items: [
+          { $sort: itemsSort },
+          { $skip: skip },
+          { $limit: limit },
+        ],
+        stats: [
+          {
+            $group: {
+              _id: null,
+              total: { $sum: 1 },
+              upcoming: {
+                $sum: {
+                  $cond: [
+                    {
+                      $and: [
+                        { $gte: ["$hearingDate", startOfToday] },
+                        { $ne: ["$status", HEARING_STATUSES.CANCELLED] },
+                      ],
+                    },
+                    1,
+                    0,
                   ],
                 },
-                1,
-                0,
-              ],
-            },
-          },
-          past: {
-            $sum: {
-              $cond: [{ $lt: ["$hearingDate", startOfToday] }, 1, 0],
-            },
-          },
-          today: {
-            $sum: {
-              $cond: [
-                {
-                  $and: [
-                    { $gte: ["$hearingDate", startOfToday] },
-                    { $lte: ["$hearingDate", endOfToday] },
-                    { $ne: ["$status", HEARING_STATUSES.CANCELLED] },
+              },
+              past: {
+                $sum: {
+                  $cond: [{ $lt: ["$hearingDate", startOfToday] }, 1, 0],
+                },
+              },
+              today: {
+                $sum: {
+                  $cond: [
+                    {
+                      $and: [
+                        { $gte: ["$hearingDate", startOfToday] },
+                        { $lte: ["$hearingDate", endOfToday] },
+                        { $ne: ["$status", HEARING_STATUSES.CANCELLED] },
+                      ],
+                    },
+                    1,
+                    0,
                   ],
                 },
-                1,
-                0,
-              ],
+              },
+              scheduled: {
+                $sum: {
+                  $cond: [{ $eq: ["$status", HEARING_STATUSES.SCHEDULED] }, 1, 0],
+                },
+              },
+              inProgress: {
+                $sum: {
+                  $cond: [{ $eq: ["$status", HEARING_STATUSES.IN_PROGRESS] }, 1, 0],
+                },
+              },
+              completed: {
+                $sum: {
+                  $cond: [{ $eq: ["$status", HEARING_STATUSES.COMPLETED] }, 1, 0],
+                },
+              },
+              adjourned: {
+                $sum: {
+                  $cond: [{ $eq: ["$status", HEARING_STATUSES.ADJOURNED] }, 1, 0],
+                },
+              },
+              cancelled: {
+                $sum: {
+                  $cond: [{ $eq: ["$status", HEARING_STATUSES.CANCELLED] }, 1, 0],
+                },
+              },
             },
           },
-          scheduled: {
-            $sum: {
-              $cond: [{ $eq: ["$status", HEARING_STATUSES.SCHEDULED] }, 1, 0],
+        ],
+      },
+    });
+
+    const [aggResult] = await Hearing.aggregate<{
+      items: (Record<string, unknown> & { _id: mongoose.Types.ObjectId })[];
+      stats: RawStatsType[];
+    }>(pipeline);
+
+    rawStats = aggResult?.stats?.[0];
+    const rawItems = aggResult?.items || [];
+
+    if (rawItems.length > 0) {
+      hearings = await Hearing.populate(rawItems, populateOptions);
+    } else {
+      hearings = [];
+    }
+  } else {
+    // When not searching, preserve existing parallel query execution
+    const [statsAggResult, foundHearings] = await Promise.all([
+      Hearing.aggregate<RawStatsType>([
+        { $match: filter },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: 1 },
+            upcoming: {
+              $sum: {
+                $cond: [
+                  {
+                    $and: [
+                      { $gte: ["$hearingDate", startOfToday] },
+                      { $ne: ["$status", HEARING_STATUSES.CANCELLED] },
+                    ],
+                  },
+                  1,
+                  0,
+                ],
+              },
             },
-          },
-          inProgress: {
-            $sum: {
-              $cond: [{ $eq: ["$status", HEARING_STATUSES.IN_PROGRESS] }, 1, 0],
+            past: {
+              $sum: {
+                $cond: [{ $lt: ["$hearingDate", startOfToday] }, 1, 0],
+              },
             },
-          },
-          completed: {
-            $sum: {
-              $cond: [{ $eq: ["$status", HEARING_STATUSES.COMPLETED] }, 1, 0],
+            today: {
+              $sum: {
+                $cond: [
+                  {
+                    $and: [
+                      { $gte: ["$hearingDate", startOfToday] },
+                      { $lte: ["$hearingDate", endOfToday] },
+                      { $ne: ["$status", HEARING_STATUSES.CANCELLED] },
+                    ],
+                  },
+                  1,
+                  0,
+                ],
+              },
             },
-          },
-          adjourned: {
-            $sum: {
-              $cond: [{ $eq: ["$status", HEARING_STATUSES.ADJOURNED] }, 1, 0],
+            scheduled: {
+              $sum: {
+                $cond: [{ $eq: ["$status", HEARING_STATUSES.SCHEDULED] }, 1, 0],
+              },
             },
-          },
-          cancelled: {
-            $sum: {
-              $cond: [{ $eq: ["$status", HEARING_STATUSES.CANCELLED] }, 1, 0],
+            inProgress: {
+              $sum: {
+                $cond: [{ $eq: ["$status", HEARING_STATUSES.IN_PROGRESS] }, 1, 0],
+              },
+            },
+            completed: {
+              $sum: {
+                $cond: [{ $eq: ["$status", HEARING_STATUSES.COMPLETED] }, 1, 0],
+              },
+            },
+            adjourned: {
+              $sum: {
+                $cond: [{ $eq: ["$status", HEARING_STATUSES.ADJOURNED] }, 1, 0],
+              },
+            },
+            cancelled: {
+              $sum: {
+                $cond: [{ $eq: ["$status", HEARING_STATUSES.CANCELLED] }, 1, 0],
+              },
             },
           },
         },
-      },
-    ]),
-    Hearing.find(filter)
-      .sort(sortOption)
-      .skip(skip)
-      .limit(limit)
-      .populate({
-        path: "caseId",
-        select:
-          "internalReference caseNumber title caseType caseStatus priority courtId clientId filingDate nextHearingDate",
-        populate: [
-          {
-            path: "clientId",
-            select: "name clientNumber organizationName clientType phone email",
-          },
-          {
-            path: "courtId",
-            select: "name courtType district roomOrHall address presidingJudgeTitle",
-          },
-        ],
-      })
-      .populate({
-        path: "courtId",
-        select: "name courtType district roomOrHall address presidingJudgeTitle",
-      })
-      .lean(),
-  ]);
+      ]),
+      Hearing.find(filter)
+        .sort(sortOption)
+        .skip(skip)
+        .limit(limit)
+        .populate({
+          path: "caseId",
+          select:
+            "internalReference caseNumber title caseType caseStatus priority courtId clientId filingDate nextHearingDate",
+          populate: [
+            {
+              path: "clientId",
+              select: "name clientNumber organizationName clientType phone email",
+            },
+            {
+              path: "courtId",
+              select: "name courtType district roomOrHall address presidingJudgeTitle",
+            },
+          ],
+        })
+        .populate({
+          path: "courtId",
+          select: "name courtType district roomOrHall address presidingJudgeTitle",
+        })
+        .lean(),
+    ]);
 
-  const rawStats = statsAggResult[0];
+    rawStats = statsAggResult[0];
+    hearings = foundHearings;
+  }
+
   const total = rawStats?.total ?? 0;
 
   // Accurately batch check whether hearings on this page have attached documents
-  const hearingIds = hearings.map((h) => h._id);
+  const hearingIds: mongoose.Types.ObjectId[] = hearings.map(
+    (h) => new mongoose.Types.ObjectId(extractIdString(h._id || (h as { id?: unknown }).id))
+  );
   const attachedOwnerIds =
     hearingIds.length > 0
       ? await AssetReference.distinct("ownerId", {
@@ -560,7 +802,6 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
  */
 export const POST = withErrorHandler(async (req: NextRequest) => {
   const userId = await getUserId();
-  await ConnectDB();
 
   const body = await req.json();
   const validated = createHearingSchema.parse(body);

@@ -2,7 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
-import { buildSearchRegex, sanitizeSearchParam } from "@/lib/helpers/search.helper";
+import { sanitizeSearchParam } from "@/lib/helpers/search.helper";
+import {
+  buildFuzzySearchPatterns,
+  bucketScoredEntityIds,
+} from "@/lib/helpers/fuzzy-searching/shared-fuzzy-search.helper";
+import {
+  calculateTaskCaseMatchScore,
+  calculateTaskClientMatchScore,
+  matchTaskStatusAndPriority,
+  buildTaskRelevanceStages,
+  TaskCaseCandidate,
+  TaskClientCandidate,
+} from "@/lib/helpers/fuzzy-searching/task-fuzzy-search.helper";
 import {
   recordAuditLog,
   AUDIT_ACTIONS,
@@ -254,51 +266,163 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     filter.dueAt = dateQuery;
   }
 
-  // Safe Contextual Search across Task title, description, and related Case & Client
-  if (search) {
-    const searchRegex = buildSearchRegex(search);
+  // Search Filter: typo-tolerant fuzzy search across task fields,
+  // case numbers/titles/categories, client names/numbers/contacts, and priority/status
+  // with relevance-based ranking
+  let relevanceStages: mongoose.PipelineStage[] = [];
+  let isSearching = false;
 
-    if (searchRegex) {
-      const [matchingCases, matchingClients] = await Promise.all([
-        Case.find(
-          {
-            deletedAt: null,
-            $or: [
-              { title: searchRegex },
-              { caseNumber: searchRegex },
-              { internalReference: searchRegex },
-            ],
-          },
-          { _id: 1 }
-        )
-          .limit(100)
-          .lean(),
-        Client.find(
-          {
-            deletedAt: null,
-            $or: [
-              { name: searchRegex },
-              { clientNumber: searchRegex },
-              { organizationName: searchRegex },
-              { phone: searchRegex },
-            ],
-          },
-          { _id: 1 }
-        )
-          .limit(100)
-          .lean(),
-      ]);
+  const searchPatterns = buildFuzzySearchPatterns(search);
+  if (searchPatterns) {
+    isSearching = true;
 
-      const caseIds = matchingCases.map((c) => c._id);
-      const clientIds = matchingClients.map((c) => c._id);
+    // 1. Evaluate whether query matches task status or priority values / labels
+    const { matchedStatuses, matchedPriorities } = matchTaskStatusAndPriority(
+      searchPatterns.sanitizedQuery
+    );
 
-      filter.$or = [
-        { title: searchRegex },
-        { description: searchRegex },
-        ...(caseIds.length > 0 ? [{ caseId: { $in: caseIds } }] : []),
-        ...(clientIds.length > 0 ? [{ clientId: { $in: clientIds } }] : []),
-      ];
+    // 2. Find matching clients with bounded candidate limits
+    const clientSearchFilter: Record<string, unknown> = {
+      deletedAt: null,
+      $or: [
+        { name: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+        { clientNumber: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+        { organizationName: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+        { phone: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+        { alternatePhone: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+        { email: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      ],
+    };
+
+    if (clientId && clientId !== "ALL") {
+      clientSearchFilter._id = new mongoose.Types.ObjectId(clientId);
     }
+
+    const matchingClients = await Client.find(clientSearchFilter, {
+      _id: 1,
+      name: 1,
+      clientNumber: 1,
+      organizationName: 1,
+      phone: 1,
+      alternatePhone: 1,
+      email: 1,
+    })
+      .limit(500)
+      .lean<TaskClientCandidate[]>();
+
+    // Score client candidates
+    const clientScores = new Map<string, number>();
+    const matchingClientIds: mongoose.Types.ObjectId[] = [];
+    for (const cl of matchingClients) {
+      const score = calculateTaskClientMatchScore(cl, searchPatterns.sanitizedQuery);
+      if (score > 0) {
+        clientScores.set(String(cl._id), score);
+        matchingClientIds.push(cl._id);
+      }
+    }
+
+    const clientBuckets = bucketScoredEntityIds(clientScores);
+
+    // 3. Find matching cases (directly or via matched clients)
+    const caseSearchConditions: Record<string, unknown>[] = [
+      { title: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { caseNumber: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { internalReference: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { description: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { legalIssues: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { opposingCounsel: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { opposingParties: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { caseCategory: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+    ];
+
+    if (matchingClientIds.length > 0) {
+      caseSearchConditions.push({ clientId: { $in: matchingClientIds } });
+    }
+
+    const caseSearchFilter: Record<string, unknown> = {
+      deletedAt: null,
+      $or: caseSearchConditions,
+    };
+
+    if (caseId && caseId !== "ALL") {
+      caseSearchFilter._id = new mongoose.Types.ObjectId(caseId);
+    } else if (clientId && clientId !== "ALL") {
+      caseSearchFilter.clientId = new mongoose.Types.ObjectId(clientId);
+    }
+
+    const matchingCases = await Case.find(caseSearchFilter, {
+      _id: 1,
+      title: 1,
+      caseNumber: 1,
+      internalReference: 1,
+      caseCategory: 1,
+      opposingCounsel: 1,
+      opposingParties: 1,
+      description: 1,
+      legalIssues: 1,
+      clientId: 1,
+    })
+      .limit(1000)
+      .lean<TaskCaseCandidate[]>();
+
+    // Score case candidates separating direct case matches and client-inherited matches
+    const caseDirectScoreMap = new Map<string, number>();
+    const caseClientScoreMap = new Map<string, number>();
+
+    for (const c of matchingCases) {
+      const scores = calculateTaskCaseMatchScore(
+        c,
+        searchPatterns.sanitizedQuery,
+        clientScores
+      );
+      if (scores.directScore > 0) {
+        caseDirectScoreMap.set(String(c._id), scores.directScore);
+      }
+      if (scores.clientScore > 0) {
+        caseClientScoreMap.set(String(c._id), scores.clientScore);
+      }
+    }
+
+    const caseBuckets = bucketScoredEntityIds(caseDirectScoreMap);
+    const inheritedClientCaseBuckets = bucketScoredEntityIds(caseClientScoreMap);
+
+    // 4. Construct task-level search conditions
+    const directConditions: Record<string, unknown>[] = [
+      { title: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { description: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+    ];
+
+    if (matchedStatuses.length > 0) {
+      directConditions.push({ status: { $in: matchedStatuses.map((s) => s.status) } });
+    }
+
+    if (matchedPriorities.length > 0) {
+      directConditions.push({ priority: { $in: matchedPriorities.map((p) => p.priority) } });
+    }
+
+    // Combine direct case IDs and inherited case IDs for task filtering
+    const allRelevantCaseIds = [
+      ...caseBuckets.allMatchingIds,
+      ...inheritedClientCaseBuckets.allMatchingIds,
+    ];
+    if (allRelevantCaseIds.length > 0) {
+      directConditions.push({ caseId: { $in: allRelevantCaseIds } });
+    }
+
+    if (clientBuckets.allMatchingIds.length > 0) {
+      directConditions.push({ clientId: { $in: clientBuckets.allMatchingIds } });
+    }
+
+    filter.$or = directConditions;
+
+    relevanceStages = buildTaskRelevanceStages(
+      caseBuckets,
+      clientBuckets,
+      inheritedClientCaseBuckets,
+      searchPatterns,
+      matchedStatuses,
+      matchedPriorities
+    );
   }
 
   // Determine sorting strategy and whether computed fields are required
@@ -368,8 +492,12 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     itemsPipeline.push({ $addFields: addFieldsStage });
   }
 
+  const itemsSort: Record<string, 1 | -1> = isSearching
+    ? { relevanceScore: -1, ...sortStage, _id: -1 }
+    : { ...sortStage, _id: -1 };
+
   itemsPipeline.push(
-    { $sort: sortStage },
+    { $sort: itemsSort },
     { $skip: skip },
     { $limit: limit },
     {
@@ -443,21 +571,14 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
 
   // Single MongoDB aggregation pipeline: executes paginated items query
   // and filter-aware aggregate statistics simultaneously on the filtered dataset.
-  const [result] = await Task.aggregate<{
-    items: TaskDocInput[];
-    stats: Array<{
-      total: number;
-      todo: number;
-      inProgress: number;
-      completed: number;
-      overdue: number;
-      urgent: number;
-      high: number;
-    }>;
-  }>([
-    { $match: filter },
-    {
-      $facet: {
+  const pipeline: mongoose.PipelineStage[] = [{ $match: filter }];
+
+  if (relevanceStages.length > 0) {
+    pipeline.push(...relevanceStages);
+  }
+
+  pipeline.push({
+    $facet: {
         items: itemsPipeline,
         stats: [
           {
@@ -509,8 +630,20 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
           },
         ],
       },
-    },
-  ]);
+    });
+
+  const [result] = await Task.aggregate<{
+    items: TaskDocInput[];
+    stats: Array<{
+      total: number;
+      todo: number;
+      inProgress: number;
+      completed: number;
+      overdue: number;
+      urgent: number;
+      high: number;
+    }>;
+  }>(pipeline);
 
   const rawStats = result?.stats?.[0] || {
     total: 0,

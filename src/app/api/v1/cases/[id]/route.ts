@@ -3,7 +3,6 @@ import mongoose from "mongoose";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
-import ConnectDB from "@/db";
 import { Case } from "@/db/models/Case.model";
 import { Client } from "@/db/models/Client.model";
 import { Court } from "@/db/models/Court.model";
@@ -43,8 +42,6 @@ export const GET = withErrorHandler(
     if (!mongoose.Types.ObjectId.isValid(id)) {
       throw ApiError.badRequest("Invalid case ID format");
     }
-
-    await ConnectDB();
 
     const caseObjectId = new mongoose.Types.ObjectId(id);
 
@@ -103,8 +100,6 @@ export const PATCH = withErrorHandler(
 
     const body = await req.json();
     const validated = updateCaseSchema.parse(body);
-
-    await ConnectDB();
 
     const caseObjectId = new mongoose.Types.ObjectId(id);
     const caseDoc = await Case.findOne({ _id: caseObjectId, deletedAt: null });
@@ -271,8 +266,6 @@ export const DELETE = withErrorHandler(
     if (!mongoose.Types.ObjectId.isValid(id)) {
       throw ApiError.badRequest("Invalid case ID format");
     }
-
-    await ConnectDB();
 
     const caseObjectId = new mongoose.Types.ObjectId(id);
     const caseDoc = await Case.findOne({ _id: caseObjectId, deletedAt: null });

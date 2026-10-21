@@ -3,7 +3,6 @@ import mongoose from "mongoose";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
-import ConnectDB from "@/db";
 import { CaseParty } from "@/db/models/CaseParty.model";
 import { Client } from "@/db/models/Client.model";
 import {
@@ -39,8 +38,6 @@ export const GET = withErrorHandler(
 
     const caseObjectId = new mongoose.Types.ObjectId(id);
     const partyObjectId = new mongoose.Types.ObjectId(partyId);
-
-    await ConnectDB();
 
     const partyDoc = await CaseParty.findOne({
       _id: partyObjectId,
@@ -84,8 +81,6 @@ export const PATCH = withErrorHandler(
 
     const body = await req.json();
     const validated = updateCasePartySchema.parse(body);
-
-    await ConnectDB();
 
     const partyDoc = await CaseParty.findOne({
       _id: partyObjectId,
@@ -185,8 +180,6 @@ export const DELETE = withErrorHandler(
 
     const caseObjectId = new mongoose.Types.ObjectId(id);
     const partyObjectId = new mongoose.Types.ObjectId(partyId);
-
-    await ConnectDB();
 
     const partyDoc = await CaseParty.findOne({
       _id: partyObjectId,

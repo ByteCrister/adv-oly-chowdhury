@@ -9,7 +9,8 @@ import {
   AUDIT_ACTIONS,
   AUDIT_ENTITY_TYPES,
 } from "@/lib/helpers/audit.helper";
-import ConnectDB from "@/db";
+// Ensure models are registered in Mongoose schema cache for nested populate
+import "@/db/models/Asset.model";
 import { Case } from "@/db/models/Case.model";
 import { CaseDocument } from "@/db/models/CaseDocument.model";
 import { AssetReference } from "@/db/models/AssetReference.model";
@@ -103,8 +104,6 @@ export const GET = withErrorHandler(
     if (!mongoose.Types.ObjectId.isValid(id)) {
       throw ApiError.badRequest("Invalid case ID format");
     }
-
-    await ConnectDB();
 
     const caseObjectId = new mongoose.Types.ObjectId(id);
     const parentCase = await Case.findOne(
@@ -247,8 +246,6 @@ export const POST = withErrorHandler(
     if (!mongoose.Types.ObjectId.isValid(id)) {
       throw ApiError.badRequest("Invalid case ID format");
     }
-
-    await ConnectDB();
 
     const caseObjectId = new mongoose.Types.ObjectId(id);
     const parentCase = await Case.findOne(

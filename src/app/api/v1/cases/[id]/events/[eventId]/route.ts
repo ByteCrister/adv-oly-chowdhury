@@ -3,7 +3,6 @@ import mongoose from "mongoose";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
-import ConnectDB from "@/db";
 import { CaseEvent } from "@/db/models/CaseEvent.model";
 import { AssetReference } from "@/db/models/AssetReference.model";
 import { ASSET_OWNER_TYPES } from "@/const/asset-reference.const";
@@ -42,8 +41,6 @@ export const GET = withErrorHandler(
 
     const caseObjectId = new mongoose.Types.ObjectId(id);
     const eventObjectId = new mongoose.Types.ObjectId(eventId);
-
-    await ConnectDB();
 
     const eventDoc = await CaseEvent.findOne({
       _id: eventObjectId,
@@ -94,8 +91,6 @@ export const PATCH = withErrorHandler(
 
     const body = await req.json();
     const validated = updateCaseEventSchema.parse(body);
-
-    await ConnectDB();
 
     await withTransaction(async (dbSession) => {
       const eventDoc = await CaseEvent.findOne({
@@ -231,8 +226,6 @@ export const DELETE = withErrorHandler(
 
     const caseObjectId = new mongoose.Types.ObjectId(id);
     const eventObjectId = new mongoose.Types.ObjectId(eventId);
-
-    await ConnectDB();
 
     const eventDoc = await CaseEvent.findOne({
       _id: eventObjectId,

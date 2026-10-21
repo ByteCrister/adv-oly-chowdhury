@@ -3,12 +3,25 @@ import mongoose from "mongoose";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
-import { sanitizeSearchParam, buildSearchRegex } from "@/lib/helpers/search.helper";
+import { sanitizeSearchParam } from "@/lib/helpers/search.helper";
+import {
+  buildFuzzySearchPatterns,
+} from "@/lib/helpers/fuzzy-searching/shared-fuzzy-search.helper";
+import {
+  calculateCaseMatchScore,
+  calculateClientMatchScore,
+  bucketScoredCaseIds,
+  buildCaseExpenseRelevanceStages,
+  CaseMatchCandidate,
+  ClientMatchCandidate,
+} from "@/lib/helpers/fuzzy-searching/case-expense-fuzzy-search.helper";
 import {
   recordAuditLog,
   AUDIT_ACTIONS,
   AUDIT_ENTITY_TYPES,
 } from "@/lib/helpers/audit.helper";
+// Ensure models are registered in Mongoose schema cache for nested populate
+import "@/db/models/Asset.model";
 import { Case } from "@/db/models/Case.model";
 import { Client } from "@/db/models/Client.model";
 import { CaseExpense } from "@/db/models/CaseExpense.model";
@@ -55,16 +68,16 @@ export function formatCaseExpenseItem(doc: CaseExpenseDocInput): CaseExpenseItem
     doc.caseDetails && typeof doc.caseDetails === "object" && "_id" in doc.caseDetails
       ? doc.caseDetails
       : doc.caseId && typeof doc.caseId === "object" && "_id" in (doc.caseId as Record<string, unknown>)
-      ? (doc.caseId as RawCaseExpenseCaseInput)
-      : null;
+        ? (doc.caseId as RawCaseExpenseCaseInput)
+        : null;
 
   // Resolve client object: check aggregation $lookup (clientDetails) or populated caseDoc.clientId
   const rawClient: RawCaseExpenseClientInput | null =
     doc.clientDetails && typeof doc.clientDetails === "object" && "_id" in doc.clientDetails
       ? doc.clientDetails
       : rawCase?.clientId && typeof rawCase.clientId === "object" && "_id" in (rawCase.clientId as Record<string, unknown>)
-      ? (rawCase.clientId as RawCaseExpenseClientInput)
-      : null;
+        ? (rawCase.clientId as RawCaseExpenseClientInput)
+        : null;
 
   // Resolve receipt reference: check aggregation $lookup (receiptDetails) or populated receiptAssetReferenceId
   const rawReceipt: RawCaseExpenseReceiptInput | null =
@@ -73,8 +86,8 @@ export function formatCaseExpenseItem(doc: CaseExpenseDocInput): CaseExpenseItem
       : doc.receiptAssetReferenceId &&
         typeof doc.receiptAssetReferenceId === "object" &&
         "_id" in (doc.receiptAssetReferenceId as Record<string, unknown>)
-      ? (doc.receiptAssetReferenceId as RawCaseExpenseReceiptInput)
-      : null;
+        ? (doc.receiptAssetReferenceId as RawCaseExpenseReceiptInput)
+        : null;
 
   // Resolve recordedBy user: check aggregation $lookup (userDetails) or populated recordedBy object
   const rawUser: RawCaseExpenseUserInput | null =
@@ -83,33 +96,33 @@ export function formatCaseExpenseItem(doc: CaseExpenseDocInput): CaseExpenseItem
       : doc.recordedBy &&
         typeof doc.recordedBy === "object" &&
         "_id" in (doc.recordedBy as Record<string, unknown>)
-      ? (doc.recordedBy as RawCaseExpenseUserInput)
-      : null;
+        ? (doc.recordedBy as RawCaseExpenseUserInput)
+        : null;
 
   // Determine scalar caseId string
   const caseIdStr: string = rawCase?._id
     ? String(rawCase._id)
     : doc.caseId && typeof doc.caseId !== "object"
-    ? String(doc.caseId)
-    : doc.caseId instanceof mongoose.Types.ObjectId
-    ? doc.caseId.toString()
-    : "";
+      ? String(doc.caseId)
+      : doc.caseId instanceof mongoose.Types.ObjectId
+        ? doc.caseId.toString()
+        : "";
 
   // Determine scalar clientId string
   const clientIdStr: string | null = rawClient?._id
     ? String(rawClient._id)
     : rawCase?.clientId && typeof rawCase.clientId !== "object"
-    ? String(rawCase.clientId)
-    : null;
+      ? String(rawCase.clientId)
+      : null;
 
   // Determine scalar receiptAssetReferenceId string
   const receiptRefIdStr: string | null = rawReceipt?._id
     ? String(rawReceipt._id)
     : doc.receiptAssetReferenceId && typeof doc.receiptAssetReferenceId !== "object"
-    ? String(doc.receiptAssetReferenceId)
-    : doc.receiptAssetReferenceId instanceof mongoose.Types.ObjectId
-    ? doc.receiptAssetReferenceId.toString()
-    : null;
+      ? String(doc.receiptAssetReferenceId)
+      : doc.receiptAssetReferenceId instanceof mongoose.Types.ObjectId
+        ? doc.receiptAssetReferenceId.toString()
+        : null;
 
   const asset = rawReceipt?.assetId;
   const idStr = doc._id ? String(doc._id) : (doc.id || "");
@@ -142,10 +155,10 @@ export function formatCaseExpenseItem(doc: CaseExpenseDocInput): CaseExpenseItem
     receiptSizeBytes: asset?.bytes || null,
     recordedBy: rawUser?._id
       ? {
-          id: String(rawUser._id),
-          name: rawUser.name || "Unknown User",
-          email: rawUser.email || "",
-        }
+        id: String(rawUser._id),
+        name: rawUser.name || "Unknown User",
+        email: rawUser.email || "",
+      }
       : null,
     createdAt: doc.createdAt ? new Date(doc.createdAt).toISOString() : "",
     updatedAt: doc.updatedAt ? new Date(doc.updatedAt).toISOString() : "",
@@ -230,67 +243,103 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     filter.expenseDate = dateQuery;
   }
 
-  // Search Filter: contextual search across case title, case number, internal reference,
-  // client name/number, and expense description
-  if (search) {
-    const searchRegex = buildSearchRegex(search);
-    if (searchRegex) {
-      const [matchingCases, matchingClients] = await Promise.all([
-        Case.find(
-          {
-            deletedAt: null,
-            $or: [
-              { title: searchRegex },
-              { caseNumber: searchRegex },
-              { internalReference: searchRegex },
-            ],
-          },
-          { _id: 1 }
-        )
-          .limit(100)
-          .lean(),
-        Client.find(
-          {
-            deletedAt: null,
-            $or: [
-              { name: searchRegex },
-              { clientNumber: searchRegex },
-              { organizationName: searchRegex },
-            ],
-          },
-          { _id: 1 }
-        )
-          .limit(100)
-          .lean(),
-      ]);
+  // Search Filter: typo-tolerant fuzzy search across case title, case number, internal reference,
+  // client name/number/organization, and expense description with relevance-based ranking
+  let relevanceStages: mongoose.PipelineStage[] = [];
+  let isSearching = false;
 
-      const caseIds = matchingCases.map((c) => c._id);
-      const clientIds = matchingClients.map((c) => c._id);
+  const searchPatterns = buildFuzzySearchPatterns(search);
+  if (searchPatterns) {
+    isSearching = true;
 
-      // Find cases associated with matching clients
-      let clientCaseIds: mongoose.Types.ObjectId[] = [];
-      if (clientIds.length > 0) {
-        const clientCases = await Case.find(
-          {
-            clientId: { $in: clientIds },
-            deletedAt: null,
-          },
-          { _id: 1 }
-        )
-          .limit(100)
-          .lean();
-        clientCaseIds = clientCases.map((c) => c._id as mongoose.Types.ObjectId);
-      }
+    // 1. Find matching clients
+    const clientSearchFilter: Record<string, unknown> = {
+      deletedAt: null,
+      $or: [
+        { name: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+        { clientNumber: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+        { organizationName: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      ],
+    };
 
-      const allMatchingCaseIds = Array.from(
-        new Set([...caseIds.map(String), ...clientCaseIds.map(String)])
-      ).map((id) => new mongoose.Types.ObjectId(id));
-
-      filter.$or = [
-        { description: searchRegex },
-        ...(allMatchingCaseIds.length > 0 ? [{ caseId: { $in: allMatchingCaseIds } }] : []),
-      ];
+    if (clientId && clientId !== "ALL") {
+      clientSearchFilter._id = new mongoose.Types.ObjectId(clientId);
     }
+
+    const matchingClients = await Client.find(clientSearchFilter, {
+      _id: 1,
+      name: 1,
+      clientNumber: 1,
+      organizationName: 1,
+    })
+      .limit(500)
+      .lean<ClientMatchCandidate[]>();
+
+    const clientScores = new Map<string, number>();
+    const matchingClientIds: mongoose.Types.ObjectId[] = [];
+
+    for (const cl of matchingClients) {
+      const score = calculateClientMatchScore(cl, searchPatterns.sanitizedQuery);
+      if (score > 0) {
+        const idStr = String(cl._id);
+        clientScores.set(idStr, score);
+        matchingClientIds.push(cl._id);
+      }
+    }
+
+    // 2. Find matching cases (directly or via matched clients)
+    const caseSearchConditions: Record<string, unknown>[] = [
+      { title: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { caseNumber: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { internalReference: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+    ];
+
+    if (matchingClientIds.length > 0) {
+      caseSearchConditions.push({ clientId: { $in: matchingClientIds } });
+    }
+
+    const caseSearchFilter: Record<string, unknown> = {
+      deletedAt: null,
+      $or: caseSearchConditions,
+    };
+
+    if (caseId && caseId !== "ALL") {
+      caseSearchFilter._id = new mongoose.Types.ObjectId(caseId);
+    } else if (clientId && clientId !== "ALL") {
+      caseSearchFilter.clientId = new mongoose.Types.ObjectId(clientId);
+    }
+
+    const matchingCases = await Case.find(caseSearchFilter, {
+      _id: 1,
+      title: 1,
+      caseNumber: 1,
+      internalReference: 1,
+      clientId: 1,
+    })
+      .limit(1000)
+      .lean<CaseMatchCandidate[]>();
+
+    const caseScoreMap = new Map<string, number>();
+
+    for (const c of matchingCases) {
+      const caseScore = calculateCaseMatchScore(c, searchPatterns.sanitizedQuery);
+      const clientScore = c.clientId ? clientScores.get(String(c.clientId)) || 0 : 0;
+      const combinedScore = Math.max(caseScore, clientScore);
+      if (combinedScore > 0) {
+        caseScoreMap.set(String(c._id), combinedScore);
+      }
+    }
+
+    const buckets = bucketScoredCaseIds(caseScoreMap);
+
+    filter.$or = [
+      { description: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      ...(buckets.allMatchingCaseIds.length > 0
+        ? [{ caseId: { $in: buckets.allMatchingCaseIds } }]
+        : []),
+    ];
+
+    relevanceStages = buildCaseExpenseRelevanceStages(buckets, searchPatterns);
   }
 
   // Deterministic sorting with tie-breaker
@@ -303,177 +352,186 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   };
 
   const sortOption = sortMap[sort as CaseExpenseSortOption] || { expenseDate: -1, _id: -1 };
+  const itemsSort: Record<string, 1 | -1> = isSearching
+    ? { relevanceScore: -1, ...sortOption }
+    : sortOption;
+
   const skip = (page - 1) * limit;
 
   // Single consolidated MongoDB aggregation pipeline executing pagination and summary statistics
-  const [aggResult] = await CaseExpense.aggregate<CaseExpenseAggregateResult>([
-    { $match: filter },
-    {
-      $facet: {
-        items: [
-          { $sort: sortOption },
-          { $skip: skip },
-          { $limit: limit },
-          {
-            $lookup: {
-              from: COLLECTIONS.CASES,
-              localField: "caseId",
-              foreignField: "_id",
-              pipeline: [
-                {
-                  $project: {
-                    _id: 1,
-                    internalReference: 1,
-                    caseNumber: 1,
-                    title: 1,
-                    clientId: 1,
-                  },
+  const pipeline: mongoose.PipelineStage[] = [{ $match: filter }];
+
+  if (isSearching && relevanceStages.length > 0) {
+    pipeline.push(...relevanceStages);
+  }
+
+  pipeline.push({
+    $facet: {
+      items: [
+        { $sort: itemsSort },
+        { $skip: skip },
+        { $limit: limit },
+        {
+          $lookup: {
+            from: COLLECTIONS.CASES,
+            localField: "caseId",
+            foreignField: "_id",
+            pipeline: [
+              {
+                $project: {
+                  _id: 1,
+                  internalReference: 1,
+                  caseNumber: 1,
+                  title: 1,
+                  clientId: 1,
                 },
-              ],
-              as: "caseDetails",
-            },
+              },
+            ],
+            as: "caseDetails",
           },
-          {
-            $unwind: {
-              path: "$caseDetails",
-              preserveNullAndEmptyArrays: true,
-            },
+        },
+        {
+          $unwind: {
+            path: "$caseDetails",
+            preserveNullAndEmptyArrays: true,
           },
-          {
-            $lookup: {
-              from: COLLECTIONS.CLIENTS,
-              localField: "caseDetails.clientId",
-              foreignField: "_id",
-              pipeline: [
-                {
-                  $project: {
-                    _id: 1,
-                    name: 1,
-                    clientNumber: 1,
-                  },
+        },
+        {
+          $lookup: {
+            from: COLLECTIONS.CLIENTS,
+            localField: "caseDetails.clientId",
+            foreignField: "_id",
+            pipeline: [
+              {
+                $project: {
+                  _id: 1,
+                  name: 1,
+                  clientNumber: 1,
                 },
-              ],
-              as: "clientDetails",
-            },
+              },
+            ],
+            as: "clientDetails",
           },
-          {
-            $unwind: {
-              path: "$clientDetails",
-              preserveNullAndEmptyArrays: true,
-            },
+        },
+        {
+          $unwind: {
+            path: "$clientDetails",
+            preserveNullAndEmptyArrays: true,
           },
-          {
-            $lookup: {
-              from: COLLECTIONS.ASSET_REFERENCES,
-              localField: "receiptAssetReferenceId",
-              foreignField: "_id",
-              pipeline: [
-                {
-                  $lookup: {
-                    from: COLLECTIONS.ASSETS,
-                    localField: "assetId",
-                    foreignField: "_id",
-                    pipeline: [
-                      {
-                        $project: {
-                          _id: 1,
-                          secureUrl: 1,
-                          originalFilename: 1,
-                          assetType: 1,
-                          mimeType: 1,
-                          bytes: 1,
-                        },
+        },
+        {
+          $lookup: {
+            from: COLLECTIONS.ASSET_REFERENCES,
+            localField: "receiptAssetReferenceId",
+            foreignField: "_id",
+            pipeline: [
+              {
+                $lookup: {
+                  from: COLLECTIONS.ASSETS,
+                  localField: "assetId",
+                  foreignField: "_id",
+                  pipeline: [
+                    {
+                      $project: {
+                        _id: 1,
+                        secureUrl: 1,
+                        originalFilename: 1,
+                        assetType: 1,
+                        mimeType: 1,
+                        bytes: 1,
                       },
-                    ],
-                    as: "assetDocs",
-                  },
+                    },
+                  ],
+                  as: "assetDocs",
                 },
-                {
-                  $unwind: {
-                    path: "$assetDocs",
-                    preserveNullAndEmptyArrays: true,
-                  },
+              },
+              {
+                $unwind: {
+                  path: "$assetDocs",
+                  preserveNullAndEmptyArrays: true,
                 },
-                {
-                  $project: {
-                    _id: 1,
-                    originalFileName: 1,
-                    assetId: "$assetDocs",
-                  },
+              },
+              {
+                $project: {
+                  _id: 1,
+                  originalFileName: 1,
+                  assetId: "$assetDocs",
                 },
-              ],
-              as: "receiptDetails",
-            },
+              },
+            ],
+            as: "receiptDetails",
           },
-          {
-            $unwind: {
-              path: "$receiptDetails",
-              preserveNullAndEmptyArrays: true,
-            },
+        },
+        {
+          $unwind: {
+            path: "$receiptDetails",
+            preserveNullAndEmptyArrays: true,
           },
-          {
-            $lookup: {
-              from: COLLECTIONS.USERS,
-              localField: "recordedBy",
-              foreignField: "_id",
-              pipeline: [
-                {
-                  $project: {
-                    _id: 1,
-                    name: 1,
-                    email: 1,
-                  },
+        },
+        {
+          $lookup: {
+            from: COLLECTIONS.USERS,
+            localField: "recordedBy",
+            foreignField: "_id",
+            pipeline: [
+              {
+                $project: {
+                  _id: 1,
+                  name: 1,
+                  email: 1,
                 },
-              ],
-              as: "userDetails",
-            },
+              },
+            ],
+            as: "userDetails",
           },
-          {
-            $unwind: {
-              path: "$userDetails",
-              preserveNullAndEmptyArrays: true,
-            },
+        },
+        {
+          $unwind: {
+            path: "$userDetails",
+            preserveNullAndEmptyArrays: true,
           },
-          {
-            $project: {
-              _id: 1,
-              caseId: 1,
-              caseDetails: 1,
-              clientDetails: 1,
-              expenseDate: 1,
-              category: 1,
-              description: 1,
-              amount: 1,
-              currency: 1,
-              receiptAssetReferenceId: 1,
-              receiptDetails: 1,
-              recordedBy: 1,
-              userDetails: 1,
-              createdAt: 1,
-              updatedAt: 1,
-            },
+        },
+        {
+          $project: {
+            _id: 1,
+            caseId: 1,
+            caseDetails: 1,
+            clientDetails: 1,
+            expenseDate: 1,
+            category: 1,
+            description: 1,
+            amount: 1,
+            currency: 1,
+            receiptAssetReferenceId: 1,
+            receiptDetails: 1,
+            recordedBy: 1,
+            userDetails: 1,
+            createdAt: 1,
+            updatedAt: 1,
           },
-        ],
-        summaryStats: [
-          {
-            $group: {
-              _id: null,
-              totalCount: { $sum: 1 },
-              totalAmount: { $sum: "$amount" },
-            },
+        },
+      ],
+      summaryStats: [
+        {
+          $group: {
+            _id: null,
+            totalCount: { $sum: 1 },
+            totalAmount: { $sum: "$amount" },
           },
-        ],
-        categoryBreakdown: [
-          {
-            $group: {
-              _id: "$category",
-              amount: { $sum: "$amount" },
-            },
+        },
+      ],
+      categoryBreakdown: [
+        {
+          $group: {
+            _id: "$category",
+            amount: { $sum: "$amount" },
           },
-        ],
-      },
+        },
+      ],
     },
-  ]);
+  });
+
+  const [aggResult] = await CaseExpense.aggregate<CaseExpenseAggregateResult>(pipeline);
 
   const items = (aggResult?.items || []).map(formatCaseExpenseItem);
   const total = aggResult?.summaryStats?.[0]?.totalCount ?? 0;

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
-import ConnectDB from "@/db";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
@@ -10,6 +9,8 @@ import {
   AUDIT_ACTIONS,
   AUDIT_ENTITY_TYPES,
 } from "@/lib/helpers/audit.helper";
+// Ensure models are registered in Mongoose schema cache for nested populate
+import "@/db/models/Asset.model";
 import { Client } from "@/db/models/Client.model";
 import { ClientDocument } from "@/db/models/ClientDocument.model";
 import { AssetReference } from "@/db/models/AssetReference.model";
@@ -90,8 +91,6 @@ export const GET = withErrorHandler(
     if (!mongoose.Types.ObjectId.isValid(id)) {
       throw ApiError.badRequest("Invalid client ID format");
     }
-
-    await ConnectDB();
 
     const objectId = new mongoose.Types.ObjectId(id);
     const clientExists = await Client.exists({ _id: objectId, deletedAt: null });
@@ -209,8 +208,6 @@ export const POST = withErrorHandler(
     if (!mongoose.Types.ObjectId.isValid(id)) {
       throw ApiError.badRequest("Invalid client ID format");
     }
-
-    await ConnectDB();
 
     const objectId = new mongoose.Types.ObjectId(id);
     const client = await Client.findOne({ _id: objectId, deletedAt: null });

@@ -3,7 +3,12 @@ import mongoose from "mongoose";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
-import { sanitizeSearchParam, buildSearchRegex, escapeRegex } from "@/lib/helpers/search.helper";
+import { sanitizeSearchParam, escapeRegex } from "@/lib/helpers/search.helper";
+import {
+  buildFuzzySearchPatterns,
+  matchCourtTypeAndStatus,
+  buildCourtRelevanceStages,
+} from "@/lib/helpers/fuzzy-searching/court-fuzzy-search.helper";
 import {
   recordAuditLog,
   AUDIT_ACTIONS,
@@ -154,19 +159,51 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     filter.createdAt = dateQuery;
   }
 
-  // Search across multiple fields safely
-  if (search) {
-    const searchRegex = buildSearchRegex(search);
-    if (searchRegex) {
-      filter.$or = [
-        { name: searchRegex },
-        { district: searchRegex },
-        { division: searchRegex },
-        { roomOrHall: searchRegex },
-        { address: searchRegex },
-        { presidingJudgeTitle: searchRegex },
-      ];
+  // Search Filter: typo-tolerant fuzzy search across court fields
+  // (name, courtType, district, division, roomOrHall, address, presidingJudgeTitle, isActive)
+  // with relevance-based ranking
+  let relevanceStages: mongoose.PipelineStage[] = [];
+  let isSearching = false;
+
+  const searchPatterns = buildFuzzySearchPatterns(search);
+  if (searchPatterns) {
+    isSearching = true;
+
+    // 1. Evaluate whether query matches courtType labels/abbreviations or active status
+    const { matchedCourtTypes, matchedIsActive, isActiveScore } =
+      matchCourtTypeAndStatus(searchPatterns.sanitizedQuery);
+
+    // 2. Candidate conditions for direct court search
+    const directConditions: Record<string, unknown>[] = [
+      { name: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { district: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { division: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { roomOrHall: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { address: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { presidingJudgeTitle: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { courtType: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+    ];
+
+    if (matchedCourtTypes.length > 0) {
+      directConditions.push({
+        courtType: { $in: matchedCourtTypes.map((m) => m.courtType) },
+      });
     }
+
+    if (matchedIsActive !== null && filter.isActive === undefined) {
+      directConditions.push({
+        isActive: matchedIsActive,
+      });
+    }
+
+    filter.$or = directConditions;
+
+    relevanceStages = buildCourtRelevanceStages(
+      searchPatterns,
+      matchedCourtTypes,
+      matchedIsActive,
+      isActiveScore
+    );
   }
 
   // Determine sorting
@@ -182,18 +219,71 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   const sortOption = sortMap[sort as CourtSortOption] || { createdAt: -1 };
   const skip = (page - 1) * limit;
 
-  // Execute queries in parallel with explicit lean projection
-  const [total, courts] = await Promise.all([
-    Court.countDocuments(filter),
-    Court.find(filter)
-      .select(
-        "_id name courtType district division roomOrHall address presidingJudgeTitle isActive createdAt updatedAt"
-      )
-      .sort(sortOption)
-      .skip(skip)
-      .limit(limit)
-      .lean(),
-  ]);
+  let total = 0;
+  let courts: CourtDocInput[] = [];
+
+  if (isSearching) {
+    const itemsSort: Record<string, 1 | -1> = {
+      relevanceScore: -1,
+      ...sortOption,
+      _id: -1,
+    };
+
+    const pipeline: mongoose.PipelineStage[] = [{ $match: filter }];
+    if (relevanceStages.length > 0) {
+      pipeline.push(...relevanceStages);
+    }
+
+    pipeline.push({
+      $facet: {
+        metadata: [{ $count: "total" }],
+        items: [
+          { $sort: itemsSort },
+          { $skip: skip },
+          { $limit: limit },
+          {
+            $project: {
+              _id: 1,
+              name: 1,
+              courtType: 1,
+              district: 1,
+              division: 1,
+              roomOrHall: 1,
+              address: 1,
+              presidingJudgeTitle: 1,
+              isActive: 1,
+              createdAt: 1,
+              updatedAt: 1,
+            },
+          },
+        ],
+      },
+    });
+
+    const [facetResult] = await Court.aggregate<{
+      metadata: Array<{ total: number }>;
+      items: CourtDocInput[];
+    }>(pipeline);
+
+    total = facetResult?.metadata[0]?.total ?? 0;
+    courts = facetResult?.items ?? [];
+  } else {
+    // Parallel lean execution when no search query is present
+    const [dbTotal, dbCourts] = await Promise.all([
+      Court.countDocuments(filter),
+      Court.find(filter)
+        .select(
+          "_id name courtType district division roomOrHall address presidingJudgeTitle isActive createdAt updatedAt"
+        )
+        .sort(sortOption)
+        .skip(skip)
+        .limit(limit)
+        .lean<CourtDocInput[]>(),
+    ]);
+
+    total = dbTotal;
+    courts = dbCourts;
+  }
 
   // Performance short-circuit: If no courts match, return early without running aggregations
   if (courts.length === 0) {

@@ -2,13 +2,24 @@ import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
-import { sanitizeSearchParam, buildSearchRegex } from "@/lib/helpers/search.helper";
+import { sanitizeSearchParam } from "@/lib/helpers/search.helper";
+import { COLLECTIONS } from "@/const/collection.const";
+import {
+  buildFuzzySearchPatterns,
+  bucketScoredEntityIds,
+} from "@/lib/helpers/fuzzy-searching/shared-fuzzy-search.helper";
+import {
+  calculateClientMatchScore,
+  calculateCourtMatchScore,
+  buildCaseRelevanceStages,
+  ClientMatchCandidate,
+  CourtMatchCandidate,
+} from "@/lib/helpers/fuzzy-searching/case-fuzzy-search.helper";
 import {
   recordAuditLog,
   AUDIT_ACTIONS,
   AUDIT_ENTITY_TYPES,
 } from "@/lib/helpers/audit.helper";
-import ConnectDB from "@/db";
 import { Case } from "@/db/models/Case.model";
 import { Client } from "@/db/models/Client.model";
 import { Court } from "@/db/models/Court.model";
@@ -133,26 +144,26 @@ export function formatCaseListItem(
 
   const clientDto: CaseClientDto | null = rawClient && rawClient._id
     ? {
-        id: extractIdString(rawClient._id),
-        clientNumber: (rawClient.clientNumber as string) || "",
-        name: (rawClient.name as string) || "Unknown Client",
-        organizationName: (rawClient.organizationName as string) || null,
-        clientType: (rawClient.clientType as string) || "INDIVIDUAL",
-        phone: (rawClient.phone as string) || null,
-        email: (rawClient.email as string) || null,
-      }
+      id: extractIdString(rawClient._id),
+      clientNumber: (rawClient.clientNumber as string) || "",
+      name: (rawClient.name as string) || "Unknown Client",
+      organizationName: (rawClient.organizationName as string) || null,
+      clientType: (rawClient.clientType as string) || "INDIVIDUAL",
+      phone: (rawClient.phone as string) || null,
+      email: (rawClient.email as string) || null,
+    }
     : null;
 
   const courtDto: CaseCourtDto | null = rawCourt && rawCourt._id
     ? {
-        id: extractIdString(rawCourt._id),
-        name: (rawCourt.name as string) || "Unknown Court",
-        courtType,
-        courtTypeLabel: COURT_TYPE_LABELS[courtType] || String(rawCourt.courtType || ""),
-        district: (rawCourt.district as string) || "Sylhet",
-        roomOrHall: (rawCourt.roomOrHall as string) || null,
-        presidingJudgeTitle: (rawCourt.presidingJudgeTitle as string) || null,
-      }
+      id: extractIdString(rawCourt._id),
+      name: (rawCourt.name as string) || "Unknown Court",
+      courtType,
+      courtTypeLabel: COURT_TYPE_LABELS[courtType] || String(rawCourt.courtType || ""),
+      district: (rawCourt.district as string) || "Sylhet",
+      roomOrHall: (rawCourt.roomOrHall as string) || null,
+      presidingJudgeTitle: (rawCourt.presidingJudgeTitle as string) || null,
+    }
     : null;
 
   const hearingsCount = counts?.hearings ?? 0;
@@ -254,8 +265,6 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     limit,
   } = parsed.data;
 
-  await ConnectDB();
-
   // Construct MongoDB filter object (only active, non-deleted cases)
   const filter: Record<string, unknown> = {
     deletedAt: null,
@@ -308,60 +317,112 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     filter.filingDate = dateQuery;
   }
 
-  // Cross-collection and multi-field text search
-  if (search) {
-    const searchRegex = buildSearchRegex(search);
-    if (searchRegex) {
-      // Find matching clients and courts in parallel, bounded to 100 results to avoid massive $in predicates
-      const [matchedClients, matchedCourts] = await Promise.all([
-        Client.find(
-          {
-            deletedAt: null,
-            $or: [
-              { name: searchRegex },
-              { clientNumber: searchRegex },
-              { organizationName: searchRegex },
-              { phone: searchRegex },
-            ],
-          },
-          { _id: 1 }
-        )
-          .limit(100)
-          .lean(),
-        Court.find(
-          {
-            deletedAt: null,
-            $or: [{ name: searchRegex }, { district: searchRegex }],
-          },
-          { _id: 1 }
-        )
-          .limit(100)
-          .lean(),
-      ]);
-      const matchedClientIds = matchedClients.map((c) => c._id);
-      const matchedCourtIds = matchedCourts.map((c) => c._id);
+  // Search Filter: typo-tolerant fuzzy search across case title, case number, internal reference,
+  // description, legal issues, opposing counsel, opposing parties, case category,
+  // client name/number/organization/phone, and court name/district with relevance-based ranking
+  let relevanceStages: mongoose.PipelineStage[] = [];
+  let isSearching = false;
 
-      const searchConditions: Record<string, unknown>[] = [
-        { title: searchRegex },
-        { caseNumber: searchRegex },
-        { internalReference: searchRegex },
-        { description: searchRegex },
-        { legalIssues: searchRegex },
-        { opposingCounsel: searchRegex },
-        { opposingParties: searchRegex },
-        { caseCategory: searchRegex },
-      ];
+  const searchPatterns = buildFuzzySearchPatterns(search);
+  if (searchPatterns) {
+    isSearching = true;
 
-      if (matchedClientIds.length > 0) {
-        searchConditions.push({ clientId: { $in: matchedClientIds } });
-      }
+    // 1. Find matching clients with bounded candidate limit and scoring
+    const clientSearchFilter: Record<string, unknown> = {
+      deletedAt: null,
+      $or: [
+        { name: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+        { clientNumber: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+        { organizationName: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+        { phone: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      ],
+    };
 
-      if (matchedCourtIds.length > 0) {
-        searchConditions.push({ courtId: { $in: matchedCourtIds } });
-      }
-
-      filter.$or = searchConditions;
+    if (clientId && clientId !== "ALL") {
+      clientSearchFilter._id = new mongoose.Types.ObjectId(clientId);
     }
+
+    // 2. Find matching courts with bounded candidate limit and scoring
+    const courtSearchFilter: Record<string, unknown> = {
+      deletedAt: null,
+      $or: [
+        { name: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+        { district: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      ],
+    };
+
+    if (courtId && courtId !== "ALL") {
+      courtSearchFilter._id = new mongoose.Types.ObjectId(courtId);
+    }
+
+    // Query clients and courts in parallel
+    const [matchingClients, matchingCourts] = await Promise.all([
+      Client.find(clientSearchFilter, {
+        _id: 1,
+        name: 1,
+        clientNumber: 1,
+        organizationName: 1,
+        phone: 1,
+      })
+        .limit(500)
+        .lean<ClientMatchCandidate[]>(),
+      Court.find(courtSearchFilter, {
+        _id: 1,
+        name: 1,
+        district: 1,
+      })
+        .limit(500)
+        .lean<CourtMatchCandidate[]>(),
+    ]);
+
+    // Score client candidates
+    const clientScores = new Map<string, number>();
+    for (const cl of matchingClients) {
+      const score = calculateClientMatchScore(cl, searchPatterns.sanitizedQuery);
+      if (score > 0) {
+        clientScores.set(String(cl._id), score);
+      }
+    }
+
+    // Score court candidates
+    const courtScores = new Map<string, number>();
+    for (const co of matchingCourts) {
+      const score = calculateCourtMatchScore(co, searchPatterns.sanitizedQuery);
+      if (score > 0) {
+        courtScores.set(String(co._id), score);
+      }
+    }
+
+    // Bucket candidates by relevance tier
+    const clientBuckets = bucketScoredEntityIds(clientScores);
+    const courtBuckets = bucketScoredEntityIds(courtScores);
+
+    const searchConditions: Record<string, unknown>[] = [
+      { title: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { caseNumber: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { internalReference: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { description: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { legalIssues: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { opposingCounsel: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { opposingParties: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+      { caseCategory: { $regex: searchPatterns.fuzzyPattern, $options: "i" } },
+    ];
+
+    if (clientBuckets.allMatchingIds.length > 0) {
+      searchConditions.push({ clientId: { $in: clientBuckets.allMatchingIds } });
+    }
+
+    if (courtBuckets.allMatchingIds.length > 0) {
+      searchConditions.push({ courtId: { $in: courtBuckets.allMatchingIds } });
+    }
+
+    filter.$or = searchConditions;
+
+    relevanceStages = buildCaseRelevanceStages(
+      clientBuckets,
+      courtBuckets,
+      searchPatterns
+    );
   }
 
   // Sorting definitions
@@ -379,71 +440,201 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   };
 
   const sortOption = sortMap[sort as CaseSortOption] || { createdAt: -1 };
+  const itemsSort: Record<string, 1 | -1> = isSearching
+    ? { relevanceScore: -1, ...sortOption, _id: -1 }
+    : { ...sortOption, _id: -1 };
+
   const skip = (page - 1) * limit;
 
-  // Execute stats aggregation and paginated find queries in parallel using identical filter
-  const [statsAggResult, cases] = await Promise.all([
-    Case.aggregate<{
-      total: number;
-      active: number;
-      hearingStaged: number;
-      argumentsPending: number;
-      judgmentReserved: number;
-      onHold: number;
-      disposed: number;
-      closed: number;
-      draft: number;
-      urgentPriority: number;
-      highPriority: number;
-    }>([
-      { $match: filter },
-      {
-        $group: {
-          _id: null,
-          total: { $sum: 1 },
-          active: {
-            $sum: { $cond: [{ $eq: ["$caseStatus", CASE_STATUSES.ACTIVE] }, 1, 0] },
+  type RawStatsType = {
+    total: number;
+    active: number;
+    hearingStaged: number;
+    argumentsPending: number;
+    judgmentReserved: number;
+    onHold: number;
+    disposed: number;
+    closed: number;
+    draft: number;
+    urgentPriority: number;
+    highPriority: number;
+  };
+
+  let rawStats: RawStatsType | undefined;
+  let cases: CaseDocInput[] = [];
+
+  if (isSearching) {
+    // Single consolidated MongoDB aggregation pipeline executing search, scoring, pagination,
+    // and live summary statistics
+    const pipeline: mongoose.PipelineStage[] = [{ $match: filter }];
+
+    if (relevanceStages.length > 0) {
+      pipeline.push(...relevanceStages);
+    }
+
+    pipeline.push({
+      $facet: {
+        items: [
+          { $sort: itemsSort },
+          { $skip: skip },
+          { $limit: limit },
+          {
+            $lookup: {
+              from: COLLECTIONS.CLIENTS,
+              localField: "clientId",
+              foreignField: "_id",
+              pipeline: [
+                {
+                  $project: {
+                    _id: 1,
+                    clientNumber: 1,
+                    name: 1,
+                    organizationName: 1,
+                    clientType: 1,
+                    phone: 1,
+                    email: 1,
+                  },
+                },
+              ],
+              as: "clientId",
+            },
           },
-          hearingStaged: {
-            $sum: { $cond: [{ $eq: ["$caseStatus", CASE_STATUSES.HEARING_STAGED] }, 1, 0] },
+          {
+            $unwind: {
+              path: "$clientId",
+              preserveNullAndEmptyArrays: true,
+            },
           },
-          argumentsPending: {
-            $sum: { $cond: [{ $eq: ["$caseStatus", CASE_STATUSES.ARGUMENTS_PENDING] }, 1, 0] },
+          {
+            $lookup: {
+              from: COLLECTIONS.COURTS,
+              localField: "courtId",
+              foreignField: "_id",
+              pipeline: [
+                {
+                  $project: {
+                    _id: 1,
+                    name: 1,
+                    courtType: 1,
+                    district: 1,
+                    roomOrHall: 1,
+                    presidingJudgeTitle: 1,
+                  },
+                },
+              ],
+              as: "courtId",
+            },
           },
-          judgmentReserved: {
-            $sum: { $cond: [{ $eq: ["$caseStatus", CASE_STATUSES.JUDGMENT_RESERVED] }, 1, 0] },
+          {
+            $unwind: {
+              path: "$courtId",
+              preserveNullAndEmptyArrays: true,
+            },
           },
-          onHold: {
-            $sum: { $cond: [{ $eq: ["$caseStatus", CASE_STATUSES.ON_HOLD] }, 1, 0] },
+        ],
+        stats: [
+          {
+            $group: {
+              _id: null,
+              total: { $sum: 1 },
+              active: {
+                $sum: { $cond: [{ $eq: ["$caseStatus", CASE_STATUSES.ACTIVE] }, 1, 0] },
+              },
+              hearingStaged: {
+                $sum: { $cond: [{ $eq: ["$caseStatus", CASE_STATUSES.HEARING_STAGED] }, 1, 0] },
+              },
+              argumentsPending: {
+                $sum: { $cond: [{ $eq: ["$caseStatus", CASE_STATUSES.ARGUMENTS_PENDING] }, 1, 0] },
+              },
+              judgmentReserved: {
+                $sum: { $cond: [{ $eq: ["$caseStatus", CASE_STATUSES.JUDGMENT_RESERVED] }, 1, 0] },
+              },
+              onHold: {
+                $sum: { $cond: [{ $eq: ["$caseStatus", CASE_STATUSES.ON_HOLD] }, 1, 0] },
+              },
+              disposed: {
+                $sum: { $cond: [{ $eq: ["$caseStatus", CASE_STATUSES.DISPOSED] }, 1, 0] },
+              },
+              closed: {
+                $sum: { $cond: [{ $eq: ["$caseStatus", CASE_STATUSES.CLOSED] }, 1, 0] },
+              },
+              draft: {
+                $sum: { $cond: [{ $eq: ["$caseStatus", CASE_STATUSES.DRAFT] }, 1, 0] },
+              },
+              urgentPriority: {
+                $sum: { $cond: [{ $eq: ["$priority", CASE_PRIORITIES.URGENT] }, 1, 0] },
+              },
+              highPriority: {
+                $sum: { $cond: [{ $eq: ["$priority", CASE_PRIORITIES.HIGH] }, 1, 0] },
+              },
+            },
           },
-          disposed: {
-            $sum: { $cond: [{ $eq: ["$caseStatus", CASE_STATUSES.DISPOSED] }, 1, 0] },
-          },
-          closed: {
-            $sum: { $cond: [{ $eq: ["$caseStatus", CASE_STATUSES.CLOSED] }, 1, 0] },
-          },
-          draft: {
-            $sum: { $cond: [{ $eq: ["$caseStatus", CASE_STATUSES.DRAFT] }, 1, 0] },
-          },
-          urgentPriority: {
-            $sum: { $cond: [{ $eq: ["$priority", CASE_PRIORITIES.URGENT] }, 1, 0] },
-          },
-          highPriority: {
-            $sum: { $cond: [{ $eq: ["$priority", CASE_PRIORITIES.HIGH] }, 1, 0] },
+        ],
+      },
+    });
+
+    const [aggResult] = await Case.aggregate<{
+      items: CaseDocInput[];
+      stats: RawStatsType[];
+    }>(pipeline);
+
+    rawStats = aggResult?.stats?.[0];
+    cases = aggResult?.items || [];
+  } else {
+    // When not searching, preserve existing optimized parallel query pattern
+    const [statsAggResult, foundCases] = await Promise.all([
+      Case.aggregate<RawStatsType>([
+        { $match: filter },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: 1 },
+            active: {
+              $sum: { $cond: [{ $eq: ["$caseStatus", CASE_STATUSES.ACTIVE] }, 1, 0] },
+            },
+            hearingStaged: {
+              $sum: { $cond: [{ $eq: ["$caseStatus", CASE_STATUSES.HEARING_STAGED] }, 1, 0] },
+            },
+            argumentsPending: {
+              $sum: { $cond: [{ $eq: ["$caseStatus", CASE_STATUSES.ARGUMENTS_PENDING] }, 1, 0] },
+            },
+            judgmentReserved: {
+              $sum: { $cond: [{ $eq: ["$caseStatus", CASE_STATUSES.JUDGMENT_RESERVED] }, 1, 0] },
+            },
+            onHold: {
+              $sum: { $cond: [{ $eq: ["$caseStatus", CASE_STATUSES.ON_HOLD] }, 1, 0] },
+            },
+            disposed: {
+              $sum: { $cond: [{ $eq: ["$caseStatus", CASE_STATUSES.DISPOSED] }, 1, 0] },
+            },
+            closed: {
+              $sum: { $cond: [{ $eq: ["$caseStatus", CASE_STATUSES.CLOSED] }, 1, 0] },
+            },
+            draft: {
+              $sum: { $cond: [{ $eq: ["$caseStatus", CASE_STATUSES.DRAFT] }, 1, 0] },
+            },
+            urgentPriority: {
+              $sum: { $cond: [{ $eq: ["$priority", CASE_PRIORITIES.URGENT] }, 1, 0] },
+            },
+            highPriority: {
+              $sum: { $cond: [{ $eq: ["$priority", CASE_PRIORITIES.HIGH] }, 1, 0] },
+            },
           },
         },
-      },
-    ]),
-    Case.find(filter)
-      .sort(sortOption)
-      .skip(skip)
-      .limit(limit)
-      .populate("clientId", "name clientNumber organizationName clientType phone email")
-      .populate("courtId", "name courtType district roomOrHall presidingJudgeTitle")
-      .lean(),
-  ]);
+      ]),
+      Case.find(filter)
+        .sort(sortOption)
+        .skip(skip)
+        .limit(limit)
+        .populate("clientId", "name clientNumber organizationName clientType phone email")
+        .populate("courtId", "name courtType district roomOrHall presidingJudgeTitle")
+        .lean(),
+    ]);
 
-  const rawStats = statsAggResult[0];
+    rawStats = statsAggResult[0];
+    cases = foundCases;
+  }
+
   const total = rawStats?.total ?? 0;
 
   const stats: CaseStatsDto = {
@@ -461,7 +652,15 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   };
 
   // In parallel, fetch relation counts for the paginated cases
-  const caseIds = cases.map((c) => c._id as mongoose.Types.ObjectId);
+  const caseIds: mongoose.Types.ObjectId[] = [];
+  cases.forEach((c) => {
+    const rawId = (c as { _id?: unknown })._id;
+    if (rawId instanceof mongoose.Types.ObjectId) {
+      caseIds.push(rawId);
+    } else if (typeof rawId === "string" && mongoose.Types.ObjectId.isValid(rawId)) {
+      caseIds.push(new mongoose.Types.ObjectId(rawId));
+    }
+  });
 
   const countsMap: Map<string, { hearings: number; documents: number; events: number; parties: number }> =
     new Map();
@@ -517,7 +716,9 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   }
 
   const items: CaseListItemDto[] = cases.map((c) => {
-    const counts = countsMap.get((c._id as mongoose.Types.ObjectId).toString());
+    const rawId = (c as { _id?: unknown })._id;
+    const idStr = rawId ? extractIdString(rawId) : "";
+    const counts = countsMap.get(idStr);
     return formatCaseListItem(c, counts);
   });
 
@@ -544,8 +745,6 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
 
   const body = await req.json();
   const validated = createCaseSchema.parse(body);
-
-  await ConnectDB();
 
   // Validate referenced Client and Court in parallel
   const clientObjectId = new mongoose.Types.ObjectId(validated.clientId);

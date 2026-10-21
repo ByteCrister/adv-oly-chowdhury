@@ -3,7 +3,6 @@ import mongoose from "mongoose";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
-import ConnectDB from "@/db";
 import { Case } from "@/db/models/Case.model";
 import { CaseDocument } from "@/db/models/CaseDocument.model";
 import { AssetReference } from "@/db/models/AssetReference.model";
@@ -14,6 +13,8 @@ import {
   AUDIT_ACTIONS,
   AUDIT_ENTITY_TYPES,
 } from "@/lib/helpers/audit.helper";
+// Ensure models are registered in Mongoose schema cache for nested populate
+import "@/db/models/Asset.model";
 import { updateCaseDocumentSchema } from "@/utils/zod/case-document.validation";
 import { formatCaseDocumentItem } from "../route";
 import type {
@@ -43,8 +44,6 @@ export const GET = withErrorHandler(
 
     const caseObjectId = new mongoose.Types.ObjectId(id);
     const docObjectId = new mongoose.Types.ObjectId(docId);
-
-    await ConnectDB();
 
     const [parentCase, doc] = await Promise.all([
       Case.findOne(
@@ -107,8 +106,6 @@ export const PATCH = withErrorHandler(
 
     const body = await req.json();
     const validated = updateCaseDocumentSchema.parse(body);
-
-    await ConnectDB();
 
     const parentCase = await Case.findOne(
       { _id: caseObjectId, deletedAt: null },
@@ -252,8 +249,6 @@ export const DELETE = withErrorHandler(
 
     const caseObjectId = new mongoose.Types.ObjectId(id);
     const docObjectId = new mongoose.Types.ObjectId(docId);
-
-    await ConnectDB();
 
     const doc = await CaseDocument.findOne({
       _id: docObjectId,

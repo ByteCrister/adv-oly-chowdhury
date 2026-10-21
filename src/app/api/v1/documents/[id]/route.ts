@@ -6,6 +6,8 @@ import { withTransaction } from "@/lib/helpers/withTransaction";
 import { CaseDocument } from "@/db/models/CaseDocument.model";
 import { ClientDocument } from "@/db/models/ClientDocument.model";
 import { AssetReference } from "@/db/models/AssetReference.model";
+// Ensure models are registered in Mongoose schema cache for nested populate
+import "@/db/models/Asset.model";
 import { ASSET_OWNER_TYPES } from "@/const/asset-reference.const";
 import { DOCUMENT_ENTITY_TYPES, DOCUMENT_ENTITY_TYPE_LIST } from "@/const/document.const";
 import { CaseDocumentType } from "@/const/case-document.const";

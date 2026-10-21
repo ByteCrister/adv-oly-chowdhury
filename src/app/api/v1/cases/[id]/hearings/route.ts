@@ -9,7 +9,6 @@ import {
   AUDIT_ENTITY_TYPES,
 } from "@/lib/helpers/audit.helper";
 import { sanitizeSearchParam, buildSearchRegex } from "@/lib/helpers/search.helper";
-import ConnectDB from "@/db";
 import { Case } from "@/db/models/Case.model";
 import { Hearing } from "@/db/models/Hearing.model";
 import { Court } from "@/db/models/Court.model";
@@ -52,8 +51,6 @@ export const GET = withErrorHandler(
     if (!mongoose.Types.ObjectId.isValid(id)) {
       throw ApiError.badRequest("Invalid case ID format");
     }
-
-    await ConnectDB();
 
     const caseObjectId = new mongoose.Types.ObjectId(id);
     const parentCase = await Case.findOne(
@@ -300,8 +297,6 @@ export const POST = withErrorHandler(
     if (!mongoose.Types.ObjectId.isValid(id)) {
       throw ApiError.badRequest("Invalid case ID format");
     }
-
-    await ConnectDB();
 
     const caseObjectId = new mongoose.Types.ObjectId(id);
     const parentCase = await Case.findOne(

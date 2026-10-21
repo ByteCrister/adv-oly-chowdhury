@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
-import ConnectDB from "@/db";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
@@ -280,8 +279,6 @@ export const GET = withErrorHandler(
       throw ApiError.badRequest("Invalid client ID format");
     }
 
-    await ConnectDB();
-
     const objectId = new mongoose.Types.ObjectId(id);
     const dto = await buildClientDetailDto(objectId);
 
@@ -310,7 +307,6 @@ export const PATCH = withErrorHandler(
     const body = await req.json();
     const validated = updateClientSchema.parse(body);
 
-    await ConnectDB();
 
     // If clientNumber is updated, ensure uniqueness excluding self
     if (validated.clientNumber) {
@@ -429,8 +425,6 @@ export const DELETE = withErrorHandler(
     if (!mongoose.Types.ObjectId.isValid(id)) {
       throw ApiError.badRequest("Invalid client ID format");
     }
-
-    await ConnectDB();
 
     const objectId = new mongoose.Types.ObjectId(id);
     const client = await Client.findOne({ _id: objectId, deletedAt: null });

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
-import ConnectDB from "@/db";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
@@ -109,7 +108,6 @@ async function buildHearingDetailDto(
 export const GET = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
     await getUserId();
-    await ConnectDB();
 
     const { id } = await params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -137,7 +135,6 @@ export const GET = withErrorHandler(
 export const PATCH = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
     const userId = await getUserId();
-    await ConnectDB();
 
     const { id } = await params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -275,7 +272,6 @@ export const PUT = PATCH;
 export const DELETE = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
     const userId = await getUserId();
-    await ConnectDB();
 
     const { id } = await params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
