@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { AlertCircle, RefreshCw } from "lucide-react";
 import { FadeInUp } from "@/components/wrappers/Motion";
 import { useCaseStore } from "@/store/useCaseStore";
@@ -56,10 +57,10 @@ export function CasesOverviewPage() {
 
   const [isDeleteOpen, setIsDeleteOpen] = React.useState(false);
   const [deletingCase, setDeletingCase] = React.useState<CaseListItemDto | null>(null);
+  const router = useRouter();
 
   const handleAddNew = () => {
-    setEditingCase(null);
-    setIsFormOpen(true);
+    router.push("/dashboard/cases/new");
   };
 
   const handleEditCase = (c: CaseListItemDto) => {

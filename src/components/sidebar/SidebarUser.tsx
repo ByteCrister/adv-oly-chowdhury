@@ -16,6 +16,7 @@ export function SidebarUser({ isCollapsed = false }: SidebarUserProps) {
   const { data: profileResponse } = useProfile();
   const [isSigningOut, setIsSigningOut] = React.useState(false);
   const [isSignOutDialogOpen, setIsSignOutDialogOpen] = React.useState(false);
+  const [failedAvatarSrc, setFailedAvatarSrc] = React.useState<string | null>(null);
 
   async function handleSignOut() {
     try {
@@ -31,6 +32,14 @@ export function SidebarUser({ isCollapsed = false }: SidebarUserProps) {
   const displayName = profile?.preferredName || profile?.name || session?.user?.name || "Advocate Oly Chowdhury";
   const displayEmail = profile?.email || session?.user?.email || "advocateaico@gmail.com";
   const avatarSrc = profile?.avatarUrl || "/images/profile/img-1.png";
+  const imageError = Boolean(avatarSrc && failedAvatarSrc === avatarSrc);
+
+  const initials = React.useMemo(() => {
+    if (!displayName) return "OC";
+    const parts = displayName.trim().split(/\s+/);
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }, [displayName]);
 
   return (
     <>
@@ -42,9 +51,9 @@ export function SidebarUser({ isCollapsed = false }: SidebarUserProps) {
         />
 
         <div
-          className={`sidebar-user-glass relative flex items-center gap-3 p-2.5 rounded-2xl transition-all duration-200 ${
-            isCollapsed ? "justify-center" : "justify-between"
-          }`}
+          className={`sidebar-user-glass relative flex items-center gap-3 transition-all duration-200 ${
+            isCollapsed ? "justify-center p-2" : "justify-between p-2.5"
+          } rounded-2xl`}
         >
           {/* User Identity */}
           {isCollapsed ? (
@@ -57,20 +66,20 @@ export function SidebarUser({ isCollapsed = false }: SidebarUserProps) {
             >
               <div className="relative shrink-0 p-0.5 rounded-full bg-gradient-to-tr from-gold-600 via-gold-400 to-amber-200 shadow-sm transition-transform group-hover:scale-105">
                 <div className="relative w-9 h-9 rounded-full bg-midnight-950 flex items-center justify-center overflow-hidden">
-                  <Image
-                    src={avatarSrc}
-                    alt={displayName}
-                    width={36}
-                    height={36}
-                    className="w-full h-full object-cover"
-                    onError={(e) => {
-                      const target = e.currentTarget as HTMLElement;
-                      target.style.display = "none";
-                    }}
-                  />
-                  <span className="text-[11px] font-bold text-gold-400 select-none">
-                    OC
-                  </span>
+                  {!imageError && avatarSrc ? (
+                    <Image
+                      src={avatarSrc}
+                      alt={displayName}
+                      fill
+                      sizes="36px"
+                      className="object-cover object-center"
+                      onError={() => setFailedAvatarSrc(avatarSrc)}
+                    />
+                  ) : (
+                    <span className="text-[11px] font-bold text-gold-400 select-none">
+                      {initials}
+                    </span>
+                  )}
                 </div>
 
                 {/* Glowing Live Presence Dot */}
@@ -91,20 +100,20 @@ export function SidebarUser({ isCollapsed = false }: SidebarUserProps) {
               {/* Avatar with Double Gold Halo Rim */}
               <div className="relative shrink-0 p-0.5 rounded-full bg-gradient-to-tr from-gold-600 via-gold-400 to-amber-200 shadow-sm">
                 <div className="relative w-9 h-9 rounded-full bg-midnight-950 flex items-center justify-center overflow-hidden">
-                  <Image
-                    src={avatarSrc}
-                    alt={displayName}
-                    width={36}
-                    height={36}
-                    className="w-full h-full object-cover transition-transform duration-300 hover:scale-110"
-                    onError={(e) => {
-                      const target = e.currentTarget as HTMLElement;
-                      target.style.display = "none";
-                    }}
-                  />
-                  <span className="text-[11px] font-bold text-gold-400 select-none">
-                    OC
-                  </span>
+                  {!imageError && avatarSrc ? (
+                    <Image
+                      src={avatarSrc}
+                      alt={displayName}
+                      fill
+                      sizes="36px"
+                      className="object-cover object-center transition-transform duration-300 hover:scale-110"
+                      onError={() => setFailedAvatarSrc(avatarSrc)}
+                    />
+                  ) : (
+                    <span className="text-[11px] font-bold text-gold-400 select-none">
+                      {initials}
+                    </span>
+                  )}
                 </div>
 
                 {/* Glowing Live Presence Dot */}

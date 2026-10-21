@@ -99,12 +99,36 @@ export function formatUserResponse(user: RawUserRecord) {
       }
     : null;
 
+  const profileAssetRefId = profileRef?._id ? String(profileRef._id) : null;
+  const signatureAssetRefId = sigRef?._id ? String(sigRef._id) : null;
+
   return {
-    ...user,
+    _id: String(user._id),
+    name: (user.name as string) || "",
+    preferredName: (user.preferredName as string) || (user.name as string) || "",
+    title: (user.title as string) || "Advocate",
+    subtitle: (user.subtitle as string) || "Advocate • Judge's Court, Sylhet",
+    tagline: (user.tagline as string | null) || null,
+    email: (user.email as string) || "",
+    phone: (user.phone as string | null) || null,
+    alternatePhone: (user.alternatePhone as string | null) || null,
+    whatsappNumber: (user.whatsappNumber as string | null) || null,
+    barCouncilId: (user.barCouncilId as string | null) || null,
+    barAssociationMemberNo: (user.barAssociationMemberNo as string | null) || null,
+    taxesBarMemberNo: (user.taxesBarMemberNo as string | null) || null,
+    chamber: user.chamber || null,
+    homeAddress: user.homeAddress || null,
+    status: (user.status as string) || "ACTIVE",
+    isActive: user.isActive !== false,
+    profileAssetReferenceId: profileAssetRefId,
+    signatureAssetReferenceId: signatureAssetRefId,
     avatarUrl,
     avatar,
     signatureUrl,
     signature,
+    lastLoginAt: user.lastLoginAt || null,
+    createdAt: user.createdAt || null,
+    updatedAt: user.updatedAt || null,
   };
 }
 
@@ -112,19 +136,24 @@ export const GET = withErrorHandler(async () => {
   const userId = await getUserId();
 
   const user = (await User.findById(userId)
+    .select("-passwordHash -__v")
     .populate({
       path: "profileAssetReferenceId",
+      select: "_id originalFileName caption purpose assetId",
       populate: {
         path: "assetId",
+        select: "_id secureUrl publicId originalFilename mimeType bytes width height format",
       },
     })
     .populate({
       path: "signatureAssetReferenceId",
+      select: "_id originalFileName caption purpose assetId",
       populate: {
         path: "assetId",
+        select: "_id secureUrl publicId originalFilename mimeType bytes width height format",
       },
     })
-    .populate("signatureAssetId")
+    .populate("signatureAssetId", "_id secureUrl publicId originalFilename mimeType bytes width height format")
     .lean()) as RawUserRecord | null;
 
   if (!user || user.isActive === false) {
@@ -224,19 +253,24 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
     { $set: updateSet },
     { new: true, runValidators: true }
   )
+    .select("-passwordHash -__v")
     .populate({
       path: "profileAssetReferenceId",
+      select: "_id originalFileName caption purpose assetId",
       populate: {
         path: "assetId",
+        select: "_id secureUrl publicId originalFilename mimeType bytes width height format",
       },
     })
     .populate({
       path: "signatureAssetReferenceId",
+      select: "_id originalFileName caption purpose assetId",
       populate: {
         path: "assetId",
+        select: "_id secureUrl publicId originalFilename mimeType bytes width height format",
       },
     })
-    .populate("signatureAssetId")
+    .populate("signatureAssetId", "_id secureUrl publicId originalFilename mimeType bytes width height format")
     .lean()) as RawUserRecord | null;
 
   if (!updatedUser) {

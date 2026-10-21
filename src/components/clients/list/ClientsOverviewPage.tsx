@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { FadeInUp } from "@/components/wrappers/Motion";
 import { useClientStore } from "@/store/useClientStore";
 import { useClientList } from "@/hooks/clients";
@@ -46,6 +47,8 @@ export function ClientsOverviewPage() {
 
   const { data, isLoading, isError, error, refetch, isFetching } = useClientList(filterParams);
 
+  const router = useRouter();
+
   // Dialog states
   const [isFormOpen, setIsFormOpen] = React.useState(false);
   const [editingClient, setEditingClient] = React.useState<ClientListItemDto | null>(null);
@@ -54,8 +57,7 @@ export function ClientsOverviewPage() {
   const [deletingClient, setDeletingClient] = React.useState<ClientListItemDto | null>(null);
 
   const handleAddNew = () => {
-    setEditingClient(null);
-    setIsFormOpen(true);
+    router.push("/dashboard/clients/new");
   };
 
   const handleEditClient = (client: ClientListItemDto) => {

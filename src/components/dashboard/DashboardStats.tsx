@@ -11,19 +11,33 @@ export interface DashboardStatsProps {
 }
 
 export function DashboardStats({ stats }: DashboardStatsProps) {
-  const activeCases = stats?.activeCases ?? 48;
-  const activeCasesSubtext = stats?.activeCasesSubtext || "18 Civil • 14 Criminal • 16 Tax/Writ";
+  const activeCases = stats?.activeCases ?? 0;
+  const activeCasesSubtext =
+    stats?.activeCasesSubtext ||
+    (activeCases === 0 ? "No active litigation matters" : `${activeCases} active matters`);
 
-  const upcomingHearings = stats?.upcomingHearings ?? 7;
-  const todayHearingsCount = stats?.todayHearingsCount ?? 3;
-  const hearingsSubtext = `${todayHearingsCount} scheduled for today in Sylhet`;
+  const upcomingHearings = stats?.upcomingHearings ?? 0;
+  const todayHearingsCount = stats?.todayHearingsCount ?? 0;
+  const hearingsSubtext =
+    todayHearingsCount > 0
+      ? `${todayHearingsCount} scheduled for today`
+      : upcomingHearings > 0
+      ? "0 today • Scheduled hearings upcoming"
+      : "No upcoming hearings";
 
-  const activeClients = stats?.activeClients ?? 62;
-  const activeClientsSubtext = stats?.activeClientsSubtext || "48 Individuals • 14 Corporate";
+  const activeClients = stats?.activeClients ?? 0;
+  const activeClientsSubtext =
+    stats?.activeClientsSubtext ||
+    (activeClients === 0 ? "No active clients registered" : `${activeClients} registered clients`);
 
-  const pendingTasks = stats?.pendingTasks ?? 12;
-  const urgentTasksCount = stats?.urgentTasksCount ?? 4;
-  const tasksSubtext = `${urgentTasksCount} urgent filing deadlines`;
+  const pendingTasks = stats?.pendingTasks ?? 0;
+  const urgentTasksCount = stats?.urgentTasksCount ?? 0;
+  const tasksSubtext =
+    urgentTasksCount > 0
+      ? `${urgentTasksCount} urgent filing ${urgentTasksCount === 1 ? "deadline" : "deadlines"}`
+      : pendingTasks > 0
+      ? "0 urgent • Standard deadlines pending"
+      : "All chamber tasks completed";
 
   const statCards = [
     {

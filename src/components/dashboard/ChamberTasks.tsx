@@ -28,9 +28,6 @@ export function ChamberTasks({ tasks = [] }: ChamberTasksProps) {
   );
 
   function handleToggleTask(task: ChamberTaskDto) {
-    if (task.id.startsWith("demo-")) {
-      return; // demo tasks in preview mode
-    }
     const isCompleted = task.status === TASK_STATUSES.COMPLETED;
     const nextStatus: TaskStatus = isCompleted ? TASK_STATUSES.TODO : TASK_STATUSES.COMPLETED;
     setUpdatingTaskId(task.id);
@@ -110,9 +107,18 @@ export function ChamberTasks({ tasks = [] }: ChamberTasksProps) {
                         )}
                       </button>
                       {task.caseRef && (
-                        <span className="text-[10px] font-mono text-muted-foreground truncate">
-                          {task.caseRef}
-                        </span>
+                        task.caseId ? (
+                          <Link
+                            href={`/dashboard/cases/${task.caseId}`}
+                            className="text-[10px] font-mono text-muted-foreground hover:text-gold-600 dark:hover:text-gold-400 transition-colors truncate"
+                          >
+                            {task.caseRef}
+                          </Link>
+                        ) : (
+                          <span className="text-[10px] font-mono text-muted-foreground truncate">
+                            {task.caseRef}
+                          </span>
+                        )
                       )}
                     </div>
 

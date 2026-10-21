@@ -8,8 +8,8 @@ export interface DashboardAdvocateInfo {
   title: string;
   subtitle: string;
   chamberLocation: string;
-  phone?: string;
-  whatsappNumber?: string;
+  phone?: string | null;
+  whatsappNumber?: string | null;
 }
 
 export interface DashboardMetricStat {
@@ -37,10 +37,11 @@ export type { HearingStatus } from "@/const/hearing.const";
 
 export interface TodayHearingDto {
   id: string;
+  caseId?: string | null;
   caseRef: string;
   caseTitle: string;
   courtName: string;
-  room: string;
+  room?: string | null;
   purpose: string;
   time: string;
   caseType: CaseType;
@@ -62,6 +63,7 @@ export interface RecentCaseDto {
 export interface ChamberTaskDto {
   id: string;
   title: string;
+  caseId?: string | null;
   caseRef: string | null;
   due: string;
   priority: TaskPriority;

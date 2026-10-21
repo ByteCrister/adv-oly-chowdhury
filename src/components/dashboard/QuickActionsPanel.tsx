@@ -13,13 +13,13 @@ export function QuickActionsPanel() {
       icon: Users,
     },
     {
-      title: "Upload Doc",
-      href: "/dashboard/documents/upload",
+      title: "Legal Docs",
+      href: "/dashboard/documents",
       icon: FileText,
     },
     {
-      title: "Fee Receipt",
-      href: "/dashboard/financials/receipt",
+      title: "Fee Accounts",
+      href: "/dashboard/financials",
       icon: Receipt,
     },
     {

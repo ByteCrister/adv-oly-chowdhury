@@ -61,9 +61,18 @@ export function TodayCauseList({ hearings = [] }: TodayCauseListProps) {
               >
                 <div className="space-y-1.5 min-w-0">
                   <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                    <span className="font-mono font-semibold px-2 py-0.5 rounded bg-muted text-foreground">
-                      {hearing.caseRef}
-                    </span>
+                    {hearing.caseId ? (
+                      <Link
+                        href={`/dashboard/cases/${hearing.caseId}`}
+                        className="font-mono font-semibold px-2 py-0.5 rounded bg-muted text-foreground hover:text-gold-600 dark:hover:text-gold-400 transition-colors"
+                      >
+                        {hearing.caseRef}
+                      </Link>
+                    ) : (
+                      <span className="font-mono font-semibold px-2 py-0.5 rounded bg-muted text-foreground">
+                        {hearing.caseRef}
+                      </span>
+                    )}
                     <span className="px-2 py-0.5 rounded bg-gold-500/10 text-gold-600 dark:text-gold-400 font-semibold border border-gold-500/20">
                       {CASE_TYPE_LABELS[hearing.caseType as CaseType] || hearing.caseType}
                     </span>
@@ -80,7 +89,16 @@ export function TodayCauseList({ hearings = [] }: TodayCauseListProps) {
                   </div>
 
                   <h4 className="font-serif font-bold text-sm text-foreground truncate">
-                    {hearing.caseTitle}
+                    {hearing.caseId ? (
+                      <Link
+                        href={`/dashboard/cases/${hearing.caseId}`}
+                        className="hover:text-gold-600 dark:hover:text-gold-400 transition-colors"
+                      >
+                        {hearing.caseTitle}
+                      </Link>
+                    ) : (
+                      hearing.caseTitle
+                    )}
                   </h4>
 
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
@@ -88,8 +106,12 @@ export function TodayCauseList({ hearings = [] }: TodayCauseListProps) {
                       <Building2 className="w-3.5 h-3.5 text-muted-foreground" />
                       <span>{hearing.courtName}</span>
                     </span>
-                    <span className="text-muted-foreground/50">•</span>
-                    <span>{hearing.room}</span>
+                    {hearing.room && (
+                      <>
+                        <span className="text-muted-foreground/50">•</span>
+                        <span>{hearing.room}</span>
+                      </>
+                    )}
                   </div>
 
                   <p className="text-xs text-foreground/80 font-medium">
@@ -105,7 +127,7 @@ export function TodayCauseList({ hearings = [] }: TodayCauseListProps) {
                   </div>
 
                   <Link
-                    href={`/dashboard/cases/${encodeURIComponent(hearing.caseRef)}`}
+                    href={hearing.caseId ? `/dashboard/cases/${hearing.caseId}` : "/dashboard/cases"}
                     className="text-xs text-muted-foreground hover:text-foreground hover:underline"
                   >
                     View Dossier

@@ -33,6 +33,9 @@ export function SignOutAlertDialog({
   displayEmail = "advocateaico@gmail.com",
   avatarSrc = "/images/profile/img-1.png",
 }: SignOutAlertDialogProps) {
+  const [failedAvatarSrc, setFailedAvatarSrc] = React.useState<string | null>(null);
+  const imageError = Boolean(avatarSrc && failedAvatarSrc === avatarSrc);
+
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent className="sm:max-w-[460px] p-6 overflow-hidden border border-border/80 dark:border-white/15 bg-white/95 dark:bg-[#080E1C]/95 shadow-2xl rounded-2xl">
@@ -73,18 +76,18 @@ export function SignOutAlertDialog({
         <div className="sidebar-user-glass p-3 rounded-xl flex items-center gap-3 my-1">
           <div className="relative shrink-0 p-0.5 rounded-full bg-gradient-to-tr from-gold-600 via-gold-400 to-amber-200">
             <div className="relative w-8 h-8 rounded-full bg-midnight-950 overflow-hidden flex items-center justify-center">
-              <Image
-                src={avatarSrc}
-                alt={displayName}
-                width={32}
-                height={32}
-                className="w-full h-full object-cover"
-                onError={(e) => {
-                  const target = e.currentTarget as HTMLElement;
-                  target.style.display = "none";
-                }}
-              />
-              <span className="text-[10px] font-bold text-gold-400">OC</span>
+              {!imageError && avatarSrc ? (
+                <Image
+                  src={avatarSrc}
+                  alt={displayName}
+                  fill
+                  sizes="32px"
+                  className="object-cover object-center"
+                  onError={() => setFailedAvatarSrc(avatarSrc)}
+                />
+              ) : (
+                <span className="text-[10px] font-bold text-gold-400">OC</span>
+              )}
             </div>
           </div>
 

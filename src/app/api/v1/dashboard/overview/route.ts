@@ -9,8 +9,8 @@ import Task from "@/db/models/Task.model";
 import "@/db/models/Court.model";
 import {
   CASE_STATUSES,
-  CASE_TYPES,
   CASE_TYPE_LABELS,
+  type CaseType,
 } from "@/const/case.const";
 import { HEARING_STATUSES } from "@/const/hearing.const";
 import {
@@ -19,8 +19,8 @@ import {
 } from "@/const/task.const";
 import {
   CLIENT_STATUSES,
-  CLIENT_TYPES,
   CLIENT_TYPE_LABELS,
+  type ClientType,
 } from "@/const/client.const";
 import { DASHBOARD_DEFAULTS } from "@/const/dashboard.const";
 import type {
@@ -37,9 +37,6 @@ import {
   formatTime,
   formatDate,
   formatChamberTask,
-  DEMO_TODAY_HEARINGS,
-  DEMO_RECENT_CASES,
-  DEMO_CHAMBER_TASKS,
   type LeanHearingRecord,
   type LeanCaseRecord,
   type LeanTaskRecord,
@@ -49,7 +46,8 @@ import {
  * GET /api/v1/dashboard/overview
  *
  * Consolidates judicial cause list, chamber tasks, recent cases, client stats,
- * and welcome advocate profile in a single parallelized, index-backed operation.
+ * and advocate profile in a single parallelized, index-backed operation.
+ * All metrics and records are genuinely derived from the database without placeholders.
  */
 export const GET = withErrorHandler(async () => {
   const userId = await getUserId();
@@ -62,9 +60,9 @@ export const GET = withErrorHandler(async () => {
   // Parallelized database operations: 1 user lookup, 4 consolidated aggregations, 3 lean find queries
   const [
     user,
-    [caseStats],
+    caseBreakdown,
     [hearingStats],
-    [clientStats],
+    clientStats,
     [taskStats],
     todayHearingsDocsRaw,
     recentCasesDocsRaw,
@@ -75,12 +73,10 @@ export const GET = withErrorHandler(async () => {
       .select("name preferredName title subtitle chamber phone whatsappNumber")
       .lean(),
 
-    // 2. Case breakdown aggregated in a single query using { deletedAt: 1, caseStatus: 1 } index
+    // 2. Active Case breakdown by type using { deletedAt: 1, caseStatus: 1 } index
     Case.aggregate<{
-      total: number;
-      civil: number;
-      criminal: number;
-      taxWrit: number;
+      _id: string;
+      count: number;
     }>([
       {
         $match: {
@@ -90,33 +86,12 @@ export const GET = withErrorHandler(async () => {
       },
       {
         $group: {
-          _id: null,
-          total: { $sum: 1 },
-          civil: {
-            $sum: { $cond: [{ $eq: ["$caseType", CASE_TYPES.CIVIL] }, 1, 0] },
-          },
-          criminal: {
-            $sum: { $cond: [{ $eq: ["$caseType", CASE_TYPES.CRIMINAL] }, 1, 0] },
-          },
-          taxWrit: {
-            $sum: {
-              $cond: [
-                {
-                  $in: [
-                    "$caseType",
-                    [
-                      CASE_TYPES.TAXATION_REVENUE,
-                      CASE_TYPES.CONSTITUTIONAL_WRIT,
-                      CASE_TYPES.CUSTOMS_VAT,
-                    ],
-                  ],
-                },
-                1,
-                0,
-              ],
-            },
-          },
+          _id: "$caseType",
+          count: { $sum: 1 },
         },
+      },
+      {
+        $sort: { count: -1 },
       },
     ]),
 
@@ -132,6 +107,22 @@ export const GET = withErrorHandler(async () => {
         },
       },
       {
+        $lookup: {
+          from: "cases",
+          localField: "caseId",
+          foreignField: "_id",
+          as: "case",
+        },
+      },
+      {
+        $unwind: "$case",
+      },
+      {
+        $match: {
+          "case.deletedAt": null,
+        },
+      },
+      {
         $group: {
           _id: null,
           upcoming: { $sum: 1 },
@@ -144,11 +135,10 @@ export const GET = withErrorHandler(async () => {
       },
     ]),
 
-    // 4. Client breakdown in a single query using { deletedAt: 1, status: 1 } index
+    // 4. Active Client breakdown by type in a single query using { deletedAt: 1, status: 1 } index
     Client.aggregate<{
-      total: number;
-      individual: number;
-      corporate: number;
+      _id: string;
+      count: number;
     }>([
       {
         $match: {
@@ -158,23 +148,12 @@ export const GET = withErrorHandler(async () => {
       },
       {
         $group: {
-          _id: null,
-          total: { $sum: 1 },
-          individual: {
-            $sum: {
-              $cond: [{ $eq: ["$clientType", CLIENT_TYPES.INDIVIDUAL] }, 1, 0],
-            },
-          },
-          corporate: {
-            $sum: {
-              $cond: [
-                { $eq: ["$clientType", CLIENT_TYPES.ORGANIZATION] },
-                1,
-                0,
-              ],
-            },
-          },
+          _id: "$clientType",
+          count: { $sum: 1 },
         },
+      },
+      {
+        $sort: { count: -1 },
       },
     ]),
 
@@ -190,6 +169,23 @@ export const GET = withErrorHandler(async () => {
         },
       },
       {
+        $lookup: {
+          from: "cases",
+          localField: "caseId",
+          foreignField: "_id",
+          as: "case",
+        },
+      },
+      {
+        $match: {
+          $or: [
+            { caseId: null },
+            { "case.0": { $exists: false } },
+            { "case.deletedAt": null },
+          ],
+        },
+      },
+      {
         $group: {
           _id: null,
           total: { $sum: 1 },
@@ -202,20 +198,20 @@ export const GET = withErrorHandler(async () => {
       },
     ]),
 
-    // 6. Today & upcoming cause list with lean projection and court fallback
+    // 6. Today's cause list hearings with lean projection and court fallback
     Hearing.find({
-      hearingDate: { $gte: startOfToday },
+      hearingDate: { $gte: startOfToday, $lte: endOfToday },
       status: { $ne: HEARING_STATUSES.CANCELLED },
     })
-      .sort({ hearingDate: 1 })
+      .sort({ hearingDate: 1, startTime: 1 })
       .limit(DASHBOARD_DEFAULTS.maxTodayHearings)
       .select("_id hearingDate startTime hearingType purpose status caseId courtId")
       .populate({
         path: "caseId",
-        select: "internalReference caseNumber title caseType priority courtId deletedAt",
-        populate: { path: "courtId", select: "name roomOrHall" },
+        select: "_id internalReference caseNumber title caseType priority courtId deletedAt",
+        populate: { path: "courtId", select: "_id name roomOrHall" },
       })
-      .populate("courtId", "name roomOrHall")
+      .populate("courtId", "_id name roomOrHall")
       .lean(),
 
     // 7. Recent cases with lean projection
@@ -223,8 +219,8 @@ export const GET = withErrorHandler(async () => {
       .sort({ createdAt: -1 })
       .limit(DASHBOARD_DEFAULTS.maxRecentCases)
       .select("_id caseNumber internalReference title caseType caseStatus filingDate createdAt clientId courtId")
-      .populate("clientId", "name organizationName clientType")
-      .populate("courtId", "name roomOrHall")
+      .populate("clientId", "_id name organizationName clientType")
+      .populate("courtId", "_id name roomOrHall")
       .lean(),
 
     // 8. Chamber tasks with soft-delete filter and lean projection
@@ -237,7 +233,7 @@ export const GET = withErrorHandler(async () => {
       .select("_id title priority status dueAt caseId")
       .populate({
         path: "caseId",
-        select: "internalReference caseNumber title deletedAt",
+        select: "_id internalReference caseNumber title deletedAt",
       })
       .lean(),
   ]);
@@ -257,18 +253,19 @@ export const GET = withErrorHandler(async () => {
     .filter((h) => !h.caseId || !h.caseId.deletedAt)
     .map((h) => {
       const caseItem = h.caseId;
-      // Inherit court from hearing override first, then case court, then chamber court default
+      // Inherit court from hearing override first, then case court
       const courtItem =
         h.courtId ||
         (caseItem?.courtId && typeof caseItem.courtId === "object"
           ? caseItem.courtId
           : null);
 
+      const caseId = caseItem?._id ? String(caseItem._id) : null;
       const caseRef = caseItem?.caseNumber || caseItem?.internalReference || "N/A";
       const caseTitle = caseItem?.title || "Judicial Case Matter";
-      const courtName = courtItem?.name || "Judge's Court, Sylhet";
-      const room = courtItem?.roomOrHall || "Courtroom 01";
-      const purpose = h.purpose || h.hearingType || "Hearing & Examination";
+      const courtName = courtItem?.name || "Court Unassigned";
+      const room = courtItem?.roomOrHall || null;
+      const purpose = h.purpose || h.hearingType || "Scheduled Proceeding";
       const time = formatTime(h.hearingDate, h.startTime);
       const caseType = normalizeCaseType(caseItem?.caseType);
       const priority = normalizeCasePriority(caseItem?.priority);
@@ -276,6 +273,7 @@ export const GET = withErrorHandler(async () => {
 
       return {
         id: String(h._id),
+        caseId,
         caseRef,
         caseTitle,
         courtName,
@@ -292,9 +290,9 @@ export const GET = withErrorHandler(async () => {
   const recentCases: RecentCaseDto[] = recentCasesDocs.map((c) => {
     const clientItem = c.clientId;
     const courtItem = c.courtId;
-    const clientName = clientItem?.organizationName || clientItem?.name || "Private Client";
-    const courtName = courtItem?.name || "District Judge Court, Sylhet";
-    const ref = c.caseNumber || c.internalReference || "REF-2026";
+    const clientName = clientItem?.organizationName || clientItem?.name || "Unassigned Client";
+    const courtName = courtItem?.name || "Court Unassigned";
+    const ref = c.caseNumber || c.internalReference || "N/A";
     const caseType = normalizeCaseType(c.caseType);
     const status = normalizeCaseStatus(c.caseStatus);
 
@@ -310,60 +308,34 @@ export const GET = withErrorHandler(async () => {
     };
   });
 
-  // 11. Map Chamber Tasks
-  const chamberTasks: ChamberTaskDto[] = chamberTasksDocs.map((t) => formatChamberTask(t));
+  // 11. Map Chamber Tasks (excluding any belonging to soft-deleted cases)
+  const chamberTasks: ChamberTaskDto[] = chamberTasksDocs
+    .filter((t) => !t.caseId || !t.caseId.deletedAt)
+    .map((t) => formatChamberTask(t));
 
-  // Extract raw counts with 0 defaults
-  const activeCasesTotal = caseStats?.total ?? 0;
-  const civilCasesCount = caseStats?.civil ?? 0;
-  const criminalCasesCount = caseStats?.criminal ?? 0;
-  const taxWritCasesCount = caseStats?.taxWrit ?? 0;
+  // Extract raw counts directly derived from database
+  const activeCasesTotal = (caseBreakdown || []).reduce((sum, item) => sum + item.count, 0);
+  const activeCasesSubtext =
+    activeCasesTotal === 0
+      ? "No active litigation matters"
+      : (caseBreakdown || [])
+          .slice(0, 3)
+          .map((item) => `${item.count} ${CASE_TYPE_LABELS[item._id as CaseType] || item._id}`)
+          .join(" • ");
 
   const upcomingHearingsTotal = hearingStats?.upcoming ?? 0;
   const todayHearingsTotal = hearingStats?.today ?? 0;
 
-  const activeClientsTotal = clientStats?.total ?? 0;
-  const individualClientsCount = clientStats?.individual ?? 0;
-  const corporateClientsCount = clientStats?.corporate ?? 0;
+  const activeClientsTotal = (clientStats || []).reduce((sum, item) => sum + item.count, 0);
+  const activeClientsSubtext =
+    activeClientsTotal === 0
+      ? "No active clients registered"
+      : (clientStats || [])
+          .map((item) => `${item.count} ${CLIENT_TYPE_LABELS[item._id as ClientType] || item._id}`)
+          .join(" • ");
 
   const pendingTasksTotal = taskStats?.total ?? 0;
   const urgentTasksTotal = taskStats?.urgent ?? 0;
-
-  // Determine whether the system is in an unseeded starter mode
-  const isDatabaseEmpty =
-    activeCasesTotal === 0 &&
-    activeClientsTotal === 0 &&
-    upcomingHearingsTotal === 0 &&
-    pendingTasksTotal === 0 &&
-    recentCasesDocs.length === 0;
-
-  // Compute final display datasets and stats
-  const finalTodayHearings: TodayHearingDto[] = isDatabaseEmpty
-    ? DEMO_TODAY_HEARINGS
-    : todayHearings;
-
-  const finalRecentCases: RecentCaseDto[] = isDatabaseEmpty
-    ? DEMO_RECENT_CASES
-    : recentCases;
-
-  const finalChamberTasks: ChamberTaskDto[] = isDatabaseEmpty
-    ? DEMO_CHAMBER_TASKS
-    : chamberTasks;
-
-  const activeCasesVal = isDatabaseEmpty ? 48 : activeCasesTotal;
-  const civilVal = isDatabaseEmpty ? 18 : civilCasesCount;
-  const criminalVal = isDatabaseEmpty ? 14 : criminalCasesCount;
-  const taxVal = isDatabaseEmpty ? 16 : taxWritCasesCount;
-
-  const upcomingHearingsVal = isDatabaseEmpty ? 7 : upcomingHearingsTotal;
-  const todayHearingsVal = isDatabaseEmpty ? 3 : todayHearingsTotal;
-
-  const activeClientsVal = isDatabaseEmpty ? 62 : activeClientsTotal;
-  const individualClientsVal = isDatabaseEmpty ? 48 : individualClientsCount;
-  const corporateClientsVal = isDatabaseEmpty ? 14 : corporateClientsCount;
-
-  const pendingTasksVal = isDatabaseEmpty ? 12 : pendingTasksTotal;
-  const urgentTasksVal = isDatabaseEmpty ? 4 : urgentTasksTotal;
 
   const overviewData: DashboardOverviewData = {
     advocate: {
@@ -372,22 +344,22 @@ export const GET = withErrorHandler(async () => {
       title: user?.title || "Advocate",
       subtitle: user?.subtitle || "Advocate • Judge's Court, Sylhet",
       chamberLocation,
-      phone: user?.phone || "01712-459840",
-      whatsappNumber: user?.whatsappNumber || "+8801712459840",
+      phone: user?.phone || null,
+      whatsappNumber: user?.whatsappNumber || null,
     },
     stats: {
-      activeCases: activeCasesVal,
-      activeCasesSubtext: `${civilVal} ${CASE_TYPE_LABELS[CASE_TYPES.CIVIL]} • ${criminalVal} ${CASE_TYPE_LABELS[CASE_TYPES.CRIMINAL]} • ${taxVal} ${CASE_TYPE_LABELS[CASE_TYPES.TAXATION_REVENUE]}`,
-      upcomingHearings: upcomingHearingsVal,
-      todayHearingsCount: todayHearingsVal,
-      activeClients: activeClientsVal,
-      activeClientsSubtext: `${individualClientsVal} ${CLIENT_TYPE_LABELS[CLIENT_TYPES.INDIVIDUAL]} • ${corporateClientsVal} ${CLIENT_TYPE_LABELS[CLIENT_TYPES.ORGANIZATION]}`,
-      pendingTasks: pendingTasksVal,
-      urgentTasksCount: urgentTasksVal,
+      activeCases: activeCasesTotal,
+      activeCasesSubtext,
+      upcomingHearings: upcomingHearingsTotal,
+      todayHearingsCount: todayHearingsTotal,
+      activeClients: activeClientsTotal,
+      activeClientsSubtext,
+      pendingTasks: pendingTasksTotal,
+      urgentTasksCount: urgentTasksTotal,
     },
-    todayHearings: finalTodayHearings,
-    recentCases: finalRecentCases,
-    chamberTasks: finalChamberTasks,
+    todayHearings,
+    recentCases,
+    chamberTasks,
   };
 
   return NextResponse.json(

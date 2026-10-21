@@ -81,14 +81,19 @@ export function RecentCasesTable({ cases = [] }: RecentCasesTableProps) {
                 >
                   <td className="px-4 py-3.5 font-mono font-semibold text-foreground">
                     <Link
-                      href={`/dashboard/cases/${encodeURIComponent(c.ref)}`}
+                      href={`/dashboard/cases/${c.id}`}
                       className="hover:text-gold-500 hover:underline"
                     >
                       {c.ref}
                     </Link>
                   </td>
                   <td className="px-4 py-3.5 font-medium text-foreground max-w-xs truncate">
-                    {c.title}
+                    <Link
+                      href={`/dashboard/cases/${c.id}`}
+                      className="hover:text-gold-500 transition-colors"
+                    >
+                      {c.title}
+                    </Link>
                   </td>
                   <td className="px-4 py-3.5 text-muted-foreground">{c.client}</td>
                   <td className="px-4 py-3.5">

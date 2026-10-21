@@ -155,19 +155,24 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     { $set: { profileAssetReferenceId: assetReference._id } },
     { new: true }
   )
+    .select("-passwordHash -__v")
     .populate({
       path: "profileAssetReferenceId",
+      select: "_id originalFileName caption purpose assetId",
       populate: {
         path: "assetId",
+        select: "_id secureUrl publicId originalFilename mimeType bytes width height format",
       },
     })
     .populate({
       path: "signatureAssetReferenceId",
+      select: "_id originalFileName caption purpose assetId",
       populate: {
         path: "assetId",
+        select: "_id secureUrl publicId originalFilename mimeType bytes width height format",
       },
     })
-    .populate("signatureAssetId")
+    .populate("signatureAssetId", "_id secureUrl publicId originalFilename mimeType bytes width height format")
     .lean()) as RawUserRecord | null;
 
   if (!updatedUser) {

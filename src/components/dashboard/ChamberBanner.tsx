@@ -38,17 +38,25 @@ export function ChamberBanner({
           </h2>
 
           <p className="text-xs sm:text-sm text-muted-foreground max-w-2xl leading-relaxed">
-            Court session is active. You have{" "}
-            <span className="font-semibold text-gold-600 dark:text-gold-400">
-              <NumberCounter value={hearingCount} delay={0.2} stiffness={90} damping={32} /> court{" "}
-              {hearingCount === 1 ? "appearance" : "appearances"}
-            </span>{" "}
-            on today&apos;s cause list and{" "}
-            <span className="font-semibold text-foreground">
-              <NumberCounter value={urgentTaskCount} delay={0.3} stiffness={90} damping={32} /> urgent{" "}
-              {urgentTaskCount === 1 ? "deadline" : "deadlines"}
-            </span>
-            .
+            {hearingCount === 0 && urgentTaskCount === 0 ? (
+              <>
+                Court session is active. You currently have no court appearances scheduled for today and no urgent filing deadlines pending.
+              </>
+            ) : (
+              <>
+                Court session is active. You have{" "}
+                <span className="font-semibold text-gold-600 dark:text-gold-400">
+                  <NumberCounter value={hearingCount} delay={0.2} stiffness={90} damping={32} /> court{" "}
+                  {hearingCount === 1 ? "appearance" : "appearances"}
+                </span>{" "}
+                on today&apos;s cause list and{" "}
+                <span className="font-semibold text-foreground">
+                  <NumberCounter value={urgentTaskCount} delay={0.3} stiffness={90} damping={32} /> urgent{" "}
+                  {urgentTaskCount === 1 ? "deadline" : "deadlines"}
+                </span>
+                .
+              </>
+            )}
           </p>
 
           {/* Prominent Visual Metric Badges */}
