@@ -4,6 +4,7 @@ import { getToken } from "next-auth/jwt";
 
 const PUBLIC_PREFIXES = [
   "/api/auth",
+  "/api/inngest",
   "/_next",
   "/favicon",
   "/apple-touch-icon",

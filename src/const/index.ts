@@ -24,3 +24,4 @@ export * from "./dashboard.const";
 export * from "./dropdown.const";
 export * from "./financial.const";
 export * from "./favicons.const";
+export * from "./password-reset.const";

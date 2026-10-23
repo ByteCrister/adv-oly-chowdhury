@@ -29,6 +29,7 @@ export interface IUser {
   // Authentication & Status (Single-User Dashboard)
   email: string;
   passwordHash?: string | null;
+  passwordChangedAt?: Date | null;
   status: UserStatus;
   isActive: boolean;
   lastLoginAt?: Date | null;

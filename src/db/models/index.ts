@@ -17,3 +17,4 @@ export * from "./ClientDocument.model";
 export * from "./CaseExpense.model";
 export * from "./ClientPayment.model";
 export * from "./AuditLog.model";
+export * from "./PasswordResetRequest.model";

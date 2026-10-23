@@ -17,3 +17,4 @@ export * from "./client-document.type";
 export * from "./case-expense.type";
 export * from "./client-payment.type";
 export * from "./audit-log.type";
+export * from "./password-reset-request.type";

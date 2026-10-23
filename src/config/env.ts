@@ -63,6 +63,36 @@ export const envSchema = z.object({
     .string()
     .min(16, "CRON_SECRET must be at least 16 characters for security")
     .optional(),
+
+  // SMTP Email Configuration (Nodemailer)
+  SMTP_USER: z
+    .string({ message: "SMTP_USER is required" })
+    .min(1, "SMTP_USER cannot be empty"),
+  SMTP_PASSWORD: z
+    .string({ message: "SMTP_PASSWORD is required" })
+    .min(1, "SMTP_PASSWORD cannot be empty"),
+  SMTP_HOST: z
+    .string()
+    .default("smtp.gmail.com"),
+  SMTP_PORT: z
+    .coerce
+    .number()
+    .default(465),
+  SMTP_SECURE: z
+    .coerce
+    .boolean()
+    .default(true),
+  SMTP_FROM: z
+    .string()
+    .optional(),
+
+  // Inngest Background Workflow Engine
+  INNGEST_SIGNING_KEY: z
+    .string({ message: "INNGEST_SIGNING_KEY is required" })
+    .min(1, "INNGEST_SIGNING_KEY cannot be empty"),
+  INNGEST_EVENT_KEY: z
+    .string({ message: "INNGEST_EVENT_KEY is required" })
+    .min(1, "INNGEST_EVENT_KEY cannot be empty"),
 });
 
 /**
@@ -97,6 +127,18 @@ const rawEnv = {
 
   // Cron Secret
   CRON_SECRET: process.env.CRON_SECRET,
+
+  // SMTP Configuration
+  SMTP_USER: process.env.SMTP_USER,
+  SMTP_PASSWORD: process.env.SMTP_PASSWORD,
+  SMTP_HOST: process.env.SMTP_HOST || "smtp.gmail.com",
+  SMTP_PORT: process.env.SMTP_PORT || "465",
+  SMTP_SECURE: process.env.SMTP_SECURE !== undefined ? process.env.SMTP_SECURE : "true",
+  SMTP_FROM: process.env.SMTP_FROM,
+
+  // Inngest Configuration
+  INNGEST_SIGNING_KEY: process.env.INNGEST_SIGNING_KEY,
+  INNGEST_EVENT_KEY: process.env.INNGEST_EVENT_KEY,
 };
 
 const parsedEnv = envSchema.safeParse(rawEnv);

@@ -1,15 +1,19 @@
 "use client";
 
-import React, { Suspense } from "react";
+import React, { Suspense, useState } from "react";
 import Link from "next/link";
-import { ShieldCheck, Scale, ArrowLeft, Loader2 } from "lucide-react";
+import { ShieldCheck, Scale, ArrowLeft, Loader2, KeyRound } from "lucide-react";
 import { SignInForm } from "./SignInForm";
+import { ForgotPasswordFlow } from "./ForgotPasswordFlow";
 
 export function SignInCard() {
+  const [view, setView] = useState<"signin" | "forgot_password">("signin");
+  const [prefilledEmail, setPrefilledEmail] = useState<string>("");
+
   return (
     <div className="relative w-full max-w-[460px] mx-auto z-10">
-      {/* Top Floating Navigation: Back to Public Portfolio */}
-      <div className="flex items-center justify-start mb-4 px-1.5 sm:px-2">
+      {/* Top Floating Navigation: Back to Public Portfolio or Sign In */}
+      <div className="flex items-center justify-between mb-4 px-1.5 sm:px-2">
         <Link
           href="/"
           className="group inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold text-slate-700 dark:text-slate-300 hover:text-gold-700 dark:hover:text-gold-300 bg-white/70 dark:bg-white/[0.05] hover:bg-white dark:hover:bg-white/[0.1] border border-slate-200/80 dark:border-white/10 backdrop-blur-md shadow-xs transition-all duration-200 cursor-pointer"
@@ -17,6 +21,16 @@ export function SignInCard() {
           <ArrowLeft className="w-3.5 h-3.5 transition-transform duration-200 group-hover:-translate-x-1" />
           <span>Return to Public Portfolio</span>
         </Link>
+
+        {view === "forgot_password" && (
+          <button
+            type="button"
+            onClick={() => setView("signin")}
+            className="group inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-gold-700 dark:text-gold-300 bg-gold-500/10 hover:bg-gold-500/20 border border-gold-500/30 transition-all duration-200 cursor-pointer"
+          >
+            <span>Back to Sign In</span>
+          </button>
+        )}
       </div>
 
       {/* Ambient Multi-Layer Radial Glow Orbs */}
@@ -50,12 +64,15 @@ export function SignInCard() {
             <div className="absolute -inset-1.5 rounded-2xl bg-gradient-to-r from-gold-400/30 via-sapphire-400/20 to-gold-500/30 blur-md opacity-75 group-hover:opacity-100 transition-opacity pointer-events-none" />
 
             <div className="relative w-16 h-16 rounded-2xl sidebar-emblem-gloss flex items-center justify-center text-gold-700 dark:text-gold-300 shadow-md">
-              {/* Specular highlight sweep across medallion */}
               <div
                 aria-hidden="true"
                 className="absolute inset-x-2 top-0 h-1/2 bg-gradient-to-b from-white/40 to-transparent rounded-t-2xl pointer-events-none"
               />
-              <Scale className="w-8 h-8 drop-shadow-sm transition-transform duration-300 group-hover:scale-105" />
+              {view === "signin" ? (
+                <Scale className="w-8 h-8 drop-shadow-sm transition-transform duration-300 group-hover:scale-105" />
+              ) : (
+                <KeyRound className="w-8 h-8 drop-shadow-sm transition-transform duration-300 group-hover:scale-105" />
+              )}
             </div>
           </div>
 
@@ -65,12 +82,16 @@ export function SignInCard() {
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-gold-400 opacity-75" />
               <span className="relative inline-flex rounded-full h-2 w-2 bg-gold-500 dark:bg-gold-400" />
             </span>
-            <span>Restricted Access • Chamber Portal</span>
+            <span>
+              {view === "signin"
+                ? "Restricted Access • Chamber Portal"
+                : "Security Recovery • Chamber Portal"}
+            </span>
           </div>
 
           {/* Heading with Serif Distinction */}
           <h1 className="text-2xl sm:text-3xl font-serif font-bold text-slate-900 dark:text-white tracking-tight leading-tight">
-            Chamber Authentication
+            {view === "signin" ? "Chamber Authentication" : "Password Recovery"}
           </h1>
 
           <div className="mt-1.5 flex flex-col items-center gap-0.5">
@@ -86,7 +107,7 @@ export function SignInCard() {
           <div className="w-16 h-px bg-gradient-to-r from-transparent via-gold-500/50 to-transparent mt-4 mb-1" />
         </div>
 
-        {/* Interactive Sign-In Form Wrapped in Suspense */}
+        {/* Interactive Form Wrapped in Suspense */}
         <Suspense
           fallback={
             <div className="flex flex-col items-center justify-center py-12 gap-3 text-muted-foreground text-sm">
@@ -100,7 +121,20 @@ export function SignInCard() {
             </div>
           }
         >
-          <SignInForm />
+          {view === "signin" ? (
+            <SignInForm
+              initialEmail={prefilledEmail}
+              onForgotPassword={() => setView("forgot_password")}
+            />
+          ) : (
+            <ForgotPasswordFlow
+              initialEmail={prefilledEmail}
+              onBackToSignIn={(email) => {
+                setView("signin");
+                if (email) setPrefilledEmail(email);
+              }}
+            />
+          )}
         </Suspense>
 
         {/* Security Notice & Footer */}

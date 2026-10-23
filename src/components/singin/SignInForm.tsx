@@ -39,11 +39,16 @@ function getAuthErrorMessage(errorParam: string | null): string | undefined {
   }
 }
 
-export function SignInForm() {
+interface SignInFormProps {
+  onForgotPassword?: () => void;
+  initialEmail?: string;
+}
+
+export function SignInForm({ onForgotPassword, initialEmail = "" }: SignInFormProps) {
   const searchParams = useSearchParams();
   const errorParam = searchParams.get("error");
 
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [prevErrorParam, setPrevErrorParam] = useState(errorParam);
@@ -246,9 +251,19 @@ export function SignInForm() {
               <Lock className="w-3.5 h-3.5 text-gold-600 dark:text-gold-400 shrink-0" />
               <span>Master Password</span>
             </label>
-            <span className="text-[10px] text-muted-foreground/80 font-medium">
-              Encrypted Key
-            </span>
+            {onForgotPassword ? (
+              <button
+                type="button"
+                onClick={onForgotPassword}
+                className="text-[11px] font-semibold text-gold-700 hover:text-gold-800 dark:text-gold-400 dark:hover:text-gold-300 transition-colors focus:outline-none underline-offset-4 hover:underline cursor-pointer"
+              >
+                Forgot password?
+              </button>
+            ) : (
+              <span className="text-[10px] text-muted-foreground/80 font-medium">
+                Encrypted Key
+              </span>
+            )}
           </div>
 
           <div

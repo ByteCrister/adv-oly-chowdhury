@@ -114,6 +114,10 @@ const userSchema = new Schema<IUserDocument>(
       default: null,
       select: false, // Hidden by default from standard queries
     },
+    passwordChangedAt: {
+      type: Date,
+      default: null,
+    },
     status: {
       type: String,
       enum: {

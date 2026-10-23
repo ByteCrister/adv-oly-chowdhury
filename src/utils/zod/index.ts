@@ -12,3 +12,4 @@ export * from "./case.validation";
 export * from "./case-party.validation";
 export * from "./case-event.validation";
 export * from "./audit.validation";
+export * from "./auth.validation";
