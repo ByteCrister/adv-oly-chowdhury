@@ -49,6 +49,18 @@ export class ApiError extends Error {
  * into appropriate HTTP responses.
  */
 function handleRouteError(err: unknown): NextResponse {
+  // 0. Re-throw Next.js internal control-flow signals (e.g. NEXT_PRERENDER_INTERRUPTED,
+  //    NEXT_REDIRECT). These are not real errors — they are framework-level signals that
+  //    must propagate up for Next.js to handle correctly.
+  if (
+    err instanceof Error &&
+    "digest" in err &&
+    typeof (err as { digest?: string }).digest === "string" &&
+    (err as { digest: string }).digest.startsWith("NEXT_")
+  ) {
+    throw err;
+  }
+
   // 1. Custom ApiError
   if (err instanceof ApiError) {
     return NextResponse.json(
