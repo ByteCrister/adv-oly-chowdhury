@@ -52,15 +52,12 @@ const assetSchema = new Schema<IAssetDocument>(
     cloudinaryAssetId: {
       type: String,
       required: [true, "Cloudinary asset ID is required"],
-      unique: true,
       trim: true,
-      index: true,
     },
     publicId: {
       type: String,
       required: [true, "Cloudinary public ID is required"],
       trim: true,
-      index: true,
     },
     resourceType: {
       type: String,
