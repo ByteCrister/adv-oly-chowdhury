@@ -16,11 +16,14 @@ import { Case } from "@/db/models/Case.model";
 import { ClientPayment } from "@/db/models/ClientPayment.model";
 import { AssetReference } from "@/db/models/AssetReference.model";
 import { ASSET_OWNER_TYPES, ASSET_PURPOSES } from "@/const/asset-reference.const";
+import { AssetType } from "@/const/asset.const";
 import {
   CLIENT_PAYMENT_DEFAULT_PAGE_LIMIT,
   CLIENT_PAYMENT_SORT_OPTIONS,
   PAYMENT_METHOD_LABELS,
   PAYMENT_TYPE_LABELS,
+  PAYMENT_METHODS,
+  PAYMENT_TYPES,
   ClientPaymentPageLimit,
   ClientPaymentSortOption,
   PaymentMethod,
@@ -37,64 +40,162 @@ import type {
   ClientPaymentActionResponse,
   ClientPaymentSummaryStats,
 } from "@/types/client-payment.types";
-import type { IAsset } from "@/types/db/asset.type";
-import type { IAssetReferenceDocument } from "@/types/db/asset-reference.type";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
+export interface RawClientPaymentInput {
+  _id?: unknown;
+  id?: string;
+  clientId?: unknown;
+  caseId?: unknown;
+  paymentDate?: Date | string | null;
+  amount?: number | null;
+  currency?: string | null;
+  paymentMethod?: PaymentMethod | string | null;
+  paymentType?: PaymentType | string | null;
+  referenceNumber?: string | null;
+  moneyReceiptNumber?: string | null;
+  receiptAssetreferenceId?: unknown;
+  receiptAssetReferenceId?: unknown;
+  notes?: string | null;
+  receivedBy?: unknown;
+  createdAt?: Date | string | null;
+  updatedAt?: Date | string | null;
+}
+
+export interface PopulatedCaseInfo {
+  _id?: mongoose.Types.ObjectId | string;
+  internalReference?: string;
+  caseNumber?: string;
+  title?: string;
+}
+
+export interface PopulatedReceiptAssetRef {
+  _id?: mongoose.Types.ObjectId | string;
+  originalFileName?: string | null;
+  assetId?: {
+    _id?: mongoose.Types.ObjectId | string;
+    secureUrl?: string | null;
+    originalFilename?: string | null;
+    assetType?: AssetType | string | null;
+    mimeType?: string | null;
+    bytes?: number | null;
+  } | null;
+}
+
+export interface PopulatedReceivedByUser {
+  _id?: mongoose.Types.ObjectId | string;
+  id?: string;
+  name?: string | null;
+  email?: string | null;
+}
+
 /**
- * Format a ClientPayment record into ClientPaymentItemDto.
+ * Format a raw or lean ClientPayment record into a clean, strongly-typed ClientPaymentItemDto.
+ * Strips internal metadata, ensures IDs are valid strings, and serializes all required client fields.
  */
-function formatClientPaymentItem(
-  payment: Record<string, unknown>,
-  caseDoc?: { internalReference?: string; caseNumber?: string; title?: string } | null,
-  receiptRef?: (IAssetReferenceDocument & { assetId?: IAsset }) | null,
-  receivedByUser?: { _id: mongoose.Types.ObjectId; name: string; email: string } | null
+export function formatClientPaymentItem(
+  payment: RawClientPaymentInput,
+  caseDoc?: PopulatedCaseInfo | null,
+  receiptRef?: PopulatedReceiptAssetRef | null,
+  receivedByUser?: PopulatedReceivedByUser | null
 ): ClientPaymentItemDto {
-  const method = payment.paymentMethod as PaymentMethod;
-  const pType = payment.paymentType as PaymentType;
-  const caseRef = caseDoc
-    ? caseDoc.caseNumber || caseDoc.internalReference || null
+  const method = (payment.paymentMethod as PaymentMethod) || PAYMENT_METHODS.CASH;
+  const pType = (payment.paymentType as PaymentType) || PAYMENT_TYPES.CASE_PROFESSIONAL_FEE;
+
+  // Resolve case info
+  const resolvedCase =
+    caseDoc !== undefined
+      ? caseDoc
+      : payment.caseId && typeof payment.caseId === "object"
+      ? (payment.caseId as PopulatedCaseInfo)
+      : null;
+
+  const caseIdStr =
+    resolvedCase && "_id" in resolvedCase && resolvedCase._id
+      ? String(resolvedCase._id)
+      : payment.caseId && typeof payment.caseId !== "object"
+      ? String(payment.caseId)
+      : null;
+
+  const caseRef = resolvedCase
+    ? resolvedCase.caseNumber || resolvedCase.internalReference || null
     : null;
 
-  const asset = receiptRef?.assetId;
+  // Resolve receipt and physical asset info
+  const resolvedReceiptRef =
+    receiptRef !== undefined
+      ? receiptRef
+      : payment.receiptAssetreferenceId && typeof payment.receiptAssetreferenceId === "object"
+      ? (payment.receiptAssetreferenceId as PopulatedReceiptAssetRef)
+      : null;
+
+  const receiptRefIdStr =
+    resolvedReceiptRef && "_id" in resolvedReceiptRef && resolvedReceiptRef._id
+      ? String(resolvedReceiptRef._id)
+      : payment.receiptAssetreferenceId && typeof payment.receiptAssetreferenceId !== "object"
+      ? String(payment.receiptAssetreferenceId)
+      : payment.receiptAssetReferenceId && typeof payment.receiptAssetReferenceId !== "object"
+      ? String(payment.receiptAssetReferenceId)
+      : null;
+
+  const asset =
+    resolvedReceiptRef?.assetId && typeof resolvedReceiptRef.assetId === "object"
+      ? resolvedReceiptRef.assetId
+      : null;
+
+  // Resolve receiving user info
+  const resolvedReceivedBy =
+    receivedByUser !== undefined
+      ? receivedByUser
+      : payment.receivedBy && typeof payment.receivedBy === "object"
+      ? (payment.receivedBy as PopulatedReceivedByUser)
+      : null;
+
+  const receivedByDto =
+    resolvedReceivedBy && resolvedReceivedBy.name
+      ? {
+          id: resolvedReceivedBy._id
+            ? String(resolvedReceivedBy._id)
+            : String(resolvedReceivedBy.id || ""),
+          name: String(resolvedReceivedBy.name),
+          email: String(resolvedReceivedBy.email || ""),
+        }
+      : null;
+
+  const idStr = payment._id ? String(payment._id) : payment.id ? String(payment.id) : "";
+  const clientIdStr = payment.clientId
+    ? typeof payment.clientId === "object" && payment.clientId !== null && "_id" in payment.clientId
+      ? String(payment.clientId._id)
+      : String(payment.clientId)
+    : "";
 
   return {
-    id: (payment._id as mongoose.Types.ObjectId).toString(),
-    clientId: (payment.clientId as mongoose.Types.ObjectId).toString(),
-    caseId: payment.caseId ? (payment.caseId as mongoose.Types.ObjectId).toString() : null,
+    id: idStr,
+    clientId: clientIdStr,
+    caseId: caseIdStr,
     caseReference: caseRef,
-    caseTitle: caseDoc?.title || null,
+    caseTitle: resolvedCase?.title || null,
     paymentDate: formatSafeIsoDate(payment.paymentDate) || new Date().toISOString(),
-    amount: payment.amount as number,
+    amount: typeof payment.amount === "number" ? payment.amount : Number(payment.amount) || 0,
     currency: (payment.currency as string) || "BDT",
     paymentMethod: method,
-    paymentMethodLabel: PAYMENT_METHOD_LABELS[method] || String(payment.paymentMethod),
+    paymentMethodLabel: PAYMENT_METHOD_LABELS[method] || String(method),
     paymentType: pType,
-    paymentTypeLabel: PAYMENT_TYPE_LABELS[pType] || String(payment.paymentType),
+    paymentTypeLabel: PAYMENT_TYPE_LABELS[pType] || String(pType),
     referenceNumber: (payment.referenceNumber as string) || null,
     moneyReceiptNumber: (payment.moneyReceiptNumber as string) || null,
-    receiptAssetreferenceId: payment.receiptAssetreferenceId
-      ? (payment.receiptAssetreferenceId as mongoose.Types.ObjectId).toString()
-      : null,
-    receiptAssetReferenceId: payment.receiptAssetreferenceId
-      ? (payment.receiptAssetreferenceId as mongoose.Types.ObjectId).toString()
-      : null,
+    receiptAssetreferenceId: receiptRefIdStr,
+    receiptAssetReferenceId: receiptRefIdStr,
     receiptUrl: asset?.secureUrl || null,
-    receiptFileName: receiptRef?.originalFileName || asset?.originalFilename || null,
-    receiptAssetType: asset?.assetType || null,
+    receiptFileName: resolvedReceiptRef?.originalFileName || asset?.originalFilename || null,
+    receiptAssetType: (asset?.assetType as AssetType) || null,
     receiptMimeType: asset?.mimeType || null,
-    receiptSizeBytes: asset?.bytes || null,
+    receiptSizeBytes: typeof asset?.bytes === "number" ? asset.bytes : null,
     notes: (payment.notes as string) || null,
-    receivedBy: receivedByUser
-      ? {
-          id: receivedByUser._id.toString(),
-          name: receivedByUser.name,
-          email: receivedByUser.email,
-        }
-      : null,
+    receivedBy: receivedByDto,
     createdAt: formatSafeIsoDate(payment.createdAt) || new Date().toISOString(),
     updatedAt: formatSafeIsoDate(payment.updatedAt) || new Date().toISOString(),
   };
@@ -103,7 +204,7 @@ function formatClientPaymentItem(
 /**
  * GET /api/v1/clients/[id]/payments
  *
- * List all payments for a specific client with pagination, filters, and parallelized financial summary.
+ * List all payments for a specific client with pagination, filters, and single-pipeline financial summary.
  */
 export const GET = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
@@ -202,63 +303,105 @@ export const GET = withErrorHandler(
     const sortOption = sortMap[sort as ClientPaymentSortOption] || { paymentDate: -1 };
     const skip = (page - 1) * limit;
 
-    // Single consolidated parallel execution for paginated payments and breakdowns
-    const [total, payments, summaryAgg, methodAgg, typeAgg] = await Promise.all([
+    // Single consolidated parallel execution for paginated payments and faceted breakdowns
+    const [total, payments, aggResult] = await Promise.all([
       ClientPayment.countDocuments(filter),
       ClientPayment.find(filter)
+        .select(
+          "_id clientId caseId paymentDate amount currency paymentMethod paymentType referenceNumber moneyReceiptNumber receiptAssetreferenceId notes receivedBy createdAt updatedAt"
+        )
         .sort(sortOption)
         .skip(skip)
         .limit(limit)
         .populate<{
-          caseId: { internalReference: string; caseNumber: string; title: string };
-        }>("caseId", "internalReference caseNumber title")
+          caseId: { _id: mongoose.Types.ObjectId; internalReference?: string; caseNumber?: string; title?: string };
+        }>({
+          path: "caseId",
+          select: "_id internalReference caseNumber title",
+        })
         .populate<{
-          receiptAssetreferenceId: IAssetReferenceDocument & { assetId: IAsset };
+          receiptAssetreferenceId: {
+            _id: mongoose.Types.ObjectId;
+            originalFileName?: string | null;
+            assetId?: {
+              _id: mongoose.Types.ObjectId;
+              secureUrl: string;
+              originalFilename?: string | null;
+              assetType?: AssetType | null;
+              mimeType?: string | null;
+              bytes?: number | null;
+            } | null;
+          };
         }>({
           path: "receiptAssetreferenceId",
-          populate: { path: "assetId" },
+          select: "_id originalFileName assetId",
+          populate: {
+            path: "assetId",
+            select: "_id secureUrl originalFilename assetType mimeType bytes",
+          },
         })
         .populate<{
           receivedBy: { _id: mongoose.Types.ObjectId; name: string; email: string };
-        }>("receivedBy", "name email")
+        }>({
+          path: "receivedBy",
+          select: "_id name email",
+        })
         .lean(),
       ClientPayment.aggregate<{
-        _id: null;
-        totalAmount: number;
-        totalCount: number;
+        summary: Array<{ totalAmount: number; totalCount: number }>;
+        byMethod: Array<{ _id: PaymentMethod; amount: number }>;
+        byType: Array<{ _id: PaymentType; amount: number }>;
       }>([
         { $match: { clientId: objectId } },
         {
-          $group: {
-            _id: null,
-            totalAmount: { $sum: "$amount" },
-            totalCount: { $sum: 1 },
+          $facet: {
+            summary: [
+              {
+                $group: {
+                  _id: null,
+                  totalAmount: { $sum: "$amount" },
+                  totalCount: { $sum: 1 },
+                },
+              },
+            ],
+            byMethod: [
+              {
+                $group: {
+                  _id: "$paymentMethod",
+                  amount: { $sum: "$amount" },
+                },
+              },
+            ],
+            byType: [
+              {
+                $group: {
+                  _id: "$paymentType",
+                  amount: { $sum: "$amount" },
+                },
+              },
+            ],
           },
         },
-      ]),
-      ClientPayment.aggregate<{ _id: PaymentMethod; amount: number }>([
-        { $match: { clientId: objectId } },
-        { $group: { _id: "$paymentMethod", amount: { $sum: "$amount" } } },
-      ]),
-      ClientPayment.aggregate<{ _id: PaymentType; amount: number }>([
-        { $match: { clientId: objectId } },
-        { $group: { _id: "$paymentType", amount: { $sum: "$amount" } } },
       ]),
     ]);
 
     const methodBreakdown: Partial<Record<PaymentMethod, number>> = {};
-    for (const item of methodAgg) {
-      methodBreakdown[item._id] = item.amount;
+    if (aggResult[0]?.byMethod) {
+      for (const item of aggResult[0].byMethod) {
+        methodBreakdown[item._id] = item.amount;
+      }
     }
 
     const typeBreakdown: Partial<Record<PaymentType, number>> = {};
-    for (const item of typeAgg) {
-      typeBreakdown[item._id] = item.amount;
+    if (aggResult[0]?.byType) {
+      for (const item of aggResult[0].byType) {
+        typeBreakdown[item._id] = item.amount;
+      }
     }
 
     const summary: ClientPaymentSummaryStats = {
-      totalCount: summaryAgg[0]?.totalCount ?? 0,
-      totalAmount: summaryAgg[0]?.totalAmount ?? 0,
+      totalCount: aggResult[0]?.summary[0]?.totalCount ?? 0,
+      totalAmount: aggResult[0]?.summary[0]?.totalAmount ?? 0,
       methodBreakdown,
       typeBreakdown,
     };
@@ -266,9 +409,9 @@ export const GET = withErrorHandler(
     const items: ClientPaymentItemDto[] = payments.map((p) =>
       formatClientPaymentItem(
         p,
-        p.caseId as unknown as { internalReference?: string; caseNumber?: string; title?: string },
-        p.receiptAssetreferenceId as unknown as (IAssetReferenceDocument & { assetId?: IAsset }),
-        p.receivedBy as unknown as { _id: mongoose.Types.ObjectId; name: string; email: string }
+        p.caseId as unknown as PopulatedCaseInfo,
+        p.receiptAssetreferenceId as unknown as PopulatedReceiptAssetRef,
+        p.receivedBy as unknown as PopulatedReceivedByUser
       )
     );
 
@@ -302,7 +445,9 @@ export const POST = withErrorHandler(
     }
 
     const objectId = new mongoose.Types.ObjectId(id);
-    const client = await Client.findOne({ _id: objectId, deletedAt: null });
+    const client = await Client.findOne({ _id: objectId, deletedAt: null })
+      .select("_id name")
+      .lean();
     if (!client) {
       throw ApiError.notFound("Client not found");
     }
@@ -319,7 +464,9 @@ export const POST = withErrorHandler(
         _id: caseObjectId,
         clientId: objectId,
         deletedAt: null,
-      });
+      })
+        .select("_id")
+        .lean();
 
       if (!linkedCase) {
         throw ApiError.badRequest(
@@ -336,7 +483,9 @@ export const POST = withErrorHandler(
       const receiptRef = await AssetReference.findOne({
         _id: receiptObjectId,
         deletedAt: null,
-      });
+      })
+        .select("_id ownerId ownerType")
+        .lean();
 
       if (!receiptRef) {
         throw ApiError.badRequest("The referenced receipt file does not exist or was deleted.");
@@ -366,7 +515,7 @@ export const POST = withErrorHandler(
             ownerId: objectId,
             purpose: ASSET_PURPOSES.PAYMENT_MONEY_RECEIPT,
           },
-          { session: dbSession }
+          { session: dbSession, select: "_id" }
         );
       }
 
@@ -393,27 +542,55 @@ export const POST = withErrorHandler(
       return payment;
     });
 
-    // Populate for response
+    // Populate with precise projections for clean response
     const populated = await ClientPayment.findById(createdPayment._id)
+      .select(
+        "_id clientId caseId paymentDate amount currency paymentMethod paymentType referenceNumber moneyReceiptNumber receiptAssetreferenceId notes receivedBy createdAt updatedAt"
+      )
       .populate<{
-        caseId: { internalReference: string; caseNumber: string; title: string };
-      }>("caseId", "internalReference caseNumber title")
+        caseId: { _id: mongoose.Types.ObjectId; internalReference?: string; caseNumber?: string; title?: string };
+      }>({
+        path: "caseId",
+        select: "_id internalReference caseNumber title",
+      })
       .populate<{
-        receiptAssetreferenceId: IAssetReferenceDocument & { assetId: IAsset };
+        receiptAssetreferenceId: {
+          _id: mongoose.Types.ObjectId;
+          originalFileName?: string | null;
+          assetId?: {
+            _id: mongoose.Types.ObjectId;
+            secureUrl: string;
+            originalFilename?: string | null;
+            assetType?: AssetType | null;
+            mimeType?: string | null;
+            bytes?: number | null;
+          } | null;
+        };
       }>({
         path: "receiptAssetreferenceId",
-        populate: { path: "assetId" },
+        select: "_id originalFileName assetId",
+        populate: {
+          path: "assetId",
+          select: "_id secureUrl originalFilename assetType mimeType bytes",
+        },
       })
       .populate<{
         receivedBy: { _id: mongoose.Types.ObjectId; name: string; email: string };
-      }>("receivedBy", "name email")
+      }>({
+        path: "receivedBy",
+        select: "_id name email",
+      })
       .lean();
 
+    if (!populated) {
+      throw ApiError.internal("Failed to retrieve created client payment.");
+    }
+
     const itemDto = formatClientPaymentItem(
-      populated!,
-      populated!.caseId as unknown as { internalReference?: string; caseNumber?: string; title?: string },
-      populated!.receiptAssetreferenceId as unknown as (IAssetReferenceDocument & { assetId?: IAsset }),
-      populated!.receivedBy as unknown as { _id: mongoose.Types.ObjectId; name: string; email: string }
+      populated,
+      populated.caseId as unknown as PopulatedCaseInfo,
+      populated.receiptAssetreferenceId as unknown as PopulatedReceiptAssetRef,
+      populated.receivedBy as unknown as PopulatedReceivedByUser
     );
 
     // Record audit log for payment creation
@@ -437,3 +614,4 @@ export const POST = withErrorHandler(
     return NextResponse.json(response, { status: 201 });
   }
 );
+

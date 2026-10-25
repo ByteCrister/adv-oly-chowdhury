@@ -52,11 +52,32 @@ import type {
 export function formatTaskItem(doc: TaskDocInput): TaskItemDto {
   const now = new Date();
   const dueAtDate = doc.dueAt ? new Date(doc.dueAt) : null;
+  const validDueAt =
+    dueAtDate && !isNaN(dueAtDate.getTime()) ? dueAtDate.toISOString() : null;
+
+  const completedAtDate = doc.completedAt ? new Date(doc.completedAt) : null;
+  const validCompletedAt =
+    completedAtDate && !isNaN(completedAtDate.getTime())
+      ? completedAtDate.toISOString()
+      : null;
+
+  const createdDateObj = doc.createdAt ? new Date(doc.createdAt) : null;
+  const validCreatedAt =
+    createdDateObj && !isNaN(createdDateObj.getTime())
+      ? createdDateObj.toISOString()
+      : new Date().toISOString();
+
+  const updatedDateObj = doc.updatedAt ? new Date(doc.updatedAt) : null;
+  const validUpdatedAt =
+    updatedDateObj && !isNaN(updatedDateObj.getTime())
+      ? updatedDateObj.toISOString()
+      : validCreatedAt;
+
   const isCompleted = doc.status === TASK_STATUSES.COMPLETED;
   const isCancelled = doc.status === TASK_STATUSES.CANCELLED;
   const isOverdue = Boolean(
-    dueAtDate &&
-      !isNaN(dueAtDate.getTime()) &&
+    validDueAt &&
+      dueAtDate &&
       dueAtDate < now &&
       !isCompleted &&
       !isCancelled
@@ -96,7 +117,7 @@ export function formatTaskItem(doc: TaskDocInput): TaskItemDto {
     ? doc.clientId.toString()
     : null;
 
-  const idStr = doc._id ? String(doc._id) : (doc.id || "");
+  const idStr = doc._id ? String(doc._id) : (doc.id ? String(doc.id) : "");
 
   return {
     id: idStr,
@@ -104,8 +125,8 @@ export function formatTaskItem(doc: TaskDocInput): TaskItemDto {
     description: doc.description || null,
     status: (doc.status as TaskStatus) || TASK_STATUSES.TODO,
     priority: (doc.priority as TaskPriority) || TASK_PRIORITIES.NORMAL,
-    dueAt: dueAtDate && !isNaN(dueAtDate.getTime()) ? dueAtDate.toISOString() : null,
-    completedAt: doc.completedAt ? new Date(doc.completedAt).toISOString() : null,
+    dueAt: validDueAt,
+    completedAt: validCompletedAt,
     isOverdue,
     caseId: caseIdStr,
     caseDetails: rawCase?._id
@@ -127,8 +148,8 @@ export function formatTaskItem(doc: TaskDocInput): TaskItemDto {
           phone: rawClient.phone || null,
         }
       : null,
-    createdAt: doc.createdAt ? new Date(doc.createdAt).toISOString() : "",
-    updatedAt: doc.updatedAt ? new Date(doc.updatedAt).toISOString() : "",
+    createdAt: validCreatedAt,
+    updatedAt: validUpdatedAt,
   };
 }
 
@@ -298,15 +319,8 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       clientSearchFilter._id = new mongoose.Types.ObjectId(clientId);
     }
 
-    const matchingClients = await Client.find(clientSearchFilter, {
-      _id: 1,
-      name: 1,
-      clientNumber: 1,
-      organizationName: 1,
-      phone: 1,
-      alternatePhone: 1,
-      email: 1,
-    })
+    const matchingClients = await Client.find(clientSearchFilter)
+      .select("_id name clientNumber organizationName phone alternatePhone email")
       .limit(500)
       .lean<TaskClientCandidate[]>();
 
@@ -350,18 +364,10 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       caseSearchFilter.clientId = new mongoose.Types.ObjectId(clientId);
     }
 
-    const matchingCases = await Case.find(caseSearchFilter, {
-      _id: 1,
-      title: 1,
-      caseNumber: 1,
-      internalReference: 1,
-      caseCategory: 1,
-      opposingCounsel: 1,
-      opposingParties: 1,
-      description: 1,
-      legalIssues: 1,
-      clientId: 1,
-    })
+    const matchingCases = await Case.find(caseSearchFilter)
+      .select(
+        "_id title caseNumber internalReference caseCategory opposingCounsel opposingParties description legalIssues clientId"
+      )
       .limit(1000)
       .lean<TaskCaseCandidate[]>();
 
@@ -507,6 +513,11 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
         foreignField: "_id",
         pipeline: [
           {
+            $match: {
+              deletedAt: null,
+            },
+          },
+          {
             $project: {
               _id: 1,
               title: 1,
@@ -525,6 +536,11 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
         localField: "clientId",
         foreignField: "_id",
         pipeline: [
+          {
+            $match: {
+              deletedAt: null,
+            },
+          },
           {
             $project: {
               _id: 1,
@@ -761,20 +777,39 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     deletedAt: null,
   });
 
-  // Record audit log for task creation
+  // Record audit log for task creation with clean, non-leaking values (no __v internal leakage)
   await recordAuditLog({
     req,
     userId,
     action: AUDIT_ACTIONS.CREATE,
     entityType: AUDIT_ENTITY_TYPES.TASK,
     entityId: newTask._id,
-    newValues: newTask.toObject(),
+    newValues: {
+      title: newTask.title,
+      description: newTask.description,
+      status: newTask.status,
+      priority: newTask.priority,
+      dueAt: newTask.dueAt,
+      caseId: newTask.caseId,
+      clientId: newTask.clientId,
+      completedAt: newTask.completedAt,
+    },
     description: `Created task "${newTask.title}"`,
   });
 
-  // Construct response directly without redundant database queries
+  // Construct response directly without spreading raw Mongoose document internals
   const taskDto = formatTaskItem({
-    ...newTask.toObject(),
+    _id: newTask._id,
+    title: newTask.title,
+    description: newTask.description,
+    status: newTask.status,
+    priority: newTask.priority,
+    dueAt: newTask.dueAt,
+    completedAt: newTask.completedAt,
+    caseId: newTask.caseId,
+    clientId: newTask.clientId,
+    createdAt: newTask.createdAt,
+    updatedAt: newTask.updatedAt,
     caseDetails: caseDoc,
     clientDetails: clientDoc,
   });

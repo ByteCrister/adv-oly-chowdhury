@@ -99,3 +99,12 @@ export interface ClientDocumentDeleteResponse {
   message: string;
   id: string;
 }
+
+/**
+ * API response for single client document detail query.
+ */
+export interface SingleClientDocumentApiResponse {
+  success: boolean;
+  data: ClientDocumentItemDto;
+}
+

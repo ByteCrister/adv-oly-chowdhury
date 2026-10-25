@@ -46,20 +46,27 @@ export const GET = withErrorHandler(
     const docObjectId = new mongoose.Types.ObjectId(docId);
 
     const [parentCase, doc] = await Promise.all([
-      Case.findOne(
-        { _id: caseObjectId, deletedAt: null },
-        { _id: 1, title: 1, caseNumber: 1, internalReference: 1, caseStatus: 1 }
-      ).lean(),
+      Case.findOne({ _id: caseObjectId, deletedAt: null })
+        .select("_id title caseNumber internalReference caseStatus")
+        .lean(),
       CaseDocument.findOne({
         _id: docObjectId,
         caseId: caseObjectId,
         deletedAt: null,
       })
+        .select(
+          "_id caseId assetReferenceId documentType title documentDate description exhibitNumber isConfidential createdAt updatedAt"
+        )
         .populate<{
           assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
         }>({
           path: "assetReferenceId",
-          populate: { path: "assetId" },
+          select: "_id originalFileName assetId",
+          match: { deletedAt: null },
+          populate: {
+            path: "assetId",
+            select: "_id secureUrl publicId originalFilename format mimeType bytes width height pages",
+          },
         })
         .lean(),
     ]);
@@ -107,10 +114,9 @@ export const PATCH = withErrorHandler(
     const body = await req.json();
     const validated = updateCaseDocumentSchema.parse(body);
 
-    const parentCase = await Case.findOne(
-      { _id: caseObjectId, deletedAt: null },
-      { _id: 1, title: 1, caseNumber: 1, internalReference: 1, caseStatus: 1 }
-    ).lean();
+    const parentCase = await Case.findOne({ _id: caseObjectId, deletedAt: null })
+      .select("_id title caseNumber internalReference caseStatus")
+      .lean();
 
     if (!parentCase) {
       throw ApiError.notFound("Case not found or has been archived.");
@@ -121,7 +127,11 @@ export const PATCH = withErrorHandler(
         _id: docObjectId,
         caseId: caseObjectId,
         deletedAt: null,
-      }).session(dbSession);
+      })
+        .select(
+          "_id caseId assetReferenceId documentType title documentDate description exhibitNumber isConfidential createdAt updatedAt"
+        )
+        .session(dbSession);
 
       if (!doc) {
         throw ApiError.notFound("Document not found for this case or has already been archived.");
@@ -133,11 +143,15 @@ export const PATCH = withErrorHandler(
       if (validated.assetReferenceId) {
         const newAssetRefId = new mongoose.Types.ObjectId(validated.assetReferenceId);
 
-        // Verify the new AssetReference exists and is active
-        const newRef = await AssetReference.findOne({
-          _id: newAssetRefId,
-          deletedAt: null,
-        }).session(dbSession);
+        // Verify the new AssetReference exists and is active, binding it to this case
+        const newRef = await AssetReference.findOneAndUpdate(
+          { _id: newAssetRefId, deletedAt: null },
+          {
+            ownerType: ASSET_OWNER_TYPES.CASE,
+            ownerId: caseObjectId,
+          },
+          { session: dbSession, select: "_id" }
+        );
 
         if (!newRef) {
           throw ApiError.badRequest(
@@ -153,14 +167,9 @@ export const PATCH = withErrorHandler(
           await AssetReference.findByIdAndUpdate(
             doc.assetReferenceId,
             { deletedAt: new Date() },
-            { session: dbSession }
+            { session: dbSession, select: "_id" }
           );
         }
-
-        // Bind the new AssetReference to this case
-        newRef.ownerType = ASSET_OWNER_TYPES.CASE;
-        newRef.ownerId = caseObjectId;
-        await newRef.save({ session: dbSession });
 
         doc.assetReferenceId = newAssetRefId;
       }
@@ -199,17 +208,28 @@ export const PATCH = withErrorHandler(
     });
 
     const updatedDoc = await CaseDocument.findById(docObjectId)
+      .select(
+        "_id caseId assetReferenceId documentType title documentDate description exhibitNumber isConfidential createdAt updatedAt"
+      )
       .populate<{
         assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
       }>({
         path: "assetReferenceId",
-        populate: { path: "assetId" },
+        select: "_id originalFileName assetId",
+        populate: {
+          path: "assetId",
+          select: "_id secureUrl publicId originalFilename format mimeType bytes width height pages",
+        },
       })
       .lean();
 
+    if (!updatedDoc) {
+      throw ApiError.notFound("Case document record not found");
+    }
+
     const itemDto = formatCaseDocumentItem(
-      updatedDoc!,
-      updatedDoc!.assetReferenceId as unknown as (IAssetReferenceDocument & {
+      updatedDoc,
+      updatedDoc.assetReferenceId as unknown as (IAssetReferenceDocument & {
         assetId: IAsset;
       }),
       parentCase
@@ -254,7 +274,7 @@ export const DELETE = withErrorHandler(
       _id: docObjectId,
       caseId: caseObjectId,
       deletedAt: null,
-    });
+    }).select("_id title assetReferenceId deletedAt");
 
     if (!doc) {
       throw ApiError.notFound("Document not found for this case or has already been archived.");
@@ -266,7 +286,7 @@ export const DELETE = withErrorHandler(
         await AssetReference.findByIdAndUpdate(
           doc.assetReferenceId,
           { deletedAt: new Date() },
-          { session: dbSession }
+          { session: dbSession, select: "_id" }
         );
       }
 

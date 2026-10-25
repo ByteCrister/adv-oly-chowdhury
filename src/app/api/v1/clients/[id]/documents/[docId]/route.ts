@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
+import { Client } from "@/db/models/Client.model";
 import { ClientDocument } from "@/db/models/ClientDocument.model";
 import { AssetReference } from "@/db/models/AssetReference.model";
 import { ASSET_OWNER_TYPES } from "@/const/asset-reference.const";
@@ -14,16 +15,12 @@ import {
 } from "@/lib/helpers/audit.helper";
 // Ensure models are registered in Mongoose schema cache for nested populate
 import "@/db/models/Asset.model";
-import {
-  CLIENT_DOCUMENT_TYPE_LABELS,
-  ClientDocumentType,
-} from "@/const/client-document.const";
 import { updateClientDocumentSchema } from "@/utils/zod/client-document.validation";
-import { formatSafeIsoDate } from "@/app/api/v1/clients/route";
+import { formatClientDocumentItem } from "../route";
 import type {
-  ClientDocumentItemDto,
   ClientDocumentActionResponse,
   ClientDocumentDeleteResponse,
+  SingleClientDocumentApiResponse,
 } from "@/types/client-document.types";
 import type { IAsset } from "@/types/db/asset.type";
 import type { IAssetReferenceDocument } from "@/types/db/asset-reference.type";
@@ -33,47 +30,9 @@ interface RouteParams {
 }
 
 /**
- * Helper to format a ClientDocument document into ClientDocumentItemDto.
- */
-function formatClientDocumentItem(
-  doc: Record<string, unknown>,
-  assetRef?: (IAssetReferenceDocument & { assetId?: IAsset }) | null
-): ClientDocumentItemDto {
-  const asset = assetRef?.assetId;
-  const docType = doc.documentType as ClientDocumentType;
-
-  return {
-    id: (doc._id as mongoose.Types.ObjectId).toString(),
-    clientId: (doc.clientId as mongoose.Types.ObjectId).toString(),
-    assetReferenceId: assetRef?._id
-      ? assetRef._id.toString()
-      : (doc.assetReferenceId as mongoose.Types.ObjectId).toString(),
-    assetId: asset?._id ? asset._id.toString() : "",
-    documentType: docType,
-    documentTypeLabel: CLIENT_DOCUMENT_TYPE_LABELS[docType] || String(doc.documentType),
-    title: doc.title as string,
-    documentDate: formatSafeIsoDate(doc.documentDate),
-    expiryDate: formatSafeIsoDate(doc.expiryDate),
-    notes: (doc.notes as string) || null,
-    originalFileName:
-      assetRef?.originalFileName || asset?.originalFilename || (doc.title as string),
-    fileUrl: asset?.secureUrl || "",
-    publicId: asset?.publicId || "",
-    mimeType: asset?.mimeType || "application/octet-stream",
-    sizeBytes: asset?.bytes || 0,
-    format: asset?.format || null,
-    width: asset?.width || null,
-    height: asset?.height || null,
-    pages: asset?.pages || null,
-    createdAt: formatSafeIsoDate(doc.createdAt) || new Date().toISOString(),
-    updatedAt: formatSafeIsoDate(doc.updatedAt) || new Date().toISOString(),
-  };
-}
-
-/**
  * GET /api/v1/clients/[id]/documents/[docId]
  *
- * Retrieve an individual active document for a client.
+ * Retrieve an individual active document for a client with strict projection.
  */
 export const GET = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
@@ -87,18 +46,33 @@ export const GET = withErrorHandler(
     const clientObjectId = new mongoose.Types.ObjectId(id);
     const docObjectId = new mongoose.Types.ObjectId(docId);
 
-    const doc = await ClientDocument.findOne({
-      _id: docObjectId,
-      clientId: clientObjectId,
-      deletedAt: null,
-    })
-      .populate<{
-        assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
-      }>({
-        path: "assetReferenceId",
-        populate: { path: "assetId" },
+    const [clientExists, doc] = await Promise.all([
+      Client.exists({ _id: clientObjectId, deletedAt: null }),
+      ClientDocument.findOne({
+        _id: docObjectId,
+        clientId: clientObjectId,
+        deletedAt: null,
       })
-      .lean();
+        .select(
+          "_id clientId assetReferenceId documentType title documentDate expiryDate notes createdAt updatedAt"
+        )
+        .populate<{
+          assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
+        }>({
+          path: "assetReferenceId",
+          select: "_id originalFileName assetId",
+          match: { deletedAt: null },
+          populate: {
+            path: "assetId",
+            select: "_id secureUrl publicId originalFilename format mimeType bytes width height pages",
+          },
+        })
+        .lean(),
+    ]);
+
+    if (!clientExists) {
+      throw ApiError.notFound("Client not found");
+    }
 
     if (!doc) {
       throw ApiError.notFound("Document not found for this client");
@@ -111,10 +85,12 @@ export const GET = withErrorHandler(
       })
     );
 
-    return NextResponse.json({
+    const response: SingleClientDocumentApiResponse = {
       success: true,
       data: itemDto,
-    });
+    };
+
+    return NextResponse.json(response);
   }
 );
 
@@ -135,6 +111,11 @@ export const PATCH = withErrorHandler(
     const clientObjectId = new mongoose.Types.ObjectId(id);
     const docObjectId = new mongoose.Types.ObjectId(docId);
 
+    const clientExists = await Client.exists({ _id: clientObjectId, deletedAt: null });
+    if (!clientExists) {
+      throw ApiError.notFound("Client not found");
+    }
+
     const body = await req.json();
     const validated = updateClientDocumentSchema.parse(body);
 
@@ -143,7 +124,11 @@ export const PATCH = withErrorHandler(
         _id: docObjectId,
         clientId: clientObjectId,
         deletedAt: null,
-      }).session(dbSession);
+      })
+        .select(
+          "_id clientId assetReferenceId documentType title documentDate expiryDate notes createdAt updatedAt"
+        )
+        .session(dbSession);
 
       if (!doc) {
         throw ApiError.notFound("Document not found for this client");
@@ -155,11 +140,15 @@ export const PATCH = withErrorHandler(
       if (validated.assetReferenceId) {
         const newAssetRefId = new mongoose.Types.ObjectId(validated.assetReferenceId);
 
-        // Verify the new AssetReference exists and is active
-        const newRef = await AssetReference.findOne({
-          _id: newAssetRefId,
-          deletedAt: null,
-        }).session(dbSession);
+        // Verify the new AssetReference exists and is active, binding it to this client
+        const newRef = await AssetReference.findOneAndUpdate(
+          { _id: newAssetRefId, deletedAt: null },
+          {
+            ownerType: ASSET_OWNER_TYPES.CLIENT,
+            ownerId: clientObjectId,
+          },
+          { session: dbSession, select: "_id" }
+        );
 
         if (!newRef) {
           throw ApiError.badRequest(
@@ -167,19 +156,17 @@ export const PATCH = withErrorHandler(
           );
         }
 
-        // Soft-delete the previous AssetReference to avoid orphaned active records
-        if (doc.assetReferenceId) {
+        // Soft-delete the previous AssetReference only if replacing with a different file
+        if (
+          doc.assetReferenceId &&
+          doc.assetReferenceId.toString() !== newAssetRefId.toString()
+        ) {
           await AssetReference.findByIdAndUpdate(
             doc.assetReferenceId,
             { deletedAt: new Date() },
-            { session: dbSession }
+            { session: dbSession, select: "_id" }
           );
         }
-
-        // Bind the new AssetReference to this client
-        newRef.ownerType = ASSET_OWNER_TYPES.CLIENT;
-        newRef.ownerId = clientObjectId;
-        await newRef.save({ session: dbSession });
 
         doc.assetReferenceId = newAssetRefId;
       }
@@ -215,17 +202,28 @@ export const PATCH = withErrorHandler(
     });
 
     const updatedDoc = await ClientDocument.findById(docObjectId)
+      .select(
+        "_id clientId assetReferenceId documentType title documentDate expiryDate notes createdAt updatedAt"
+      )
       .populate<{
         assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
       }>({
         path: "assetReferenceId",
-        populate: { path: "assetId" },
+        select: "_id originalFileName assetId",
+        populate: {
+          path: "assetId",
+          select: "_id secureUrl publicId originalFilename format mimeType bytes width height pages",
+        },
       })
       .lean();
 
+    if (!updatedDoc) {
+      throw ApiError.notFound("Client document record not found");
+    }
+
     const itemDto = formatClientDocumentItem(
-      updatedDoc!,
-      updatedDoc!.assetReferenceId as unknown as (IAssetReferenceDocument & {
+      updatedDoc,
+      updatedDoc.assetReferenceId as unknown as (IAssetReferenceDocument & {
         assetId: IAsset;
       })
     );
@@ -269,7 +267,7 @@ export const DELETE = withErrorHandler(
       _id: docObjectId,
       clientId: clientObjectId,
       deletedAt: null,
-    });
+    }).select("_id title assetReferenceId deletedAt");
 
     if (!doc) {
       throw ApiError.notFound("Document not found for this client or has already been removed");
@@ -281,7 +279,7 @@ export const DELETE = withErrorHandler(
         await AssetReference.findByIdAndUpdate(
           doc.assetReferenceId,
           { deletedAt: new Date() },
-          { session: dbSession }
+          { session: dbSession, select: "_id" }
         );
       }
 

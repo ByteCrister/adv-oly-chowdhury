@@ -78,9 +78,10 @@ export async function generateClientNumber(
   const prefix = `CL-${currentYear}-`;
 
   const query = Client.findOne(
-    { clientNumber: { $regex: new RegExp(`^${prefix}\\d+$`) } },
-    { clientNumber: 1 }
-  ).sort({ clientNumber: -1 });
+    { clientNumber: { $regex: new RegExp(`^${prefix}\\d+$`) } }
+  )
+    .select("clientNumber")
+    .sort({ clientNumber: -1 });
 
   if (dbSession) {
     query.session(dbSession);
@@ -119,16 +120,26 @@ function formatClientListItem(
   const activeCases = counts?.activeCases ?? 0;
   const totalDocuments = counts?.totalDocuments ?? 0;
   const totalPayments = counts?.totalPayments ?? 0;
-  const totalPaidAmount = counts?.totalPaidAmount ?? 0;
+  const rawPaidAmount = counts?.totalPaidAmount ?? 0;
+  const totalPaidAmount =
+    typeof rawPaidAmount === "number" ? rawPaidAmount : Number(rawPaidAmount) || 0;
+
+  const idVal =
+    "_id" in client && client._id
+      ? client._id
+      : "id" in client
+      ? client.id
+      : undefined;
+  const idStr = idVal ? String(idVal) : "";
 
   return {
-    id: (client._id as mongoose.Types.ObjectId).toString(),
+    id: idStr,
     clientNumber: (client.clientNumber as string) || "",
     clientType: cType,
     clientTypeLabel: CLIENT_TYPE_LABELS[cType] || String(client.clientType),
     status: cStatus,
     statusLabel: CLIENT_STATUS_LABELS[cStatus] || String(client.status),
-    name: client.name as string,
+    name: (client.name as string) || "",
     organizationName: (client.organizationName as string) || null,
     phone: (client.phone as string) || null,
     email: (client.email as string) || null,
@@ -238,29 +249,16 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     };
 
     const [matchingCourts, matchingDocuments, matchingPayments] = await Promise.all([
-      Court.find(courtSearchFilter, {
-        _id: 1,
-        name: 1,
-        district: 1,
-      })
+      Court.find(courtSearchFilter)
+        .select("_id name district")
         .limit(200)
         .lean<ClientRelatedCourtCandidate[]>(),
-      ClientDocument.find(documentSearchFilter, {
-        _id: 1,
-        clientId: 1,
-        title: 1,
-        documentType: 1,
-        notes: 1,
-      })
+      ClientDocument.find(documentSearchFilter)
+        .select("_id clientId title documentType notes")
         .limit(500)
         .lean<ClientRelatedDocumentCandidate[]>(),
-      ClientPayment.find(paymentSearchFilter, {
-        _id: 1,
-        clientId: 1,
-        moneyReceiptNumber: 1,
-        referenceNumber: 1,
-        notes: 1,
-      })
+      ClientPayment.find(paymentSearchFilter)
+        .select("_id clientId moneyReceiptNumber referenceNumber notes")
         .limit(500)
         .lean<ClientRelatedPaymentCandidate[]>(),
     ]);
@@ -296,21 +294,11 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       {
         deletedAt: null,
         $or: caseConditions,
-      },
-      {
-        _id: 1,
-        clientId: 1,
-        courtId: 1,
-        title: 1,
-        caseNumber: 1,
-        internalReference: 1,
-        caseCategory: 1,
-        opposingCounsel: 1,
-        opposingParties: 1,
-        description: 1,
-        legalIssues: 1,
       }
     )
+      .select(
+        "_id clientId courtId title caseNumber internalReference caseCategory opposingCounsel opposingParties description legalIssues"
+      )
       .limit(1000)
       .lean<ClientRelatedCaseCandidate[]>();
 
@@ -425,6 +413,22 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
           { $sort: itemsSort },
           { $skip: skip },
           { $limit: limit },
+          {
+            $project: {
+              _id: 1,
+              clientNumber: 1,
+              clientType: 1,
+              status: 1,
+              name: 1,
+              organizationName: 1,
+              phone: 1,
+              email: 1,
+              nationalId: 1,
+              address: 1,
+              createdAt: 1,
+              updatedAt: 1,
+            },
+          },
         ],
         stats: [
           {
@@ -492,7 +496,14 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
           },
         },
       ]),
-      Client.find(filter).sort(itemsSort).skip(skip).limit(limit).lean(),
+      Client.find(filter)
+        .select(
+          "_id clientNumber clientType status name organizationName phone email nationalId address createdAt updatedAt"
+        )
+        .sort(itemsSort)
+        .skip(skip)
+        .limit(limit)
+        .lean(),
     ]);
 
     clients = nonSearchClients;
@@ -505,28 +516,34 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   // Prepare cross-collection aggregates without arbitrary candidate limits or unbounded in-memory arrays
   const fetchGlobalStats = async () => {
     if (!isFiltered) {
-      const [activeCaseClients, revenueAgg, thisMonthRevenueAgg] = await Promise.all([
+      const [activeCaseClients, revenueAgg] = await Promise.all([
         Case.distinct("clientId", {
           caseStatus: CASE_STATUSES.ACTIVE,
           deletedAt: null,
         }),
-        ClientPayment.aggregate<{ total: number }>([
-          { $group: { _id: null, total: { $sum: "$amount" } } },
-        ]),
-        ClientPayment.aggregate<{ total: number }>([
+        ClientPayment.aggregate<{ totalRevenue: number; thisMonthRevenue: number }>([
           {
-            $match: {
-              paymentDate: { $gte: startOfMonth },
+            $group: {
+              _id: null,
+              totalRevenue: { $sum: "$amount" },
+              thisMonthRevenue: {
+                $sum: {
+                  $cond: [
+                    { $gte: ["$paymentDate", startOfMonth] },
+                    "$amount",
+                    0,
+                  ],
+                },
+              },
             },
           },
-          { $group: { _id: null, total: { $sum: "$amount" } } },
         ]),
       ]);
 
       return {
         clientsWithActiveCases: activeCaseClients.length,
-        totalRevenueCollected: revenueAgg[0]?.total ?? 0,
-        thisMonthRevenue: thisMonthRevenueAgg[0]?.total ?? 0,
+        totalRevenueCollected: revenueAgg[0]?.totalRevenue ?? 0,
+        thisMonthRevenue: revenueAgg[0]?.thisMonthRevenue ?? 0,
       };
     }
 
@@ -544,6 +561,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       Client.aggregate<{ count: number }>([
         { $match: filter },
         ...(relevanceStages.length > 0 ? relevanceStages : []),
+        { $project: { _id: 1 } },
         {
           $lookup: {
             from: COLLECTIONS.CASES,
@@ -568,6 +586,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       Client.aggregate<{ totalRevenue: number; thisMonthRevenue: number }>([
         { $match: filter },
         ...(relevanceStages.length > 0 ? relevanceStages : []),
+        { $project: { _id: 1 } },
         {
           $lookup: {
             from: COLLECTIONS.CLIENT_PAYMENTS,
@@ -736,7 +755,9 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
 
   if (!isAutoGenerated) {
     clientNumber = validated.clientNumber!.trim().toUpperCase();
-    const existingClient = await Client.findOne({ clientNumber });
+    const existingClient = await Client.findOne({ clientNumber })
+      .select("_id")
+      .lean();
 
     if (existingClient) {
       throw ApiError.conflict(

@@ -372,7 +372,9 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     deletedAt: null,
     name: { $regex: new RegExp(`^${escapeRegex(trimmedName)}$`, "i") },
     district: { $regex: new RegExp(`^${escapeRegex(trimmedDistrict)}$`, "i") },
-  }).lean();
+  })
+    .select("_id")
+    .lean();
 
   if (existingCourt) {
     throw ApiError.conflict(
@@ -398,7 +400,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
       { session: dbSession }
     );
 
-    // Record audit log for court creation
+    // Record audit log for court creation with clean sanitized values (no __v internal leakage)
     await recordAuditLog({
       req,
       userId,
@@ -406,7 +408,16 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
       entityType: AUDIT_ENTITY_TYPES.COURT,
       entityId: court._id,
       oldValues: null,
-      newValues: court.toObject(),
+      newValues: {
+        name: court.name,
+        courtType: court.courtType,
+        district: court.district,
+        division: court.division,
+        roomOrHall: court.roomOrHall,
+        address: court.address,
+        presidingJudgeTitle: court.presidingJudgeTitle,
+        isActive: court.isActive,
+      },
       description: `Created court "${court.name}" (${court.district})`,
       session: dbSession,
     });

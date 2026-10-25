@@ -3,6 +3,8 @@ import mongoose from "mongoose";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
+// Ensure models are registered in Mongoose schema cache for nested populate
+import "@/db/models/Asset.model";
 import { CaseEvent } from "@/db/models/CaseEvent.model";
 import { AssetReference } from "@/db/models/AssetReference.model";
 import { ASSET_OWNER_TYPES } from "@/const/asset-reference.const";
@@ -46,11 +48,19 @@ export const GET = withErrorHandler(
       _id: eventObjectId,
       caseId: caseObjectId,
     })
+      .select(
+        "_id caseId eventType title description eventDate assetReferenceId createdAt updatedAt"
+      )
       .populate<{
         assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
       }>({
         path: "assetReferenceId",
-        populate: { path: "assetId" },
+        select: "_id originalFileName assetId",
+        match: { deletedAt: null },
+        populate: {
+          path: "assetId",
+          select: "_id secureUrl publicId originalFilename mimeType bytes",
+        },
       })
       .lean();
 
@@ -102,17 +112,32 @@ export const PATCH = withErrorHandler(
         throw ApiError.notFound("Event not found for this case.");
       }
 
-      const beforeState = eventDoc.toObject();
+      const beforeState = {
+        title: eventDoc.title,
+        eventType: eventDoc.eventType,
+        description: eventDoc.description,
+        eventDate: eventDoc.eventDate,
+        assetReferenceId: eventDoc.assetReferenceId,
+      };
 
       // Handle attachment replacement if provided
       if (validated.assetReferenceId !== undefined) {
         if (validated.assetReferenceId) {
           const newAssetRefId = new mongoose.Types.ObjectId(validated.assetReferenceId);
 
-          const newRef = await AssetReference.findOne({
-            _id: newAssetRefId,
-            deletedAt: null,
-          }).session(dbSession);
+          const newRef = await AssetReference.findOneAndUpdate(
+            {
+              _id: newAssetRefId,
+              deletedAt: null,
+            },
+            {
+              $set: {
+                ownerType: ASSET_OWNER_TYPES.CASE_EVENT,
+                ownerId: caseObjectId,
+              },
+            },
+            { session: dbSession, select: "_id" }
+          );
 
           if (!newRef) {
             throw ApiError.badRequest(
@@ -128,14 +153,9 @@ export const PATCH = withErrorHandler(
             await AssetReference.findByIdAndUpdate(
               eventDoc.assetReferenceId,
               { deletedAt: new Date() },
-              { session: dbSession }
+              { session: dbSession, select: "_id" }
             );
           }
-
-          // Bind new reference
-          newRef.ownerType = ASSET_OWNER_TYPES.CASE_EVENT;
-          newRef.ownerId = caseObjectId;
-          await newRef.save({ session: dbSession });
 
           eventDoc.assetReferenceId = newAssetRefId;
         } else {
@@ -144,7 +164,7 @@ export const PATCH = withErrorHandler(
             await AssetReference.findByIdAndUpdate(
               eventDoc.assetReferenceId,
               { deletedAt: new Date() },
-              { session: dbSession }
+              { session: dbSession, select: "_id" }
             );
           }
           eventDoc.assetReferenceId = null;
@@ -162,8 +182,16 @@ export const PATCH = withErrorHandler(
 
       await eventDoc.save({ session: dbSession });
 
+      const afterState = {
+        title: eventDoc.title,
+        eventType: eventDoc.eventType,
+        description: eventDoc.description,
+        eventDate: eventDoc.eventDate,
+        assetReferenceId: eventDoc.assetReferenceId,
+      };
+
       // Record audit log for case event update
-      const diff = calculateAuditDiff(beforeState, eventDoc.toObject());
+      const diff = calculateAuditDiff(beforeState, afterState);
       await recordAuditLog({
         req,
         userId,
@@ -178,17 +206,29 @@ export const PATCH = withErrorHandler(
     });
 
     const updatedDoc = await CaseEvent.findById(eventObjectId)
+      .select(
+        "_id caseId eventType title description eventDate assetReferenceId createdAt updatedAt"
+      )
       .populate<{
         assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
       }>({
         path: "assetReferenceId",
-        populate: { path: "assetId" },
+        select: "_id originalFileName assetId",
+        match: { deletedAt: null },
+        populate: {
+          path: "assetId",
+          select: "_id secureUrl publicId originalFilename mimeType bytes",
+        },
       })
       .lean();
 
+    if (!updatedDoc) {
+      throw ApiError.notFound("Case event record not found");
+    }
+
     const itemDto = formatCaseEventItem(
-      updatedDoc!,
-      updatedDoc!.assetReferenceId as unknown as (IAssetReferenceDocument & {
+      updatedDoc,
+      updatedDoc.assetReferenceId as unknown as (IAssetReferenceDocument & {
         assetId: IAsset;
       }) | null
     );
@@ -230,13 +270,20 @@ export const DELETE = withErrorHandler(
     const eventDoc = await CaseEvent.findOne({
       _id: eventObjectId,
       caseId: caseObjectId,
-    });
+    }).select("_id title eventType eventDate assetReferenceId description");
 
     if (!eventDoc) {
       throw ApiError.notFound("Event not found for this case.");
     }
 
-    const eventSnapshot = eventDoc.toObject();
+    const oldValues = {
+      _id: String(eventDoc._id),
+      title: eventDoc.title,
+      eventType: eventDoc.eventType,
+      eventDate: eventDoc.eventDate,
+      assetReferenceId: eventDoc.assetReferenceId ? String(eventDoc.assetReferenceId) : null,
+      description: eventDoc.description,
+    };
 
     await withTransaction(async (dbSession) => {
       // 1. Soft-delete attached AssetReference if present
@@ -244,7 +291,7 @@ export const DELETE = withErrorHandler(
         await AssetReference.findByIdAndUpdate(
           eventDoc.assetReferenceId,
           { deletedAt: new Date() },
-          { session: dbSession }
+          { session: dbSession, select: "_id" }
         );
       }
 
@@ -258,7 +305,7 @@ export const DELETE = withErrorHandler(
         action: AUDIT_ACTIONS.DELETE,
         entityType: AUDIT_ENTITY_TYPES.CASE_EVENT,
         entityId: eventDoc._id,
-        oldValues: eventSnapshot,
+        oldValues,
         newValues: null,
         description: `Deleted case event "${eventDoc.title}"`,
         session: dbSession,

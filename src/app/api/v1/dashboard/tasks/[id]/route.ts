@@ -55,17 +55,20 @@ export const PATCH = withErrorHandler(
     }
     const { status: targetStatus } = parsedBody.data;
 
-    // 3. Find existing non-deleted task
+    // 3. Find existing non-deleted task with strict projection
     const existingTask = await Task.findOne({
       _id: taskId,
       deletedAt: null,
-    });
+    }).select("_id title status completedAt caseId priority dueAt");
 
     if (!existingTask) {
       throw ApiError.notFound("Task not found or has already been deleted");
     }
 
-    const beforeState = existingTask.toObject();
+    const beforeState = {
+      status: existingTask.status,
+      completedAt: existingTask.completedAt,
+    };
 
     // 4. Update status and handle completedAt timestamp
     existingTask.status = targetStatus;
@@ -79,13 +82,16 @@ export const PATCH = withErrorHandler(
 
     await existingTask.save();
 
-    // 5. Populate case relationship for DTO serialization
-    await existingTask.populate(
-      "caseId",
-      "internalReference caseNumber title deletedAt"
-    );
+    // 5. Populate case relationship for DTO serialization with explicit projection
+    await existingTask.populate({
+      path: "caseId",
+      select: "_id internalReference caseNumber title deletedAt",
+    });
 
-    const afterState = existingTask.toObject();
+    const afterState = {
+      status: existingTask.status,
+      completedAt: existingTask.completedAt,
+    };
 
     // 6. Record compliance audit log if fields changed
     const diff = calculateAuditDiff(beforeState, afterState);
@@ -103,7 +109,20 @@ export const PATCH = withErrorHandler(
     }
 
     // 7. Format type-safe ChamberTaskDto matching TaskUpdateApiResponse contract
-    const dto = formatChamberTask(afterState as unknown as LeanTaskRecord);
+    const dto = formatChamberTask({
+      _id: existingTask._id,
+      title: existingTask.title,
+      status: existingTask.status,
+      priority: existingTask.priority,
+      dueAt: existingTask.dueAt,
+      caseId: existingTask.caseId as unknown as {
+        _id?: import("mongoose").Types.ObjectId;
+        internalReference?: string;
+        caseNumber?: string;
+        title?: string;
+        deletedAt?: Date | null;
+      },
+    });
 
     const response: TaskUpdateApiResponse = {
       success: true,

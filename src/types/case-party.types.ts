@@ -102,6 +102,14 @@ export interface CasePartyActionResponse {
 }
 
 /**
+ * Response for GET single party operation
+ */
+export interface CasePartyDetailResponse {
+  success: boolean;
+  data: CasePartyItemDto;
+}
+
+/**
  * Response for DELETE operation
  */
 export interface CasePartyDeleteResponse {

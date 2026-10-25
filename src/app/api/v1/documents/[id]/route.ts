@@ -23,6 +23,8 @@ import {
   CLIENT_POPULATE_SELECT,
   ASSET_REF_POPULATE_SELECT,
   ASSET_POPULATE_SELECT,
+  CASE_DOCUMENT_SELECT,
+  CLIENT_DOCUMENT_SELECT,
 } from "@/lib/helpers/document.helper";
 import type {
   DocumentActionResponse,
@@ -73,6 +75,7 @@ export const GET = withErrorHandler(
     // Check CaseDocument first if entityType is CASE or omitted
     if (!entityTypeParam || entityTypeParam === DOCUMENT_ENTITY_TYPES.CASE) {
       const caseDoc = await CaseDocument.findOne({ _id: objectId, deletedAt: null })
+        .select(CASE_DOCUMENT_SELECT)
         .populate<{ caseId: Record<string, unknown> }>("caseId", CASE_POPULATE_SELECT)
         .populate<{
           assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
@@ -96,6 +99,7 @@ export const GET = withErrorHandler(
     // Check ClientDocument
     if (!entityTypeParam || entityTypeParam === DOCUMENT_ENTITY_TYPES.CLIENT) {
       const clientDoc = await ClientDocument.findOne({ _id: objectId, deletedAt: null })
+        .select(CLIENT_DOCUMENT_SELECT)
         .populate<{ clientId: Record<string, unknown> }>("clientId", CLIENT_POPULATE_SELECT)
         .populate<{
           assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
@@ -165,13 +169,25 @@ export const PATCH = withErrorHandler(
         const doc = await CaseDocument.findOne({
           _id: objectId,
           deletedAt: null,
-        }).session(dbSession);
+        })
+          .select(
+            "_id caseId assetReferenceId documentType title documentDate description exhibitNumber isConfidential deletedAt createdAt updatedAt"
+          )
+          .session(dbSession);
 
         if (!doc) {
           throw ApiError.notFound("Case document not found or has already been deleted.");
         }
 
-        const beforeState = doc.toObject();
+        const beforeState = {
+          title: doc.title,
+          documentType: doc.documentType,
+          documentDate: doc.documentDate,
+          description: doc.description,
+          exhibitNumber: doc.exhibitNumber,
+          isConfidential: doc.isConfidential,
+          assetReferenceId: doc.assetReferenceId,
+        };
 
         // File replacement handling
         if (
@@ -183,7 +199,9 @@ export const PATCH = withErrorHandler(
           const newRef = await AssetReference.findOne({
             _id: newAssetRefId,
             deletedAt: null,
-          }).session(dbSession);
+          })
+            .select("_id ownerType ownerId")
+            .session(dbSession);
 
           if (!newRef) {
             throw ApiError.badRequest(
@@ -263,7 +281,17 @@ export const PATCH = withErrorHandler(
 
         await doc.save({ session: dbSession });
 
-        const diff = calculateAuditDiff(beforeState, doc.toObject());
+        const afterState = {
+          title: doc.title,
+          documentType: doc.documentType,
+          documentDate: doc.documentDate,
+          description: doc.description,
+          exhibitNumber: doc.exhibitNumber,
+          isConfidential: doc.isConfidential,
+          assetReferenceId: doc.assetReferenceId,
+        };
+
+        const diff = calculateAuditDiff(beforeState, afterState);
         if (diff.oldValues || diff.newValues) {
           await recordAuditLog({
             req,
@@ -280,6 +308,7 @@ export const PATCH = withErrorHandler(
       });
 
       const updated = await CaseDocument.findById(objectId)
+        .select(CASE_DOCUMENT_SELECT)
         .populate<{ caseId: Record<string, unknown> }>("caseId", CASE_POPULATE_SELECT)
         .populate<{
           assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
@@ -313,13 +342,24 @@ export const PATCH = withErrorHandler(
         const doc = await ClientDocument.findOne({
           _id: objectId,
           deletedAt: null,
-        }).session(dbSession);
+        })
+          .select(
+            "_id clientId assetReferenceId documentType title documentDate expiryDate notes deletedAt createdAt updatedAt"
+          )
+          .session(dbSession);
 
         if (!doc) {
           throw ApiError.notFound("Client document not found or has already been deleted.");
         }
 
-        const beforeState = doc.toObject();
+        const beforeState = {
+          title: doc.title,
+          documentType: doc.documentType,
+          documentDate: doc.documentDate,
+          expiryDate: doc.expiryDate,
+          notes: doc.notes,
+          assetReferenceId: doc.assetReferenceId,
+        };
 
         // File replacement handling
         if (
@@ -331,7 +371,9 @@ export const PATCH = withErrorHandler(
           const newRef = await AssetReference.findOne({
             _id: newAssetRefId,
             deletedAt: null,
-          }).session(dbSession);
+          })
+            .select("_id ownerType ownerId")
+            .session(dbSession);
 
           if (!newRef) {
             throw ApiError.badRequest(
@@ -408,7 +450,16 @@ export const PATCH = withErrorHandler(
 
         await doc.save({ session: dbSession });
 
-        const diff = calculateAuditDiff(beforeState, doc.toObject());
+        const afterState = {
+          title: doc.title,
+          documentType: doc.documentType,
+          documentDate: doc.documentDate,
+          expiryDate: doc.expiryDate,
+          notes: doc.notes,
+          assetReferenceId: doc.assetReferenceId,
+        };
+
+        const diff = calculateAuditDiff(beforeState, afterState);
         if (diff.oldValues || diff.newValues) {
           await recordAuditLog({
             req,
@@ -425,6 +476,7 @@ export const PATCH = withErrorHandler(
       });
 
       const updated = await ClientDocument.findById(objectId)
+        .select(CLIENT_DOCUMENT_SELECT)
         .populate<{ clientId: Record<string, unknown> }>("clientId", CLIENT_POPULATE_SELECT)
         .populate<{
           assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
@@ -494,7 +546,9 @@ export const DELETE = withErrorHandler(
         const caseDoc = await CaseDocument.findOne({
           _id: objectId,
           deletedAt: null,
-        }).session(dbSession);
+        })
+          .select("_id title assetReferenceId deletedAt")
+          .session(dbSession);
 
         if (!caseDoc) return null;
 
@@ -560,7 +614,9 @@ export const DELETE = withErrorHandler(
         const clientDoc = await ClientDocument.findOne({
           _id: objectId,
           deletedAt: null,
-        }).session(dbSession);
+        })
+          .select("_id title assetReferenceId deletedAt")
+          .session(dbSession);
 
         if (!clientDoc) return null;
 

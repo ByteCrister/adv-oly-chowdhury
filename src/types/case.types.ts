@@ -183,6 +183,15 @@ export interface CaseActionResponse {
 }
 
 /**
+ * Response for GET single case operation
+ */
+export interface CaseDetailResponse {
+  success: boolean;
+  message: string;
+  data: CaseDetailDto;
+}
+
+/**
  * Response for DELETE operation
  */
 export interface CaseDeleteResponse {
@@ -190,3 +199,4 @@ export interface CaseDeleteResponse {
   message: string;
   id: string;
 }
+

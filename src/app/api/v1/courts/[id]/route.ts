@@ -144,7 +144,11 @@ export const PATCH = withErrorHandler(
       const court = await Court.findOne({
         _id: objectId,
         deletedAt: null,
-      }).session(dbSession);
+      })
+        .select(
+          "_id name courtType district division roomOrHall address presidingJudgeTitle isActive deletedAt createdAt updatedAt"
+        )
+        .session(dbSession);
 
       if (!court) {
         throw ApiError.notFound("Court not found");
@@ -234,7 +238,9 @@ export const DELETE = withErrorHandler(
     const court = await Court.findOne({
       _id: objectId,
       deletedAt: null,
-    });
+    }).select(
+      "_id name courtType district division roomOrHall address presidingJudgeTitle isActive deletedAt createdAt updatedAt"
+    );
 
     if (!court) {
       throw ApiError.notFound("Court not found or already deleted");

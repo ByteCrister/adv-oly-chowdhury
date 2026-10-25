@@ -206,6 +206,17 @@ test("Password reset confirm schema enforces length and matching confirmation", 
   assert.equal(mismatch.success, false);
 });
 
+test("Password change request OTP schema requires current password", () => {
+  const schema = z.object({
+    currentPassword: z.string().min(1, "Current password is required"),
+  });
+
+  assert.equal(schema.safeParse({ currentPassword: "OldPassword123!" }).success, true);
+  assert.equal(schema.safeParse({ currentPassword: "" }).success, false);
+  assert.equal(schema.safeParse({}).success, false);
+});
+
+
 // ---------------------------------------------------------------------------
 // 4. Inngest Workflow Idempotency & Lifecycle Tests
 // ---------------------------------------------------------------------------

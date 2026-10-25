@@ -35,38 +35,46 @@ async function buildHearingDetailDto(
   dbSession?: mongoose.ClientSession
 ): Promise<HearingDetailDto> {
   const query = Hearing.findById(hearingId)
+    .select(
+      "_id caseId courtId hearingDate startTime hearingType purpose outcome nextDate status adjournmentReason notes createdAt updatedAt"
+    )
     .populate({
       path: "caseId",
       select:
-        "internalReference caseNumber title caseType caseStatus priority courtId clientId filingDate nextHearingDate",
+        "_id internalReference caseNumber title caseType caseStatus priority courtId clientId filingDate nextHearingDate",
       populate: [
         {
           path: "clientId",
-          select: "name clientNumber organizationName clientType phone email",
+          select: "_id name clientNumber organizationName clientType phone email",
         },
         {
           path: "courtId",
-          select: "name courtType district roomOrHall address presidingJudgeTitle",
+          select: "_id name courtType district roomOrHall address presidingJudgeTitle",
         },
       ],
     })
     .populate({
       path: "courtId",
-      select: "name courtType district roomOrHall address presidingJudgeTitle",
+      select: "_id name courtType district roomOrHall address presidingJudgeTitle",
     });
 
   if (dbSession) {
     query.session(dbSession);
   }
 
+  const assetQuery = AssetReference.countDocuments({
+    ownerType: ASSET_OWNER_TYPES.HEARING,
+    ownerId: hearingId,
+    deletedAt: null,
+  });
+  if (dbSession) {
+    assetQuery.session(dbSession);
+  }
+
   // Execute hearing detail fetch and document reference count in parallel
   const [hearing, documentsCount] = await Promise.all([
     query.lean(),
-    AssetReference.countDocuments({
-      ownerType: ASSET_OWNER_TYPES.HEARING,
-      ownerId: hearingId,
-      deletedAt: null,
-    }),
+    assetQuery,
   ]);
 
   if (!hearing) {
@@ -79,7 +87,9 @@ async function buildHearingDetailDto(
   if (!hearing.courtId && rawCaseObj && typeof rawCaseObj === "object" && rawCaseObj.courtId) {
     const cId = rawCaseObj.courtId;
     if (typeof cId === "string" || cId instanceof mongoose.Types.ObjectId) {
-      const courtDoc = await Court.findById(cId).lean();
+      const courtDoc = await Court.findById(cId)
+        .select("_id name courtType district roomOrHall address presidingJudgeTitle")
+        .lean();
       if (courtDoc) {
         fallbackCourtsMap = new Map([
           [(courtDoc._id as mongoose.Types.ObjectId).toString(), courtDoc as unknown as Record<string, unknown>],
@@ -90,7 +100,8 @@ async function buildHearingDetailDto(
 
   const formattedItem = formatHearingListItem(
     hearing as unknown as IPopulatedHearingDoc,
-    fallbackCourtsMap
+    fallbackCourtsMap,
+    documentsCount === 0
   );
 
   return {
@@ -148,12 +159,28 @@ export const PATCH = withErrorHandler(
 
     // Execute update inside a single ACID transaction without redundant pre-fetching
     await withTransaction(async (dbSession) => {
-      const hearing = await Hearing.findById(objectId).session(dbSession);
+      const hearing = await Hearing.findById(objectId)
+        .select(
+          "_id caseId courtId hearingDate startTime hearingType purpose outcome nextDate status adjournmentReason notes"
+        )
+        .session(dbSession);
       if (!hearing) {
         throw ApiError.notFound("Hearing record not found or has been removed.");
       }
 
-      const beforeState = hearing.toObject();
+      const beforeState = {
+        caseId: hearing.caseId,
+        courtId: hearing.courtId,
+        hearingDate: hearing.hearingDate,
+        startTime: hearing.startTime,
+        hearingType: hearing.hearingType,
+        purpose: hearing.purpose,
+        outcome: hearing.outcome,
+        nextDate: hearing.nextDate,
+        status: hearing.status,
+        adjournmentReason: hearing.adjournmentReason,
+        notes: hearing.notes,
+      };
       let targetCaseId = hearing.caseId;
       const oldCaseId = hearing.caseId;
 
@@ -230,8 +257,21 @@ export const PATCH = withErrorHandler(
         await syncCaseNextHearingDate(oldCaseId, dbSession);
       }
 
-      // Record audit log for hearing update
-      const diff = calculateAuditDiff(beforeState, hearing.toObject());
+      // Record audit log for hearing update with clean sanitized state
+      const afterState = {
+        caseId: hearing.caseId,
+        courtId: hearing.courtId,
+        hearingDate: hearing.hearingDate,
+        startTime: hearing.startTime,
+        hearingType: hearing.hearingType,
+        purpose: hearing.purpose,
+        outcome: hearing.outcome,
+        nextDate: hearing.nextDate,
+        status: hearing.status,
+        adjournmentReason: hearing.adjournmentReason,
+        notes: hearing.notes,
+      };
+      const diff = calculateAuditDiff(beforeState, afterState);
       await recordAuditLog({
         req,
         userId,
@@ -282,7 +322,9 @@ export const DELETE = withErrorHandler(
 
     // Concurrently fetch the target hearing and check attached document references
     const [hearing, attachedFilesCount] = await Promise.all([
-      Hearing.findById(objectId),
+      Hearing.findById(objectId).select(
+        "_id caseId courtId hearingDate startTime hearingType purpose outcome nextDate status adjournmentReason notes"
+      ),
       AssetReference.countDocuments({
         ownerType: ASSET_OWNER_TYPES.HEARING,
         ownerId: objectId,
@@ -308,7 +350,19 @@ export const DELETE = withErrorHandler(
 
     // Execute deletion inside a transaction
     await withTransaction(async (dbSession) => {
-      const hearingSnapshot = hearing.toObject();
+      const hearingSnapshot = {
+        caseId: hearing.caseId,
+        courtId: hearing.courtId,
+        hearingDate: hearing.hearingDate,
+        startTime: hearing.startTime,
+        hearingType: hearing.hearingType,
+        purpose: hearing.purpose,
+        outcome: hearing.outcome,
+        nextDate: hearing.nextDate,
+        status: hearing.status,
+        adjournmentReason: hearing.adjournmentReason,
+        notes: hearing.notes,
+      };
 
       await Hearing.findByIdAndDelete(objectId).session(dbSession);
 

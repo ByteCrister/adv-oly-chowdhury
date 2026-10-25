@@ -3,12 +3,10 @@
 import { useQuery, UseQueryOptions } from "@tanstack/react-query";
 import axios from "axios";
 import { CLIENT_PAYMENT_QUERY_KEYS } from "@/const/client-payment.const";
-import type { ClientPaymentItemDto } from "@/types/client-payment.types";
-
-interface SinglePaymentApiResponse {
-  success: boolean;
-  data: ClientPaymentItemDto;
-}
+import type {
+  ClientPaymentItemDto,
+  SingleClientPaymentApiResponse,
+} from "@/types/client-payment.types";
 
 /**
  * Fetch a single client payment by client ID and payment ID.
@@ -17,7 +15,7 @@ export async function fetchClientPaymentDetails(
   clientId: string,
   paymentId: string
 ): Promise<ClientPaymentItemDto> {
-  const response = await axios.get<SinglePaymentApiResponse>(
+  const response = await axios.get<SingleClientPaymentApiResponse>(
     `/api/v1/clients/${clientId}/payments/${paymentId}`
   );
   return response.data.data;

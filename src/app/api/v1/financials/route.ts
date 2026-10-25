@@ -35,16 +35,26 @@ import type {
   FinancialSummaryStats,
 } from "@/types/financial.types";
 
+/**
+ * Safely converts any date representation into an ISO string or empty string.
+ * Protects against RangeError: Invalid time value exceptions.
+ */
+function toIsoDateString(value: unknown): string {
+  if (!value) return "";
+  const d = new Date(value as string | number | Date);
+  return !isNaN(d.getTime()) ? d.toISOString() : "";
+}
+
 interface RawAggregatedRecord {
   _id: mongoose.Types.ObjectId;
   recordType: typeof FINANCIAL_RECORD_TYPES.PAYMENT | typeof FINANCIAL_RECORD_TYPES.EXPENSE;
-  transactionDate: Date;
+  transactionDate: Date | string;
   amount: number;
   currency: string;
-  clientId?: mongoose.Types.ObjectId | null;
+  clientId?: mongoose.Types.ObjectId | string | null;
   clientName?: string | null;
   clientNumber?: string | null;
-  caseId?: mongoose.Types.ObjectId | null;
+  caseId?: mongoose.Types.ObjectId | string | null;
   caseTitle?: string | null;
   caseReference?: string | null;
   paymentMethod?: PaymentMethod | null;
@@ -53,9 +63,7 @@ interface RawAggregatedRecord {
   referenceNumber?: string | null;
   moneyReceiptNumber?: string | null;
   description?: string | null;
-  receiptAssetId?: mongoose.Types.ObjectId | null;
-  relevanceScore?: number;
-  /** Single object produced by $arrayElemAt in the items facet pipeline. */
+  receiptAssetId?: mongoose.Types.ObjectId | string | null;
   receiptDoc?: {
     originalFileName?: string;
     assetDoc?: {
@@ -65,18 +73,18 @@ interface RawAggregatedRecord {
       mimeType?: string;
       bytes?: number;
     };
-  };
-  userDoc?: { _id: mongoose.Types.ObjectId; name: string; email: string }[];
-  createdAt: Date;
-  updatedAt: Date;
+  } | null;
+  recordedByUser?: { _id: mongoose.Types.ObjectId | string; name: string; email: string } | null;
+  createdAt: Date | string;
+  updatedAt: Date | string;
 }
 
 /**
  * GET /api/v1/financials
  *
  * Unified financial ledger endpoint combining Client Payments and Case Expenses.
- * Uses high-performance MongoDB aggregation with $unionWith, $facet, filtering,
- * server-side search, sorting, and pagination.
+ * Uses high-performance MongoDB aggregation with index-backed early filtering,
+ * projected lookups, $unionWith, $facet, server-side search, sorting, and pagination.
  */
 export const GET = withErrorHandler(async (req: NextRequest) => {
   await getUserId();
@@ -116,8 +124,58 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     limit,
   } = parsed.data;
 
+  // Build index-backed early match filters for each union branch
+  const paymentEarlyMatch: Record<string, unknown> = {};
+  const expenseEarlyMatch: Record<string, unknown> = {};
+
+  // 1. Record Type early exclusion
+  if (recordType === FINANCIAL_RECORD_TYPES.PAYMENT) {
+    expenseEarlyMatch._id = null; // Exclude all expenses at source
+  } else if (recordType === FINANCIAL_RECORD_TYPES.EXPENSE) {
+    paymentEarlyMatch._id = null; // Exclude all payments at source
+  }
+
+  // 2. Date Range early filter
+  if (startDate || endDate) {
+    const dateQuery: Record<string, Date> = {};
+    if (startDate) {
+      dateQuery.$gte = new Date(startDate);
+    }
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      dateQuery.$lte = end;
+    }
+    paymentEarlyMatch.paymentDate = dateQuery;
+    expenseEarlyMatch.expenseDate = dateQuery;
+  }
+
+  // 3. Case ID early filter
+  if (caseId && caseId !== "ALL" && mongoose.Types.ObjectId.isValid(caseId)) {
+    const caseObjId = new mongoose.Types.ObjectId(caseId);
+    paymentEarlyMatch.caseId = caseObjId;
+    expenseEarlyMatch.caseId = caseObjId;
+  }
+
+  // 4. Payment Method early filter
+  if (paymentMethod && paymentMethod !== "ALL") {
+    paymentEarlyMatch.paymentMethod = paymentMethod;
+    expenseEarlyMatch._id = null; // Expenses never have a payment method
+  }
+
+  // 5. Expense Category early filter
+  if (expenseCategory && expenseCategory !== "ALL") {
+    expenseEarlyMatch.category = expenseCategory;
+    paymentEarlyMatch._id = null; // Payments never have an expense category
+  }
+
+  // 6. Client ID early filter for ClientPayment (which has direct indexed clientId)
+  if (clientId && clientId !== "ALL" && mongoose.Types.ObjectId.isValid(clientId)) {
+    paymentEarlyMatch.clientId = new mongoose.Types.ObjectId(clientId);
+  }
+
   // Build the ClientPayment branch of the union pipeline
-  const paymentProjectStage = {
+  const paymentProjectStage: mongoose.PipelineStage = {
     $project: {
       _id: 1,
       recordType: { $literal: FINANCIAL_RECORD_TYPES.PAYMENT },
@@ -140,14 +198,14 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   };
 
   // Build the CaseExpense branch of the union pipeline
-  const expenseProjectStage = {
+  const expenseProjectStage: mongoose.PipelineStage = {
     $project: {
       _id: 1,
       recordType: { $literal: FINANCIAL_RECORD_TYPES.EXPENSE },
       transactionDate: "$expenseDate",
       amount: "$amount",
       currency: "$currency",
-      clientId: { $literal: null }, // Will be resolved from case
+      clientId: { $literal: null }, // Will be resolved from linked case
       caseId: "$caseId",
       paymentMethod: { $literal: null },
       paymentType: { $literal: null },
@@ -163,28 +221,63 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   };
 
   // Master aggregation pipeline starting from ClientPayment
-  const pipeline: mongoose.PipelineStage[] = [
-    paymentProjectStage,
-    {
-      $unionWith: {
-        coll: COLLECTIONS.CASE_EXPENSES,
-        pipeline: [expenseProjectStage],
-      },
+  const pipeline: mongoose.PipelineStage[] = [];
+
+  // Early filter on ClientPayment
+  if (Object.keys(paymentEarlyMatch).length > 0) {
+    pipeline.push({ $match: paymentEarlyMatch });
+  }
+  pipeline.push(paymentProjectStage);
+
+  // Early filter and projection on CaseExpense
+  const expensePipeline: mongoose.PipelineStage.UnionWithPipelineStage[] = [];
+  if (Object.keys(expenseEarlyMatch).length > 0) {
+    expensePipeline.push({ $match: expenseEarlyMatch });
+  }
+  expensePipeline.push(expenseProjectStage);
+
+  // Union with CaseExpense
+  pipeline.push({
+    $unionWith: {
+      coll: COLLECTIONS.CASE_EXPENSES,
+      pipeline: expensePipeline,
     },
-    // Populate case details
+  });
+
+  // Lookup case details with strict field projection
+  pipeline.push(
     {
       $lookup: {
-        from: "cases",
+        from: COLLECTIONS.CASES,
         localField: "caseId",
         foreignField: "_id",
+        pipeline: [
+          {
+            $project: {
+              _id: 1,
+              clientId: 1,
+              caseNumber: 1,
+              internalReference: 1,
+              title: 1,
+              caseCategory: 1,
+              opposingCounsel: 1,
+              description: 1,
+              legalIssues: 1,
+              deletedAt: 1,
+            },
+          },
+        ],
         as: "caseDocs",
       },
     },
-    // Determine the effective clientId: for payments it's already on the record;
-    // for expenses it comes from the linked case!
     {
       $addFields: {
         caseDoc: { $arrayElemAt: ["$caseDocs", 0] },
+      },
+    },
+    {
+      $project: {
+        caseDocs: 0,
       },
     },
     {
@@ -199,18 +292,37 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
         isCaseDeleted: { $gt: ["$caseDoc.deletedAt", null] },
       },
     },
-    // Lookup client details based on effectiveClientId
+    // Lookup client details with strict field projection
     {
       $lookup: {
-        from: "clients",
+        from: COLLECTIONS.CLIENTS,
         localField: "effectiveClientId",
         foreignField: "_id",
+        pipeline: [
+          {
+            $project: {
+              _id: 1,
+              clientNumber: 1,
+              name: 1,
+              organizationName: 1,
+              phone: 1,
+              alternatePhone: 1,
+              email: 1,
+              deletedAt: 1,
+            },
+          },
+        ],
         as: "clientDocs",
       },
     },
     {
       $addFields: {
         clientDoc: { $arrayElemAt: ["$clientDocs", 0] },
+      },
+    },
+    {
+      $project: {
+        clientDocs: 0,
       },
     },
     {
@@ -226,43 +338,16 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
         isCaseDeleted: { $ne: true },
         isClientDeleted: { $ne: true },
       },
-    },
-  ];
+    }
+  );
 
-  // Post-union unified match filters
-  const matchConditions: Record<string, unknown> = {};
-
-  if (recordType && recordType !== "ALL") {
-    matchConditions.recordType = recordType;
-  }
-
+  // Post-lookup match filter for effective client ID (applies to expenses resolved through case)
   if (clientId && clientId !== "ALL" && mongoose.Types.ObjectId.isValid(clientId)) {
-    matchConditions.effectiveClientId = new mongoose.Types.ObjectId(clientId);
-  }
-
-  if (caseId && caseId !== "ALL" && mongoose.Types.ObjectId.isValid(caseId)) {
-    matchConditions.caseId = new mongoose.Types.ObjectId(caseId);
-  }
-
-  if (paymentMethod && paymentMethod !== "ALL") {
-    matchConditions.paymentMethod = paymentMethod;
-  }
-
-  if (expenseCategory && expenseCategory !== "ALL") {
-    matchConditions.expenseCategory = expenseCategory;
-  }
-
-  if (startDate || endDate) {
-    const dateQuery: Record<string, Date> = {};
-    if (startDate) {
-      dateQuery.$gte = new Date(startDate);
-    }
-    if (endDate) {
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      dateQuery.$lte = end;
-    }
-    matchConditions.transactionDate = dateQuery;
+    pipeline.push({
+      $match: {
+        effectiveClientId: new mongoose.Types.ObjectId(clientId),
+      },
+    });
   }
 
   // Typo-tolerant fuzzy search across financial identifiers, case numbers/titles/narrative,
@@ -277,15 +362,20 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     relevanceStages = buildFinancialRelevanceStages(searchPatterns, metadataMatches);
   }
 
-  // Apply explicit financial filters first
-  if (Object.keys(matchConditions).length > 0) {
-    pipeline.push({ $match: matchConditions });
-  }
-
   // Apply dynamic relevance scoring and positive relevance match
   if (isSearching && relevanceStages.length > 0) {
     pipeline.push(...relevanceStages);
   }
+
+  // Project away large intermediate lookup documents and flags before faceting to free memory
+  pipeline.push({
+    $project: {
+      caseDoc: 0,
+      clientDoc: 0,
+      isCaseDeleted: 0,
+      isClientDeleted: 0,
+    },
+  });
 
   // Deterministic sorting with stable tie-breaker
   const sortMap: Record<FinancialSortOption, Record<string, 1 | -1>> = {
@@ -310,12 +400,21 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
         { $sort: itemsSort },
         { $skip: skip },
         { $limit: limit },
-        // Lookup receipt asset reference
+        // Lookup receipt asset reference with strict projection
         {
           $lookup: {
-            from: "asset_references",
+            from: COLLECTIONS.ASSET_REFERENCES,
             localField: "receiptAssetId",
             foreignField: "_id",
+            pipeline: [
+              {
+                $project: {
+                  _id: 1,
+                  assetId: 1,
+                  originalFileName: 1,
+                },
+              },
+            ],
             as: "receiptRef",
           },
         },
@@ -324,10 +423,10 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
             receiptDoc: { $arrayElemAt: ["$receiptRef", 0] },
           },
         },
-        // Lookup asset file
+        // Lookup asset file with strict projection
         {
           $lookup: {
-            from: "assets",
+            from: COLLECTIONS.ASSETS,
             localField: "receiptDoc.assetId",
             foreignField: "_id",
             pipeline: [
@@ -350,14 +449,49 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
             "receiptDoc.assetDoc": { $arrayElemAt: ["$assetDocs", 0] },
           },
         },
-        // Lookup recording user
+        // Lookup recording user with strict projection
         {
           $lookup: {
-            from: "users",
+            from: COLLECTIONS.USERS,
             localField: "recordedBy",
             foreignField: "_id",
-            pipeline: [{ $project: { name: 1, email: 1 } }],
+            pipeline: [
+              {
+                $project: {
+                  _id: 1,
+                  name: 1,
+                  email: 1,
+                },
+              },
+            ],
             as: "userDoc",
+          },
+        },
+        // Strictly project only the required fields for DTO mapping
+        {
+          $project: {
+            _id: 1,
+            recordType: 1,
+            transactionDate: 1,
+            amount: 1,
+            currency: 1,
+            clientId: { $ifNull: ["$clientId", "$effectiveClientId"] },
+            clientName: 1,
+            clientNumber: 1,
+            caseId: 1,
+            caseTitle: 1,
+            caseReference: 1,
+            paymentMethod: 1,
+            paymentType: 1,
+            expenseCategory: 1,
+            referenceNumber: 1,
+            moneyReceiptNumber: 1,
+            description: 1,
+            receiptAssetId: 1,
+            createdAt: 1,
+            updatedAt: 1,
+            receiptDoc: 1,
+            recordedByUser: { $arrayElemAt: ["$userDoc", 0] },
           },
         },
       ],
@@ -443,12 +577,12 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
 
   const methodBreakdown: Partial<Record<PaymentMethod, number>> = {};
   for (const item of aggregationResult?.methodBreakdown || []) {
-    methodBreakdown[item._id] = item.amount;
+    methodBreakdown[item._id] = Math.round(item.amount * 100) / 100;
   }
 
   const categoryBreakdown: Partial<Record<CaseExpenseCategory, number>> = {};
   for (const item of aggregationResult?.categoryBreakdown || []) {
-    categoryBreakdown[item._id] = item.amount;
+    categoryBreakdown[item._id] = Math.round(item.amount * 100) / 100;
   }
 
   const summary: FinancialSummaryStats = {
@@ -464,7 +598,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
 
   const items: UnifiedFinancialRecordDto[] = rawItems.map((record) => {
     const receiptRef = record.receiptDoc;
-    const user = record.userDoc && Array.isArray(record.userDoc) ? record.userDoc[0] : null;
+    const user = record.recordedByUser;
 
     const pMethod = record.paymentMethod as PaymentMethod | null;
     const pType = record.paymentType as PaymentType | null;
@@ -473,7 +607,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     return {
       id: record._id.toString(),
       recordType: record.recordType,
-      transactionDate: new Date(record.transactionDate).toISOString(),
+      transactionDate: toIsoDateString(record.transactionDate),
       amount: record.amount,
       currency: record.currency || "BDT",
       clientId: record.clientId ? record.clientId.toString() : null,
@@ -504,8 +638,8 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
             email: user.email,
           }
         : null,
-      createdAt: record.createdAt ? new Date(record.createdAt).toISOString() : "",
-      updatedAt: record.updatedAt ? new Date(record.updatedAt).toISOString() : "",
+      createdAt: toIsoDateString(record.createdAt),
+      updatedAt: toIsoDateString(record.updatedAt),
     };
   });
 

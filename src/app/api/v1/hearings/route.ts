@@ -128,7 +128,8 @@ export async function syncCaseNextHearingDate(
  */
 export function formatHearingListItem(
   doc: IPopulatedHearingDoc | Record<string, unknown>,
-  fallbackCourtsMap?: Map<string, IPopulatedHearingCourt | Record<string, unknown>>
+  fallbackCourtsMap?: Map<string, IPopulatedHearingCourt | Record<string, unknown>>,
+  isDeletableOverride?: boolean
 ): HearingListItemDto {
   const id = extractIdString(doc._id || (doc as { id?: unknown }).id);
 
@@ -192,12 +193,23 @@ export function formatHearingListItem(
       }
     : null;
 
+  const resolvedCourtId = courtDto
+    ? courtDto.id
+    : (extractIdString(doc.courtId) || (rawCase?.courtId ? extractIdString(rawCase.courtId) : "") || null);
+
+  const isDeletable =
+    isDeletableOverride !== undefined
+      ? Boolean(isDeletableOverride)
+      : doc.isDeletable !== undefined
+      ? Boolean(doc.isDeletable)
+      : true;
+
   return {
     id,
     caseId: caseDto.id,
     case: caseDto,
     client: clientDto,
-    courtId: courtDto ? courtDto.id : (doc.courtId ? extractIdString(doc.courtId) : (rawCase?.courtId ? extractIdString(rawCase.courtId) : null)),
+    courtId: resolvedCourtId,
     court: courtDto,
     hearingDate: formatSafeIsoDate(doc.hearingDate) || new Date().toISOString(),
     startTime: typeof doc.startTime === "string" ? doc.startTime : null,
@@ -209,7 +221,7 @@ export function formatHearingListItem(
     statusLabel: HEARING_STATUS_LABELS[status] || status,
     adjournmentReason: typeof doc.adjournmentReason === "string" ? doc.adjournmentReason : null,
     notes: typeof doc.notes === "string" ? doc.notes : null,
-    isDeletable: doc.isDeletable !== undefined ? Boolean(doc.isDeletable) : true,
+    isDeletable,
     createdAt: formatSafeIsoDate(doc.createdAt) || new Date().toISOString(),
     updatedAt: formatSafeIsoDate(doc.updatedAt) || new Date().toISOString(),
   };
@@ -289,10 +301,12 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     filter.caseId = new mongoose.Types.ObjectId(caseId);
   } else if (clientId) {
     // If client filter is supplied, find cases associated with this client
-    const clientCases = await Case.find(
-      { clientId: new mongoose.Types.ObjectId(clientId), deletedAt: null },
-      { _id: 1 }
-    ).lean();
+    const clientCases = await Case.find({
+      clientId: new mongoose.Types.ObjectId(clientId),
+      deletedAt: null,
+    })
+      .select("_id")
+      .lean();
     const caseIds = clientCases.map((c) => c._id);
     filter.caseId = { $in: caseIds };
   }
@@ -355,24 +369,12 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     }
 
     const [matchingClients, matchingCourts] = await Promise.all([
-      Client.find(clientSearchFilter, {
-        _id: 1,
-        name: 1,
-        clientNumber: 1,
-        organizationName: 1,
-        phone: 1,
-      })
+      Client.find(clientSearchFilter)
+        .select("_id name clientNumber organizationName phone")
         .limit(500)
         .lean<ClientMatchCandidate[]>(),
-      Court.find(courtSearchFilter, {
-        _id: 1,
-        name: 1,
-        courtType: 1,
-        district: 1,
-        roomOrHall: 1,
-        address: 1,
-        presidingJudgeTitle: 1,
-      })
+      Court.find(courtSearchFilter)
+        .select("_id name courtType district roomOrHall address presidingJudgeTitle")
         .limit(500)
         .lean<HearingCourtCandidate[]>(),
     ]);
@@ -432,19 +434,10 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       caseSearchFilter.clientId = new mongoose.Types.ObjectId(clientId);
     }
 
-    const matchingCases = await Case.find(caseSearchFilter, {
-      _id: 1,
-      title: 1,
-      caseNumber: 1,
-      internalReference: 1,
-      caseCategory: 1,
-      opposingCounsel: 1,
-      opposingParties: 1,
-      description: 1,
-      legalIssues: 1,
-      clientId: 1,
-      courtId: 1,
-    })
+    const matchingCases = await Case.find(caseSearchFilter)
+      .select(
+        "_id title caseNumber internalReference caseCategory opposingCounsel opposingParties description legalIssues clientId courtId"
+      )
       .limit(1000)
       .lean<HearingCaseCandidate[]>();
 
@@ -528,21 +521,21 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     {
       path: "caseId",
       select:
-        "internalReference caseNumber title caseType caseStatus priority courtId clientId filingDate nextHearingDate",
+        "_id internalReference caseNumber title caseType caseStatus priority courtId clientId filingDate nextHearingDate",
       populate: [
         {
           path: "clientId",
-          select: "name clientNumber organizationName clientType phone email",
+          select: "_id name clientNumber organizationName clientType phone email",
         },
         {
           path: "courtId",
-          select: "name courtType district roomOrHall address presidingJudgeTitle",
+          select: "_id name courtType district roomOrHall address presidingJudgeTitle",
         },
       ],
     },
     {
       path: "courtId",
-      select: "name courtType district roomOrHall address presidingJudgeTitle",
+      select: "_id name courtType district roomOrHall address presidingJudgeTitle",
     },
   ];
 
@@ -561,6 +554,24 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
           { $sort: itemsSort },
           { $skip: skip },
           { $limit: limit },
+          {
+            $project: {
+              _id: 1,
+              caseId: 1,
+              courtId: 1,
+              hearingDate: 1,
+              startTime: 1,
+              hearingType: 1,
+              purpose: 1,
+              outcome: 1,
+              nextDate: 1,
+              status: 1,
+              adjournmentReason: 1,
+              notes: 1,
+              createdAt: 1,
+              updatedAt: 1,
+            },
+          },
         ],
         stats: [
           {
@@ -720,24 +731,27 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
         .sort(sortOption)
         .skip(skip)
         .limit(limit)
+        .select(
+          "_id caseId courtId hearingDate startTime hearingType purpose outcome nextDate status adjournmentReason notes createdAt updatedAt"
+        )
         .populate({
           path: "caseId",
           select:
-            "internalReference caseNumber title caseType caseStatus priority courtId clientId filingDate nextHearingDate",
+            "_id internalReference caseNumber title caseType caseStatus priority courtId clientId filingDate nextHearingDate",
           populate: [
             {
               path: "clientId",
-              select: "name clientNumber organizationName clientType phone email",
+              select: "_id name clientNumber organizationName clientType phone email",
             },
             {
               path: "courtId",
-              select: "name courtType district roomOrHall address presidingJudgeTitle",
+              select: "_id name courtType district roomOrHall address presidingJudgeTitle",
             },
           ],
         })
         .populate({
           path: "courtId",
-          select: "name courtType district roomOrHall address presidingJudgeTitle",
+          select: "_id name courtType district roomOrHall address presidingJudgeTitle",
         })
         .lean(),
     ]);
@@ -763,10 +777,11 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   const hearingsWithDocsSet = new Set(attachedOwnerIds.map(String));
 
   const items: HearingListItemDto[] = hearings.map((h) =>
-    formatHearingListItem({
-      ...(h as unknown as IPopulatedHearingDoc),
-      isDeletable: !hearingsWithDocsSet.has(String(h._id)),
-    })
+    formatHearingListItem(
+      h as unknown as IPopulatedHearingDoc,
+      undefined,
+      !hearingsWithDocsSet.has(String(h._id))
+    )
   );
 
   const stats: HearingStatsDto = {
@@ -858,7 +873,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     // Sync case.nextHearingDate
     await syncCaseNextHearingDate(targetCase._id, dbSession);
 
-    // Record audit log for hearing creation
+    // Record audit log for hearing creation with clean sanitized payload
     await recordAuditLog({
       req,
       userId,
@@ -866,7 +881,19 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
       entityType: AUDIT_ENTITY_TYPES.HEARING,
       entityId: hearing._id,
       oldValues: null,
-      newValues: hearing.toObject(),
+      newValues: {
+        caseId: targetCase._id,
+        courtId: courtObjectId,
+        hearingDate: hearingDateObj,
+        startTime: validated.startTime?.trim() || null,
+        hearingType: validated.hearingType?.trim() || null,
+        purpose: validated.purpose?.trim() || null,
+        outcome: validated.outcome?.trim() || null,
+        nextDate: nextDateObj,
+        status: validated.status,
+        adjournmentReason: validated.adjournmentReason?.trim() || null,
+        notes: validated.notes?.trim() || null,
+      },
       description: `Scheduled hearing for case "${targetCase.title}" on ${hearing.hearingDate.toISOString()}`,
       session: dbSession,
     });
@@ -876,29 +903,34 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
 
   // Fetch populated hearing detail in a single consolidated query
   const populatedDoc = await Hearing.findById(createdHearing._id)
+    .select(
+      "_id caseId courtId hearingDate startTime hearingType purpose outcome nextDate status adjournmentReason notes createdAt updatedAt"
+    )
     .populate({
       path: "caseId",
       select:
-        "internalReference caseNumber title caseType caseStatus priority courtId clientId filingDate nextHearingDate",
+        "_id internalReference caseNumber title caseType caseStatus priority courtId clientId filingDate nextHearingDate",
       populate: [
         {
           path: "clientId",
-          select: "name clientNumber organizationName clientType phone email",
+          select: "_id name clientNumber organizationName clientType phone email",
         },
         {
           path: "courtId",
-          select: "name courtType district roomOrHall address presidingJudgeTitle",
+          select: "_id name courtType district roomOrHall address presidingJudgeTitle",
         },
       ],
     })
     .populate({
       path: "courtId",
-      select: "name courtType district roomOrHall address presidingJudgeTitle",
+      select: "_id name courtType district roomOrHall address presidingJudgeTitle",
     })
     .lean();
 
   const formattedItem = formatHearingListItem(
-    populatedDoc as unknown as IPopulatedHearingDoc
+    populatedDoc as unknown as IPopulatedHearingDoc,
+    undefined,
+    true
   );
 
   const detailDto: HearingDetailDto = {

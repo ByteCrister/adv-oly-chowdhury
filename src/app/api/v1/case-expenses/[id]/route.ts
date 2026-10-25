@@ -46,23 +46,29 @@ export const GET = withErrorHandler(
 
     const expenseObjectId = new mongoose.Types.ObjectId(id);
     const expense = await CaseExpense.findById(expenseObjectId)
+      .select(
+        "_id caseId expenseDate category description amount currency receiptAssetReferenceId recordedBy createdAt updatedAt"
+      )
       .populate({
         path: "caseId",
-        select: "internalReference caseNumber title clientId",
+        select: "_id internalReference caseNumber title clientId",
         populate: {
           path: "clientId",
-          select: "name clientNumber",
+          select: "_id name clientNumber",
         },
       })
       .populate({
         path: "receiptAssetReferenceId",
-        select: "originalFileName assetId",
+        select: "_id originalFileName assetId",
         populate: {
           path: "assetId",
-          select: "secureUrl originalFilename assetType mimeType bytes",
+          select: "_id secureUrl originalFilename assetType mimeType bytes",
         },
       })
-      .populate("recordedBy", "name email")
+      .populate({
+        path: "recordedBy",
+        select: "_id name email",
+      })
       .lean<CaseExpenseDocInput>();
 
     if (!expense) {
@@ -88,7 +94,9 @@ export const PUT = withErrorHandler(
     }
 
     const expenseObjectId = new mongoose.Types.ObjectId(id);
-    const existingExpense = await CaseExpense.findById(expenseObjectId);
+    const existingExpense = await CaseExpense.findById(expenseObjectId).select(
+      "_id caseId expenseDate category description amount currency receiptAssetReferenceId recordedBy createdAt updatedAt"
+    );
     if (!existingExpense) {
       throw ApiError.notFound("Case expense record not found");
     }
@@ -156,7 +164,7 @@ export const PUT = withErrorHandler(
             await AssetReference.findByIdAndUpdate(
               oldReceiptId,
               { deletedAt: new Date() },
-              { session: dbSession }
+              { session: dbSession, select: "_id" }
             );
           }
 
@@ -167,7 +175,7 @@ export const PUT = withErrorHandler(
               ownerId: targetCaseObjectId,
               purpose: ASSET_PURPOSES.EXPENSE_RECEIPT,
             },
-            { session: dbSession }
+            { session: dbSession, select: "_id" }
           );
 
           updateFields.receiptAssetReferenceId = targetReceiptObjectId;
@@ -177,7 +185,7 @@ export const PUT = withErrorHandler(
             await AssetReference.findByIdAndUpdate(
               oldReceiptId,
               { deletedAt: new Date() },
-              { session: dbSession }
+              { session: dbSession, select: "_id" }
             );
           }
           updateFields.receiptAssetReferenceId = null;
@@ -187,7 +195,7 @@ export const PUT = withErrorHandler(
         await AssetReference.findByIdAndUpdate(
           oldReceiptId,
           { ownerId: targetCaseObjectId },
-          { session: dbSession }
+          { session: dbSession, select: "_id" }
         );
       }
 
@@ -213,6 +221,7 @@ export const PUT = withErrorHandler(
 
       await CaseExpense.findByIdAndUpdate(expenseObjectId, updateFields, {
         session: dbSession,
+        select: "_id",
       });
 
       // 4. Record audit log for case expense update
@@ -231,26 +240,36 @@ export const PUT = withErrorHandler(
     });
 
     const updated = await CaseExpense.findById(expenseObjectId)
+      .select(
+        "_id caseId expenseDate category description amount currency receiptAssetReferenceId recordedBy createdAt updatedAt"
+      )
       .populate({
         path: "caseId",
-        select: "internalReference caseNumber title clientId",
+        select: "_id internalReference caseNumber title clientId",
         populate: {
           path: "clientId",
-          select: "name clientNumber",
+          select: "_id name clientNumber",
         },
       })
       .populate({
         path: "receiptAssetReferenceId",
-        select: "originalFileName assetId",
+        select: "_id originalFileName assetId",
         populate: {
           path: "assetId",
-          select: "secureUrl originalFilename assetType mimeType bytes",
+          select: "_id secureUrl originalFilename assetType mimeType bytes",
         },
       })
-      .populate("recordedBy", "name email")
+      .populate({
+        path: "recordedBy",
+        select: "_id name email",
+      })
       .lean<CaseExpenseDocInput>();
 
-    const itemDto = formatCaseExpenseItem(updated!);
+    if (!updated) {
+      throw ApiError.notFound("Case expense record not found");
+    }
+
+    const itemDto = formatCaseExpenseItem(updated);
 
     const response: CaseExpenseActionResponse = {
       success: true,
@@ -284,7 +303,9 @@ export const DELETE = withErrorHandler(
     }
 
     const expenseObjectId = new mongoose.Types.ObjectId(id);
-    const expense = await CaseExpense.findById(expenseObjectId);
+    const expense = await CaseExpense.findById(expenseObjectId).select(
+      "_id caseId expenseDate category description amount currency receiptAssetReferenceId recordedBy createdAt updatedAt"
+    );
     if (!expense) {
       throw ApiError.notFound("Case expense record not found");
     }
@@ -297,12 +318,13 @@ export const DELETE = withErrorHandler(
         await AssetReference.findByIdAndUpdate(
           expense.receiptAssetReferenceId,
           { deletedAt: new Date() },
-          { session: dbSession }
+          { session: dbSession, select: "_id" }
         );
       }
 
       const deletedDoc = await CaseExpense.findByIdAndDelete(expenseObjectId, {
         session: dbSession,
+        select: "_id",
       });
 
       if (!deletedDoc) {

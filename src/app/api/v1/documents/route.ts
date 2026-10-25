@@ -18,6 +18,8 @@ import {
   CLIENT_POPULATE_SELECT,
   ASSET_REF_POPULATE_SELECT,
   ASSET_POPULATE_SELECT,
+  CASE_DOCUMENT_SELECT,
+  CLIENT_DOCUMENT_SELECT,
 } from "@/lib/helpers/document.helper";
 import { Case } from "@/db/models/Case.model";
 import { Client } from "@/db/models/Client.model";
@@ -280,16 +282,8 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
         clientSearchFilter._id = new mongoose.Types.ObjectId(clientId);
       }
 
-      const matchingClients = await Client.find(clientSearchFilter, {
-        _id: 1,
-        name: 1,
-        clientNumber: 1,
-        organizationName: 1,
-        phone: 1,
-        alternatePhone: 1,
-        email: 1,
-        nationalId: 1,
-      })
+      const matchingClients = await Client.find(clientSearchFilter)
+        .select("_id name clientNumber organizationName phone alternatePhone email nationalId")
         .limit(1000)
         .lean<DocumentClientCandidate[]>();
 
@@ -346,18 +340,10 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
         caseSearchFilter._id = new mongoose.Types.ObjectId(caseId);
       }
 
-      const matchingCases = await Case.find(caseSearchFilter, {
-        _id: 1,
-        title: 1,
-        caseNumber: 1,
-        internalReference: 1,
-        caseCategory: 1,
-        opposingCounsel: 1,
-        opposingParties: 1,
-        description: 1,
-        legalIssues: 1,
-        clientId: 1,
-      })
+      const matchingCases = await Case.find(caseSearchFilter)
+        .select(
+          "_id title caseNumber internalReference caseCategory opposingCounsel opposingParties description legalIssues clientId"
+        )
         .limit(1000)
         .lean<DocumentCaseCandidate[]>();
 
@@ -551,6 +537,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       items = await populateAndFormatDocuments(rawDocs);
     } else {
       const documents = await CaseDocument.find(caseFilter)
+        .select(CASE_DOCUMENT_SELECT)
         .sort(sortOption)
         .skip(skip)
         .limit(limit)
@@ -624,6 +611,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       items = await populateAndFormatDocuments(rawDocs);
     } else {
       const documents = await ClientDocument.find(clientFilter)
+        .select(CLIENT_DOCUMENT_SELECT)
         .sort(sortOption)
         .skip(skip)
         .limit(limit)
@@ -756,7 +744,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   const existingRef = await AssetReference.findOne({
     _id: assetRefId,
     deletedAt: null,
-  });
+  }).select("_id ownerType ownerId");
 
   if (!existingRef) {
     throw ApiError.badRequest(
@@ -782,7 +770,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
 
   if (validated.entityType === DOCUMENT_ENTITY_TYPES.CASE) {
     const caseObjectId = new mongoose.Types.ObjectId(validated.caseId);
-    const caseDoc = await Case.findOne({ _id: caseObjectId, deletedAt: null });
+    const caseDoc = await Case.findOne({ _id: caseObjectId, deletedAt: null }).select("_id title");
     if (!caseDoc) {
       throw ApiError.notFound("Case record not found or has been deleted.");
     }
@@ -806,14 +794,23 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
       });
       await doc.save({ session: dbSession });
 
-      // 3. Record compliance audit log
+      // 3. Record compliance audit log with clean DTO fields (no __v internal leakage)
       await recordAuditLog({
         req,
         userId,
         action: AUDIT_ACTIONS.CREATE,
         entityType: AUDIT_ENTITY_TYPES.CASE_DOCUMENT,
         entityId: doc._id,
-        newValues: doc.toObject(),
+        newValues: {
+          caseId: doc.caseId,
+          assetReferenceId: doc.assetReferenceId,
+          documentType: doc.documentType,
+          title: doc.title,
+          documentDate: doc.documentDate,
+          description: doc.description,
+          exhibitNumber: doc.exhibitNumber,
+          isConfidential: doc.isConfidential,
+        },
         description: `Created case document "${doc.title}" for case "${caseDoc.title}"`,
         session: dbSession,
       });
@@ -822,6 +819,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     });
 
     const populated = await CaseDocument.findById(createdDoc._id)
+      .select(CASE_DOCUMENT_SELECT)
       .populate<{ caseId: Record<string, unknown> }>("caseId", CASE_POPULATE_SELECT)
       .populate<{
         assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
@@ -854,7 +852,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   } else {
     // CLIENT DOCUMENT
     const clientObjectId = new mongoose.Types.ObjectId(validated.clientId);
-    const client = await Client.findOne({ _id: clientObjectId, deletedAt: null });
+    const client = await Client.findOne({ _id: clientObjectId, deletedAt: null }).select("_id name");
     if (!client) {
       throw ApiError.notFound("Client record not found or has been deleted.");
     }
@@ -877,14 +875,22 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
       });
       await doc.save({ session: dbSession });
 
-      // 3. Record compliance audit log
+      // 3. Record compliance audit log with clean DTO fields (no __v internal leakage)
       await recordAuditLog({
         req,
         userId,
         action: AUDIT_ACTIONS.CREATE,
         entityType: AUDIT_ENTITY_TYPES.CLIENT_DOCUMENT,
         entityId: doc._id,
-        newValues: doc.toObject(),
+        newValues: {
+          clientId: doc.clientId,
+          assetReferenceId: doc.assetReferenceId,
+          documentType: doc.documentType,
+          title: doc.title,
+          documentDate: doc.documentDate,
+          expiryDate: doc.expiryDate,
+          notes: doc.notes,
+        },
         description: `Created client document "${doc.title}" for client "${client.name}"`,
         session: dbSession,
       });
@@ -893,6 +899,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     });
 
     const populated = await ClientDocument.findById(createdDoc._id)
+      .select(CLIENT_DOCUMENT_SELECT)
       .populate<{ clientId: Record<string, unknown> }>("clientId", CLIENT_POPULATE_SELECT)
       .populate<{
         assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };

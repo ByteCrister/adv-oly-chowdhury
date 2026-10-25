@@ -18,10 +18,16 @@ import {
   AUDIT_ENTITY_TYPES,
 } from "@/lib/helpers/audit.helper";
 import { updateCaseSchema } from "@/utils/zod/case.validation";
-import { formatCaseListItem } from "../route";
+import {
+  formatCaseDetail,
+  CASE_SELECT_FIELDS,
+  CASE_CLIENT_POPULATE,
+  CASE_COURT_POPULATE,
+} from "../route";
 import type {
   CaseDetailDto,
   CaseActionResponse,
+  CaseDetailResponse,
   CaseDeleteResponse,
 } from "@/types/case.types";
 
@@ -32,7 +38,8 @@ interface RouteParams {
 /**
  * GET /api/v1/cases/[id]
  *
- * Retrieve single case details with populated client, court, and relation counts.
+ * Retrieve single case details with strictly projected client, court, and relation counts.
+ * Prevents over-fetching and eliminates leaked internal MongoDB fields.
  */
 export const GET = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
@@ -48,8 +55,9 @@ export const GET = withErrorHandler(
     const [caseDoc, hearingsCount, documentsCount, eventsCount, partiesCount] =
       await Promise.all([
         Case.findOne({ _id: caseObjectId, deletedAt: null })
-          .populate("clientId", "name clientNumber organizationName clientType phone email")
-          .populate("courtId", "name courtType district roomOrHall presidingJudgeTitle")
+          .select(CASE_SELECT_FIELDS)
+          .populate(CASE_CLIENT_POPULATE)
+          .populate(CASE_COURT_POPULATE)
           .lean(),
         Hearing.countDocuments({ caseId: caseObjectId }),
         CaseDocument.countDocuments({ caseId: caseObjectId, deletedAt: null }),
@@ -61,20 +69,14 @@ export const GET = withErrorHandler(
       throw ApiError.notFound("Case not found or has been archived.");
     }
 
-    const counts = {
+    const detailDto: CaseDetailDto = formatCaseDetail(caseDoc, {
       hearings: hearingsCount,
       documents: documentsCount,
       events: eventsCount,
       parties: partiesCount,
-    };
+    });
 
-    const listItem = formatCaseListItem(caseDoc, counts);
-    const detailDto: CaseDetailDto = {
-      ...listItem,
-      counts,
-    };
-
-    const response: CaseActionResponse = {
+    const response: CaseDetailResponse = {
       success: true,
       message: "Case details retrieved successfully.",
       data: detailDto,
@@ -88,6 +90,7 @@ export const GET = withErrorHandler(
  * PATCH /api/v1/cases/[id]
  *
  * Update case metadata, status, priority, or relational assignments.
+ * Validates references concurrently, records audit diff, and returns lean DTO.
  */
 export const PATCH = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
@@ -128,24 +131,35 @@ export const PATCH = withErrorHandler(
       caseDoc.internalReference = newRef;
     }
 
-    // Validate updated client reference if provided
+    // Validate updated client and court references concurrently if provided
+    const validationPromises: Promise<void>[] = [];
+
     if (validated.clientId) {
       const clientObjectId = new mongoose.Types.ObjectId(validated.clientId);
-      const clientExists = await Client.exists({ _id: clientObjectId, deletedAt: null });
-      if (!clientExists) {
-        throw ApiError.badRequest("Selected client does not exist or has been archived.");
-      }
-      caseDoc.clientId = clientObjectId;
+      validationPromises.push(
+        Client.exists({ _id: clientObjectId, deletedAt: null }).then((clientExists) => {
+          if (!clientExists) {
+            throw ApiError.badRequest("Selected client does not exist or has been archived.");
+          }
+          caseDoc.clientId = clientObjectId;
+        })
+      );
     }
 
-    // Validate updated court reference if provided
     if (validated.courtId) {
       const courtObjectId = new mongoose.Types.ObjectId(validated.courtId);
-      const courtExists = await Court.exists({ _id: courtObjectId, deletedAt: null });
-      if (!courtExists) {
-        throw ApiError.badRequest("Selected court does not exist or has been archived.");
-      }
-      caseDoc.courtId = courtObjectId;
+      validationPromises.push(
+        Court.exists({ _id: courtObjectId, deletedAt: null }).then((courtExists) => {
+          if (!courtExists) {
+            throw ApiError.badRequest("Selected court does not exist or has been archived.");
+          }
+          caseDoc.courtId = courtObjectId;
+        })
+      );
+    }
+
+    if (validationPromises.length > 0) {
+      await Promise.all(validationPromises);
     }
 
     // Apply metadata updates
@@ -182,7 +196,6 @@ export const PATCH = withErrorHandler(
       }
     }
 
-
     if (validated.closedAt !== undefined) {
       caseDoc.closedAt = validated.closedAt ? new Date(validated.closedAt) : null;
     }
@@ -210,12 +223,13 @@ export const PATCH = withErrorHandler(
       });
     });
 
-    // Fetch updated populated case and relation counts
+    // Fetch updated populated case and relation counts with strict field selections
     const [updatedDoc, hearingsCount, documentsCount, eventsCount, partiesCount] =
       await Promise.all([
         Case.findById(caseObjectId)
-          .populate("clientId", "name clientNumber organizationName clientType phone email")
-          .populate("courtId", "name courtType district roomOrHall presidingJudgeTitle")
+          .select(CASE_SELECT_FIELDS)
+          .populate(CASE_CLIENT_POPULATE)
+          .populate(CASE_COURT_POPULATE)
           .lean(),
         Hearing.countDocuments({ caseId: caseObjectId }),
         CaseDocument.countDocuments({ caseId: caseObjectId, deletedAt: null }),
@@ -223,18 +237,16 @@ export const PATCH = withErrorHandler(
         CaseParty.countDocuments({ caseId: caseObjectId }),
       ]);
 
-    const counts = {
+    if (!updatedDoc) {
+      throw ApiError.notFound("Case record could not be retrieved after update.");
+    }
+
+    const detailDto: CaseDetailDto = formatCaseDetail(updatedDoc, {
       hearings: hearingsCount,
       documents: documentsCount,
       events: eventsCount,
       parties: partiesCount,
-    };
-
-    const listItem = formatCaseListItem(updatedDoc!, counts);
-    const detailDto: CaseDetailDto = {
-      ...listItem,
-      counts,
-    };
+    });
 
     const response: CaseActionResponse = {
       success: true,

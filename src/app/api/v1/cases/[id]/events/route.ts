@@ -9,6 +9,8 @@ import {
   AUDIT_ACTIONS,
   AUDIT_ENTITY_TYPES,
 } from "@/lib/helpers/audit.helper";
+// Ensure models are registered in Mongoose schema cache for nested populate
+import "@/db/models/Asset.model";
 import { Case } from "@/db/models/Case.model";
 import { CaseEvent } from "@/db/models/CaseEvent.model";
 import { AssetReference } from "@/db/models/AssetReference.model";
@@ -41,40 +43,68 @@ interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
+export interface RawCaseEventInput {
+  _id?: unknown;
+  id?: string;
+  caseId?: unknown;
+  eventType?: CaseEventType | string | null;
+  title?: string | null;
+  description?: string | null;
+  eventDate?: Date | string | null;
+  assetReferenceId?: unknown;
+  createdAt?: Date | string | null;
+  updatedAt?: Date | string | null;
+}
+
 /**
  * Format a lean CaseEvent record into a type-safe CaseEventItemDto.
  */
 export function formatCaseEventItem(
-  doc: Record<string, unknown>,
+  doc: RawCaseEventInput,
   assetRef?: (IAssetReferenceDocument & { assetId?: IAsset }) | null
 ): CaseEventItemDto {
-  const asset = assetRef?.assetId;
+  const resolvedAssetRef =
+    assetRef !== undefined
+      ? assetRef
+      : doc.assetReferenceId && typeof doc.assetReferenceId === "object"
+      ? (doc.assetReferenceId as unknown as IAssetReferenceDocument & { assetId?: IAsset })
+      : null;
+
+  const asset =
+    resolvedAssetRef?.assetId && typeof resolvedAssetRef.assetId === "object"
+      ? resolvedAssetRef.assetId
+      : null;
+
   const eventType = (doc.eventType as CaseEventType) || CASE_EVENT_TYPES.OTHER;
 
+  const idStr = doc._id ? String(doc._id) : (doc.id as string) || "";
+  const caseIdStr = doc.caseId ? String(doc.caseId) : "";
+  const assetRefIdStr = resolvedAssetRef?._id
+    ? String(resolvedAssetRef._id)
+    : doc.assetReferenceId && typeof doc.assetReferenceId !== "object"
+    ? String(doc.assetReferenceId)
+    : null;
+
   return {
-    id: (doc._id as mongoose.Types.ObjectId).toString(),
-    caseId: (doc.caseId as mongoose.Types.ObjectId).toString(),
+    id: idStr,
+    caseId: caseIdStr,
     eventType,
     eventTypeLabel: CASE_EVENT_TYPE_LABELS[eventType] || eventType,
-    title: doc.title as string,
+    title: (doc.title as string) || "",
     description: (doc.description as string) || null,
     eventDate: formatSafeIsoDate(doc.eventDate) || new Date().toISOString(),
-    assetReferenceId: assetRef?._id
-      ? assetRef._id.toString()
-      : doc.assetReferenceId
-      ? String(doc.assetReferenceId)
-      : null,
+    assetReferenceId: assetRefIdStr,
     attachment:
-      assetRef && asset
+      resolvedAssetRef && asset
         ? {
-            id: (assetRef._id as mongoose.Types.ObjectId).toString(),
+            id: String(resolvedAssetRef._id),
             assetId: String(asset._id),
             originalFileName:
-              assetRef.originalFileName || asset.originalFilename || "Attachment",
+              resolvedAssetRef.originalFileName || asset.originalFilename || "Attachment",
             fileUrl: asset.secureUrl || "",
             publicId: asset.publicId || "",
             mimeType: asset.mimeType || "application/octet-stream",
-            sizeBytes: asset.bytes || 0,
+            sizeBytes: typeof asset.bytes === "number" ? asset.bytes : 0,
           }
         : null,
     createdAt: formatSafeIsoDate(doc.createdAt) || new Date().toISOString(),
@@ -217,8 +247,21 @@ export const GET = withErrorHandler(
             },
           },
         },
+        {
+          $project: {
+            _id: 0,
+            total: 1,
+            upcoming: 1,
+            past: 1,
+            today: 1,
+            withAttachment: 1,
+          },
+        },
       ]),
       CaseEvent.find(filter)
+        .select(
+          "_id caseId eventType title description eventDate assetReferenceId createdAt updatedAt"
+        )
         .sort(sortOption)
         .skip(skip)
         .limit(limit)
@@ -226,7 +269,12 @@ export const GET = withErrorHandler(
           assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
         }>({
           path: "assetReferenceId",
-          populate: { path: "assetId" },
+          select: "_id originalFileName assetId",
+          match: { deletedAt: null },
+          populate: {
+            path: "assetId",
+            select: "_id secureUrl publicId originalFilename mimeType bytes",
+          },
         })
         .lean(),
     ]);
@@ -297,20 +345,25 @@ export const POST = withErrorHandler(
     const createdEvent = await withTransaction(async (dbSession) => {
       // 1. If attachment reference provided, verify and assign ownership inside session
       if (assetRefObjectId) {
-        const existingRef = await AssetReference.findOne({
-          _id: assetRefObjectId,
-          deletedAt: null,
-        }).session(dbSession);
+        const updatedRef = await AssetReference.findOneAndUpdate(
+          {
+            _id: assetRefObjectId,
+            deletedAt: null,
+          },
+          {
+            $set: {
+              ownerType: ASSET_OWNER_TYPES.CASE_EVENT,
+              ownerId: caseObjectId,
+            },
+          },
+          { session: dbSession, select: "_id" }
+        );
 
-        if (!existingRef) {
+        if (!updatedRef) {
           throw ApiError.badRequest(
             "Referenced attachment does not exist or has been deleted."
           );
         }
-
-        existingRef.ownerType = ASSET_OWNER_TYPES.CASE_EVENT;
-        existingRef.ownerId = caseObjectId;
-        await existingRef.save({ session: dbSession });
       }
 
       // 2. Create CaseEvent
@@ -336,7 +389,14 @@ export const POST = withErrorHandler(
         entityType: AUDIT_ENTITY_TYPES.CASE_EVENT,
         entityId: eventDoc._id,
         oldValues: null,
-        newValues: eventDoc.toObject(),
+        newValues: {
+          caseId: eventDoc.caseId,
+          eventType: eventDoc.eventType,
+          title: eventDoc.title,
+          description: eventDoc.description,
+          eventDate: eventDoc.eventDate,
+          assetReferenceId: eventDoc.assetReferenceId,
+        },
         description: `Added event "${eventDoc.title}" to case`,
         session: dbSession,
       });
@@ -345,17 +405,29 @@ export const POST = withErrorHandler(
     });
 
     const populated = await CaseEvent.findById(createdEvent._id)
+      .select(
+        "_id caseId eventType title description eventDate assetReferenceId createdAt updatedAt"
+      )
       .populate<{
         assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
       }>({
         path: "assetReferenceId",
-        populate: { path: "assetId" },
+        select: "_id originalFileName assetId",
+        match: { deletedAt: null },
+        populate: {
+          path: "assetId",
+          select: "_id secureUrl publicId originalFilename mimeType bytes",
+        },
       })
       .lean();
 
+    if (!populated) {
+      throw ApiError.internal("Failed to retrieve created case event.");
+    }
+
     const itemDto = formatCaseEventItem(
-      populated!,
-      populated!.assetReferenceId as unknown as (IAssetReferenceDocument & {
+      populated,
+      populated.assetReferenceId as unknown as (IAssetReferenceDocument & {
         assetId: IAsset;
       }) | null
     );

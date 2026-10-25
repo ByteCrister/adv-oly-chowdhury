@@ -7,11 +7,11 @@ import {
   RefreshCw,
   Eye,
   EyeOff,
-  Lock,
   AlertTriangle,
-  CheckCircle2,
+  ShieldCheck,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import axios from "axios";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/shared/use-toast";
@@ -21,7 +21,7 @@ import {
   StaggerItem,
 } from "@/components/wrappers/Motion";
 import { useUpdateProfileMutation } from "@/hooks/profile/mutations/useUpdateProfileMutation";
-import { useUpdatePasswordMutation } from "@/hooks/profile/mutations/useUpdatePasswordMutation";
+import { PasswordChangeOtpDialog } from "./PasswordChangeOtpDialog";
 import {
   ProfileApiResponse,
   ProfileUpdateDto,
@@ -48,7 +48,6 @@ export function ProfileEditForm({
 }: ProfileEditFormProps) {
   const { toast } = useToast();
   const updateProfileMutation = useUpdateProfileMutation();
-  const updatePasswordMutation = useUpdatePasswordMutation();
 
   // Profile Form State initialized from user
   const [formData, setFormData] = React.useState<ProfileUpdateDto>({
@@ -92,6 +91,12 @@ export function ProfileEditForm({
   const [showCurrentPassword, setShowCurrentPassword] = React.useState(false);
   const [showNewPassword, setShowNewPassword] = React.useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = React.useState(false);
+
+  // Password OTP Verification States
+  const [isRequestingOtp, setIsRequestingOtp] = React.useState(false);
+  const [otpDialogOpen, setOtpDialogOpen] = React.useState(false);
+  const [otpRequestId, setOtpRequestId] = React.useState("");
+  const [userEmail, setUserEmail] = React.useState(user.email || "");
 
   // Form error states
   const [formError, setFormError] = React.useState<string | null>(null);
@@ -203,7 +208,7 @@ export function ProfileEditForm({
     [formData, onSaved, toast, updateProfileMutation]
   );
 
-  // Save password update
+  // Save password update via OTP verification flow
   const handleSavePassword = React.useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
@@ -221,40 +226,67 @@ export function ProfileEditForm({
         setPasswordError("New passwords do not match.");
         return;
       }
+      if (passwordData.currentPassword === passwordData.newPassword) {
+        setPasswordError("New password must be different from your current password.");
+        return;
+      }
+
+      setIsRequestingOtp(true);
 
       try {
-        await updatePasswordMutation.mutateAsync(passwordData);
+        const response = await axios.post(
+          "/api/v1/users/me/password/request-otp",
+          {
+            currentPassword: passwordData.currentPassword,
+          }
+        );
+
+        const data = response.data?.data;
+        setOtpRequestId(data?.requestId || "");
+        if (data?.email) {
+          setUserEmail(data.email);
+        }
+
+        setOtpDialogOpen(true);
 
         toast({
-          title: "Password Changed",
-          description: "Your chamber admin account password has been updated.",
+          title: "Verification Code Dispatched",
+          description:
+            "A 6-digit one-time code was sent to your chamber email. Please verify to update your password.",
           variant: "gold",
         });
-
-        setPasswordData({
-          currentPassword: "",
-          newPassword: "",
-          confirmPassword: "",
-        });
-
-        onSaved();
       } catch (err: unknown) {
-        const msg =
-          err instanceof Error
-            ? err.message
-            : "Failed to update password. Please check your current password.";
+        let msg =
+          "Failed to initiate password change. Please verify your current password.";
+        if (axios.isAxiosError(err)) {
+          msg = err.response?.data?.message || err.message || msg;
+        } else if (err instanceof Error) {
+          msg = err.message;
+        }
         setPasswordError(msg);
         toast({
-          title: "Password Update Failed",
+          title: "Verification Request Failed",
           description: msg,
           variant: "destructive",
         });
+      } finally {
+        setIsRequestingOtp(false);
       }
     },
-    [onSaved, passwordData, toast, updatePasswordMutation]
+    [passwordData, toast]
   );
 
-  const isSaving = updateProfileMutation.isPending || updatePasswordMutation.isPending;
+  const handlePasswordSuccess = React.useCallback(() => {
+    setPasswordData({
+      currentPassword: "",
+      newPassword: "",
+      confirmPassword: "",
+    });
+    setPasswordError(null);
+    onSaved();
+  }, [onSaved]);
+
+  const isSaving = updateProfileMutation.isPending || isRequestingOtp;
 
   return (
     <div className="p-6 sm:p-8 rounded-2xl bg-card/85 dark:bg-card/50 backdrop-blur-2xl border border-border/80 dark:border-white/10 shadow-xl space-y-8">
@@ -746,11 +778,11 @@ export function ProfileEditForm({
         <FadeIn duration={0.3} key="security">
           <div className="space-y-6">
             <div className="p-4 rounded-xl bg-gold-500/10 border border-gold-500/25 flex items-start gap-3">
-              <Lock className="w-4 h-4 text-gold-500 mt-0.5 shrink-0" />
+              <ShieldCheck className="w-4 h-4 text-gold-500 mt-0.5 shrink-0" />
               <div className="text-xs space-y-1">
-                <p className="font-semibold text-foreground">Update Admin Password</p>
+                <p className="font-semibold text-foreground">Update Chamber Admin Password</p>
                 <p className="text-muted-foreground">
-                  Protect your chamber records. Changing your password requires your current password and will update your single-user authentication credentials.
+                  Protect your chamber records. Changing your password requires your current password and authorization via a secure 6-digit one-time code sent to your registered chamber email.
                 </p>
               </div>
             </div>
@@ -887,15 +919,15 @@ export function ProfileEditForm({
                       disabled={isSaving}
                       className="w-full text-xs font-semibold gap-1.5 shadow-sm"
                     >
-                      {isSaving ? (
+                      {isRequestingOtp ? (
                         <>
                           <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          <span>Updating Password...</span>
+                          <span>Dispatching Verification Code...</span>
                         </>
                       ) : (
                         <>
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Update Account Password</span>
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          <span>Verify with OTP &amp; Update Password</span>
                         </>
                       )}
                     </Button>
@@ -949,6 +981,18 @@ export function ProfileEditForm({
           </div>
         </div>
       )}
+
+      {/* ── Password Change OTP Verification Dialog ── */}
+      <PasswordChangeOtpDialog
+        open={otpDialogOpen}
+        onOpenChange={setOtpDialogOpen}
+        email={userEmail}
+        requestId={otpRequestId}
+        currentPassword={passwordData.currentPassword}
+        newPassword={passwordData.newPassword}
+        confirmPassword={passwordData.confirmPassword}
+        onSuccess={handlePasswordSuccess}
+      />
     </div>
   );
 }

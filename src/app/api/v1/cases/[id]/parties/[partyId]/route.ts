@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
+import { Case } from "@/db/models/Case.model";
 import { CaseParty } from "@/db/models/CaseParty.model";
 import { Client } from "@/db/models/Client.model";
 import {
@@ -12,9 +13,14 @@ import {
   AUDIT_ENTITY_TYPES,
 } from "@/lib/helpers/audit.helper";
 import { updateCasePartySchema } from "@/utils/zod/case-party.validation";
-import { formatCasePartyItem } from "../route";
+import {
+  formatCasePartyItem,
+  CASE_PARTY_SELECT_FIELDS,
+  CASE_PARTY_CLIENT_POPULATE,
+} from "../route";
 import type {
   CasePartyActionResponse,
+  CasePartyDetailResponse,
   CasePartyDeleteResponse,
 } from "@/types/case-party.types";
 
@@ -26,6 +32,7 @@ interface RouteParams {
  * GET /api/v1/cases/[id]/parties/[partyId]
  *
  * Retrieve an individual party associated with a case.
+ * Enforces strict case scoping, parent case verification, and projected population.
  */
 export const GET = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
@@ -39,12 +46,21 @@ export const GET = withErrorHandler(
     const caseObjectId = new mongoose.Types.ObjectId(id);
     const partyObjectId = new mongoose.Types.ObjectId(partyId);
 
-    const partyDoc = await CaseParty.findOne({
-      _id: partyObjectId,
-      caseId: caseObjectId,
-    })
-      .populate("clientId", "name clientNumber organizationName clientType phone email")
-      .lean();
+    // Parallel lookup: verify parent case exists while querying projected party
+    const [caseExists, partyDoc] = await Promise.all([
+      Case.exists({ _id: caseObjectId, deletedAt: null }),
+      CaseParty.findOne({
+        _id: partyObjectId,
+        caseId: caseObjectId,
+      })
+        .select(CASE_PARTY_SELECT_FIELDS)
+        .populate(CASE_PARTY_CLIENT_POPULATE)
+        .lean(),
+    ]);
+
+    if (!caseExists) {
+      throw ApiError.notFound("Case not found or has been archived.");
+    }
 
     if (!partyDoc) {
       throw ApiError.notFound("Party not found for this case.");
@@ -55,10 +71,12 @@ export const GET = withErrorHandler(
       partyDoc.clientId as Record<string, unknown> | null
     );
 
-    return NextResponse.json({
+    const response: CasePartyDetailResponse = {
       success: true,
       data: itemDto,
-    });
+    };
+
+    return NextResponse.json(response);
   }
 );
 
@@ -66,6 +84,7 @@ export const GET = withErrorHandler(
  * PATCH /api/v1/cases/[id]/parties/[partyId]
  *
  * Update an existing case party record.
+ * Validates updates, audits diffs in a transaction, and returns the lean projected DTO.
  */
 export const PATCH = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
@@ -82,10 +101,17 @@ export const PATCH = withErrorHandler(
     const body = await req.json();
     const validated = updateCasePartySchema.parse(body);
 
-    const partyDoc = await CaseParty.findOne({
-      _id: partyObjectId,
-      caseId: caseObjectId,
-    });
+    const [caseExists, partyDoc] = await Promise.all([
+      Case.exists({ _id: caseObjectId, deletedAt: null }),
+      CaseParty.findOne({
+        _id: partyObjectId,
+        caseId: caseObjectId,
+      }).select(CASE_PARTY_SELECT_FIELDS),
+    ]);
+
+    if (!caseExists) {
+      throw ApiError.notFound("Case not found or has been archived.");
+    }
 
     if (!partyDoc) {
       throw ApiError.notFound("Party not found for this case.");
@@ -139,12 +165,17 @@ export const PATCH = withErrorHandler(
     });
 
     const updatedDoc = await CaseParty.findById(partyObjectId)
-      .populate("clientId", "name clientNumber organizationName clientType phone email")
+      .select(CASE_PARTY_SELECT_FIELDS)
+      .populate(CASE_PARTY_CLIENT_POPULATE)
       .lean();
 
+    if (!updatedDoc) {
+      throw ApiError.notFound("Party record could not be retrieved after update.");
+    }
+
     const itemDto = formatCasePartyItem(
-      updatedDoc!,
-      updatedDoc!.clientId as Record<string, unknown> | null
+      updatedDoc,
+      updatedDoc.clientId as Record<string, unknown> | null
     );
 
     const response: CasePartyActionResponse = {
@@ -168,6 +199,7 @@ export const PUT = PATCH;
  * DELETE /api/v1/cases/[id]/parties/[partyId]
  *
  * Remove a party record from the case.
+ * Enforces parent case verification and returns a clean deletion response.
  */
 export const DELETE = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
@@ -181,10 +213,17 @@ export const DELETE = withErrorHandler(
     const caseObjectId = new mongoose.Types.ObjectId(id);
     const partyObjectId = new mongoose.Types.ObjectId(partyId);
 
-    const partyDoc = await CaseParty.findOne({
-      _id: partyObjectId,
-      caseId: caseObjectId,
-    });
+    const [caseExists, partyDoc] = await Promise.all([
+      Case.exists({ _id: caseObjectId, deletedAt: null }),
+      CaseParty.findOne({
+        _id: partyObjectId,
+        caseId: caseObjectId,
+      }).select(CASE_PARTY_SELECT_FIELDS),
+    ]);
+
+    if (!caseExists) {
+      throw ApiError.notFound("Case not found or has been archived.");
+    }
 
     if (!partyDoc) {
       throw ApiError.notFound("Party not found for this case.");

@@ -197,6 +197,14 @@ export interface CreateClientInput {
 export type UpdateClientInput = Partial<CreateClientInput>;
 
 /**
+ * API response for single client detail query.
+ */
+export interface SingleClientApiResponse {
+  success: boolean;
+  data: ClientDetailDto;
+}
+
+/**
  * API response for create and update mutations.
  */
 export interface ClientActionResponse {
@@ -213,3 +221,4 @@ export interface ClientDeleteResponse {
   message: string;
   id: string;
 }
+

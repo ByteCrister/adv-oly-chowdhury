@@ -118,3 +118,12 @@ export interface ClientPaymentDeleteResponse {
   message: string;
   id: string;
 }
+
+/**
+ * API response for single client payment detail query.
+ */
+export interface SingleClientPaymentApiResponse {
+  success: boolean;
+  data: ClientPaymentItemDto;
+}
+

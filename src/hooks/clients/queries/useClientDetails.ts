@@ -3,12 +3,7 @@
 import { useQuery, UseQueryOptions } from "@tanstack/react-query";
 import axios from "axios";
 import { CLIENT_QUERY_KEYS } from "@/const/client.const";
-import type { ClientDetailDto } from "@/types/client.types";
-
-interface SingleClientApiResponse {
-  success: boolean;
-  data: ClientDetailDto;
-}
+import type { ClientDetailDto, SingleClientApiResponse } from "@/types/client.types";
 
 /**
  * Fetch detailed client profile by ID.

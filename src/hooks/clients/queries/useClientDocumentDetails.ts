@@ -3,12 +3,10 @@
 import { useQuery, UseQueryOptions } from "@tanstack/react-query";
 import axios from "axios";
 import { CLIENT_DOCUMENT_QUERY_KEYS } from "@/const/client-document.const";
-import type { ClientDocumentItemDto } from "@/types/client-document.types";
-
-interface SingleDocumentApiResponse {
-  success: boolean;
-  data: ClientDocumentItemDto;
-}
+import type {
+  ClientDocumentItemDto,
+  SingleClientDocumentApiResponse,
+} from "@/types/client-document.types";
 
 /**
  * Fetch a single client document by client ID and document ID.
@@ -17,7 +15,7 @@ export async function fetchClientDocumentDetails(
   clientId: string,
   docId: string
 ): Promise<ClientDocumentItemDto> {
-  const response = await axios.get<SingleDocumentApiResponse>(
+  const response = await axios.get<SingleClientDocumentApiResponse>(
     `/api/v1/clients/${clientId}/documents/${docId}`
   );
   return response.data.data;

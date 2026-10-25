@@ -30,6 +30,7 @@ import {
   casePartyQueryFilterSchema,
 } from "@/utils/zod/case-party.validation";
 import { extractIdString, formatSafeIsoDate } from "@/app/api/v1/cases/route";
+import type { CaseClientDto } from "@/types/case.types";
 import type {
   CasePartyItemDto,
   CasePartyPaginationResponse,
@@ -37,20 +38,42 @@ import type {
   CasePartyActionResponse,
 } from "@/types/case-party.types";
 
-import type { ICaseParty, ICasePartyDocument } from "@/types/db/case-party.type";
+import type {
+  ICaseParty,
+  ICasePartyDocument,
+  IPopulatedCasePartyDoc,
+} from "@/types/db/case-party.type";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
+/**
+ * Explicit projection fields for CaseParty queries.
+ * Eliminates leaked internal MongoDB fields (__v, passwordHash, etc.).
+ */
+export const CASE_PARTY_SELECT_FIELDS =
+  "_id caseId clientId name partyType role address phone notes createdAt updatedAt";
+
+/**
+ * Strict population options for linked Client reference.
+ * Restricts client data to display-safe non-sensitive summary fields.
+ */
+export const CASE_PARTY_CLIENT_POPULATE = {
+  path: "clientId",
+  select: "_id name clientNumber organizationName clientType phone email",
+} as const;
+
 export type CasePartyDocInput =
   | ICasePartyDocument
   | ICaseParty
+  | IPopulatedCasePartyDoc
   | mongoose.FlattenMaps<ICasePartyDocument>
   | (Record<string, unknown> & { _id?: unknown });
 
 /**
  * Format a lean CaseParty record into a type-safe CasePartyItemDto.
+ * Extracts clean DTO fields, eliminates database internals, and prevents payload bloat.
  */
 export function formatCasePartyItem(
   doc: CasePartyDocInput,
@@ -63,24 +86,37 @@ export function formatCasePartyItem(
   const partyType = (rawDoc.partyType as PartyType) || PARTY_TYPES.INDIVIDUAL;
   const role = (rawDoc.role as PartyRole) || PARTY_ROLES.PLAINTIFF;
 
+  // Resolve client document from explicit parameter, or from populated clientId on doc
+  const resolvedClientDoc =
+    clientDoc !== undefined
+      ? clientDoc
+      : rawDoc.clientId &&
+        typeof rawDoc.clientId === "object" &&
+        "_id" in (rawDoc.clientId as object)
+      ? (rawDoc.clientId as Record<string, unknown>)
+      : null;
+
   const clientId = extractIdString(rawDoc.clientId) || null;
+
+  const clientDto: CaseClientDto | null =
+    resolvedClientDoc && resolvedClientDoc._id
+      ? {
+          id: extractIdString(resolvedClientDoc._id),
+          clientNumber: (resolvedClientDoc.clientNumber as string) || "",
+          name: (resolvedClientDoc.name as string) || "",
+          organizationName: (resolvedClientDoc.organizationName as string) || null,
+          clientType: (resolvedClientDoc.clientType as string) || "INDIVIDUAL",
+          phone: (resolvedClientDoc.phone as string) || null,
+          email: (resolvedClientDoc.email as string) || null,
+        }
+      : null;
 
   return {
     id,
     caseId,
     clientId,
-    client: clientDoc && clientDoc._id
-      ? {
-          id: extractIdString(clientDoc._id),
-          clientNumber: (clientDoc.clientNumber as string) || "",
-          name: (clientDoc.name as string) || "",
-          organizationName: (clientDoc.organizationName as string) || null,
-          clientType: (clientDoc.clientType as string) || "INDIVIDUAL",
-          phone: (clientDoc.phone as string) || null,
-          email: (clientDoc.email as string) || null,
-        }
-      : null,
-    name: (doc as Record<string, unknown>).name as string,
+    client: clientDto,
+    name: (rawDoc.name as string) || "",
     partyType,
     partyTypeLabel: CASE_PARTY_TYPE_LABELS[partyType] || partyType,
     role,
@@ -192,6 +228,7 @@ export const GET = withErrorHandler(
         other: number;
       }>([
         { $match: filter },
+        { $project: { _id: 0, role: 1 } },
         {
           $group: {
             _id: null,
@@ -241,10 +278,11 @@ export const GET = withErrorHandler(
         },
       ]),
       CaseParty.find(filter)
+        .select(CASE_PARTY_SELECT_FIELDS)
         .sort(sortOption)
         .skip(skip)
         .limit(limit)
-        .populate("clientId", "name clientNumber organizationName clientType phone email")
+        .populate(CASE_PARTY_CLIENT_POPULATE)
         .lean(),
     ]);
 
@@ -262,10 +300,9 @@ export const GET = withErrorHandler(
       other: rawStats?.other ?? 0,
     };
 
-    const items: CasePartyItemDto[] = parties.map((p) => {
-      const clientDoc = p.clientId as Record<string, unknown> | null;
-      return formatCasePartyItem(p, clientDoc);
-    });
+    const items: CasePartyItemDto[] = parties.map((p) =>
+      formatCasePartyItem(p, p.clientId as Record<string, unknown> | null)
+    );
 
     const response: CasePartyPaginationResponse = {
       items,
@@ -352,12 +389,17 @@ export const POST = withErrorHandler(
     });
 
     const populated = await CaseParty.findById(createdParty._id)
-      .populate("clientId", "name clientNumber organizationName clientType phone email")
+      .select(CASE_PARTY_SELECT_FIELDS)
+      .populate(CASE_PARTY_CLIENT_POPULATE)
       .lean();
 
+    if (!populated) {
+      throw ApiError.notFound("Party record could not be retrieved after creation.");
+    }
+
     const itemDto = formatCasePartyItem(
-      populated!,
-      populated!.clientId as Record<string, unknown> | null
+      populated,
+      populated.clientId as Record<string, unknown> | null
     );
 
     const response: CasePartyActionResponse = {

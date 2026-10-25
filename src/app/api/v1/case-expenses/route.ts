@@ -132,6 +132,16 @@ export function formatCaseExpenseItem(doc: CaseExpenseDocInput): CaseExpenseItem
     ? expenseDateObj.toISOString()
     : new Date().toISOString();
 
+  const createdDateObj = doc.createdAt ? new Date(doc.createdAt) : null;
+  const validCreatedAt = createdDateObj && !isNaN(createdDateObj.getTime())
+    ? createdDateObj.toISOString()
+    : new Date().toISOString();
+
+  const updatedDateObj = doc.updatedAt ? new Date(doc.updatedAt) : null;
+  const validUpdatedAt = updatedDateObj && !isNaN(updatedDateObj.getTime())
+    ? updatedDateObj.toISOString()
+    : validCreatedAt;
+
   return {
     id: idStr,
     caseId: caseIdStr,
@@ -152,7 +162,7 @@ export function formatCaseExpenseItem(doc: CaseExpenseDocInput): CaseExpenseItem
     receiptFileName: rawReceipt?.originalFileName || asset?.originalFilename || null,
     receiptAssetType: (asset?.assetType as AssetType) || null,
     receiptMimeType: asset?.mimeType || null,
-    receiptSizeBytes: asset?.bytes || null,
+    receiptSizeBytes: typeof asset?.bytes === "number" ? asset.bytes : null,
     recordedBy: rawUser?._id
       ? {
         id: String(rawUser._id),
@@ -160,8 +170,8 @@ export function formatCaseExpenseItem(doc: CaseExpenseDocInput): CaseExpenseItem
         email: rawUser.email || "",
       }
       : null,
-    createdAt: doc.createdAt ? new Date(doc.createdAt).toISOString() : "",
-    updatedAt: doc.updatedAt ? new Date(doc.updatedAt).toISOString() : "",
+    createdAt: validCreatedAt,
+    updatedAt: validUpdatedAt,
   };
 }
 
@@ -266,12 +276,8 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       clientSearchFilter._id = new mongoose.Types.ObjectId(clientId);
     }
 
-    const matchingClients = await Client.find(clientSearchFilter, {
-      _id: 1,
-      name: 1,
-      clientNumber: 1,
-      organizationName: 1,
-    })
+    const matchingClients = await Client.find(clientSearchFilter)
+      .select("_id name clientNumber organizationName phone")
       .limit(500)
       .lean<ClientMatchCandidate[]>();
 
@@ -309,13 +315,8 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       caseSearchFilter.clientId = new mongoose.Types.ObjectId(clientId);
     }
 
-    const matchingCases = await Case.find(caseSearchFilter, {
-      _id: 1,
-      title: 1,
-      caseNumber: 1,
-      internalReference: 1,
-      clientId: 1,
-    })
+    const matchingCases = await Case.find(caseSearchFilter)
+      .select("_id title caseNumber internalReference clientId")
       .limit(1000)
       .lean<CaseMatchCandidate[]>();
 
@@ -372,11 +373,31 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
         { $skip: skip },
         { $limit: limit },
         {
+          $project: {
+            _id: 1,
+            caseId: 1,
+            expenseDate: 1,
+            category: 1,
+            description: 1,
+            amount: 1,
+            currency: 1,
+            receiptAssetReferenceId: 1,
+            recordedBy: 1,
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        },
+        {
           $lookup: {
             from: COLLECTIONS.CASES,
             localField: "caseId",
             foreignField: "_id",
             pipeline: [
+              {
+                $match: {
+                  deletedAt: null,
+                },
+              },
               {
                 $project: {
                   _id: 1,
@@ -403,6 +424,11 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
             foreignField: "_id",
             pipeline: [
               {
+                $match: {
+                  deletedAt: null,
+                },
+              },
+              {
                 $project: {
                   _id: 1,
                   name: 1,
@@ -425,6 +451,11 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
             localField: "receiptAssetReferenceId",
             foreignField: "_id",
             pipeline: [
+              {
+                $match: {
+                  deletedAt: null,
+                },
+              },
               {
                 $lookup: {
                   from: COLLECTIONS.ASSETS,
@@ -622,7 +653,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
           ownerId: caseObjectId,
           purpose: ASSET_PURPOSES.EXPENSE_RECEIPT,
         },
-        { session: dbSession }
+        { session: dbSession, select: "_id" }
       );
     }
 
@@ -658,26 +689,36 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   });
 
   const populated = await CaseExpense.findById(createdExpense._id)
+    .select(
+      "_id caseId expenseDate category description amount currency receiptAssetReferenceId recordedBy createdAt updatedAt"
+    )
     .populate({
       path: "caseId",
-      select: "internalReference caseNumber title clientId",
+      select: "_id internalReference caseNumber title clientId",
       populate: {
         path: "clientId",
-        select: "name clientNumber",
+        select: "_id name clientNumber",
       },
     })
     .populate({
       path: "receiptAssetReferenceId",
-      select: "originalFileName assetId",
+      select: "_id originalFileName assetId",
       populate: {
         path: "assetId",
-        select: "secureUrl originalFilename assetType mimeType bytes",
+        select: "_id secureUrl originalFilename assetType mimeType bytes",
       },
     })
-    .populate("recordedBy", "name email")
+    .populate({
+      path: "recordedBy",
+      select: "_id name email",
+    })
     .lean<CaseExpenseDocInput>();
 
-  const itemDto = formatCaseExpenseItem(populated!);
+  if (!populated) {
+    throw ApiError.internal("Failed to retrieve recorded case expense.");
+  }
+
+  const itemDto = formatCaseExpenseItem(populated);
 
   const response: CaseExpenseActionResponse = {
     success: true,

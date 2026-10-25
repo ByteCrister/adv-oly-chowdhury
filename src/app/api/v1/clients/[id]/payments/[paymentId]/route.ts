@@ -3,10 +3,12 @@ import mongoose from "mongoose";
 import { getUserId } from "@/lib/auth/auth.helper";
 import { withErrorHandler, ApiError } from "@/lib/helpers/withErrorHandler";
 import { withTransaction } from "@/lib/helpers/withTransaction";
+import { Client } from "@/db/models/Client.model";
 import { ClientPayment } from "@/db/models/ClientPayment.model";
 import { Case } from "@/db/models/Case.model";
 import { AssetReference } from "@/db/models/AssetReference.model";
 import { ASSET_OWNER_TYPES, ASSET_PURPOSES } from "@/const/asset-reference.const";
+import { AssetType } from "@/const/asset.const";
 import {
   recordAuditLog,
   calculateAuditDiff,
@@ -15,86 +17,27 @@ import {
 } from "@/lib/helpers/audit.helper";
 // Ensure models are registered in Mongoose schema cache for nested populate
 import "@/db/models/Asset.model";
-import {
-  PAYMENT_METHOD_LABELS,
-  PAYMENT_TYPE_LABELS,
-  PaymentMethod,
-  PaymentType,
-} from "@/const/client-payment.const";
 import { updateClientPaymentSchema } from "@/utils/zod/client-payment.validation";
-import { formatSafeIsoDate } from "@/app/api/v1/clients/route";
+import {
+  formatClientPaymentItem,
+  type PopulatedCaseInfo,
+  type PopulatedReceiptAssetRef,
+  type PopulatedReceivedByUser,
+} from "../route";
 import type {
-  ClientPaymentItemDto,
   ClientPaymentActionResponse,
   ClientPaymentDeleteResponse,
+  SingleClientPaymentApiResponse,
 } from "@/types/client-payment.types";
-import type { IAsset } from "@/types/db/asset.type";
-import type { IAssetReferenceDocument } from "@/types/db/asset-reference.type";
 
 interface RouteParams {
   params: Promise<{ id: string; paymentId: string }>;
 }
 
 /**
- * Format a ClientPayment record into ClientPaymentItemDto.
- */
-function formatClientPaymentItem(
-  payment: Record<string, unknown>,
-  caseDoc?: { internalReference?: string; caseNumber?: string; title?: string } | null,
-  receiptRef?: (IAssetReferenceDocument & { assetId?: IAsset }) | null,
-  receivedByUser?: { _id: mongoose.Types.ObjectId; name: string; email: string } | null
-): ClientPaymentItemDto {
-  const method = payment.paymentMethod as PaymentMethod;
-  const pType = payment.paymentType as PaymentType;
-  const caseRef = caseDoc
-    ? caseDoc.caseNumber || caseDoc.internalReference || null
-    : null;
-
-  const asset = receiptRef?.assetId;
-
-  return {
-    id: (payment._id as mongoose.Types.ObjectId).toString(),
-    clientId: (payment.clientId as mongoose.Types.ObjectId).toString(),
-    caseId: payment.caseId ? (payment.caseId as mongoose.Types.ObjectId).toString() : null,
-    caseReference: caseRef,
-    caseTitle: caseDoc?.title || null,
-    paymentDate: formatSafeIsoDate(payment.paymentDate) || new Date().toISOString(),
-    amount: payment.amount as number,
-    currency: (payment.currency as string) || "BDT",
-    paymentMethod: method,
-    paymentMethodLabel: PAYMENT_METHOD_LABELS[method] || String(payment.paymentMethod),
-    paymentType: pType,
-    paymentTypeLabel: PAYMENT_TYPE_LABELS[pType] || String(payment.paymentType),
-    referenceNumber: (payment.referenceNumber as string) || null,
-    moneyReceiptNumber: (payment.moneyReceiptNumber as string) || null,
-    receiptAssetreferenceId: payment.receiptAssetreferenceId
-      ? (payment.receiptAssetreferenceId as mongoose.Types.ObjectId).toString()
-      : null,
-    receiptAssetReferenceId: payment.receiptAssetreferenceId
-      ? (payment.receiptAssetreferenceId as mongoose.Types.ObjectId).toString()
-      : null,
-    receiptUrl: asset?.secureUrl || null,
-    receiptFileName: receiptRef?.originalFileName || asset?.originalFilename || null,
-    receiptAssetType: asset?.assetType || null,
-    receiptMimeType: asset?.mimeType || null,
-    receiptSizeBytes: asset?.bytes || null,
-    notes: (payment.notes as string) || null,
-    receivedBy: receivedByUser
-      ? {
-          id: receivedByUser._id.toString(),
-          name: receivedByUser.name,
-          email: receivedByUser.email,
-        }
-      : null,
-    createdAt: formatSafeIsoDate(payment.createdAt) || new Date().toISOString(),
-    updatedAt: formatSafeIsoDate(payment.updatedAt) || new Date().toISOString(),
-  };
-}
-
-/**
  * GET /api/v1/clients/[id]/payments/[paymentId]
  *
- * Retrieve details for a single client payment.
+ * Retrieve details for a single client payment with strict field projections.
  */
 export const GET = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
@@ -108,23 +51,54 @@ export const GET = withErrorHandler(
     const clientObjectId = new mongoose.Types.ObjectId(id);
     const paymentObjectId = new mongoose.Types.ObjectId(paymentId);
 
-    const payment = await ClientPayment.findOne({
-      _id: paymentObjectId,
-      clientId: clientObjectId,
-    })
-      .populate<{
-        caseId: { internalReference: string; caseNumber: string; title: string };
-      }>("caseId", "internalReference caseNumber title")
-      .populate<{
-        receiptAssetreferenceId: IAssetReferenceDocument & { assetId: IAsset };
-      }>({
-        path: "receiptAssetreferenceId",
-        populate: { path: "assetId" },
+    const [clientExists, payment] = await Promise.all([
+      Client.exists({ _id: clientObjectId, deletedAt: null }),
+      ClientPayment.findOne({
+        _id: paymentObjectId,
+        clientId: clientObjectId,
       })
-      .populate<{
-        receivedBy: { _id: mongoose.Types.ObjectId; name: string; email: string };
-      }>("receivedBy", "name email")
-      .lean();
+        .select(
+          "_id clientId caseId paymentDate amount currency paymentMethod paymentType referenceNumber moneyReceiptNumber receiptAssetreferenceId notes receivedBy createdAt updatedAt"
+        )
+        .populate<{
+          caseId: { _id: mongoose.Types.ObjectId; internalReference?: string; caseNumber?: string; title?: string };
+        }>({
+          path: "caseId",
+          select: "_id internalReference caseNumber title",
+        })
+        .populate<{
+          receiptAssetreferenceId: {
+            _id: mongoose.Types.ObjectId;
+            originalFileName?: string | null;
+            assetId?: {
+              _id: mongoose.Types.ObjectId;
+              secureUrl: string;
+              originalFilename?: string | null;
+              assetType?: AssetType | null;
+              mimeType?: string | null;
+              bytes?: number | null;
+            } | null;
+          };
+        }>({
+          path: "receiptAssetreferenceId",
+          select: "_id originalFileName assetId",
+          populate: {
+            path: "assetId",
+            select: "_id secureUrl originalFilename assetType mimeType bytes",
+          },
+        })
+        .populate<{
+          receivedBy: { _id: mongoose.Types.ObjectId; name: string; email: string };
+        }>({
+          path: "receivedBy",
+          select: "_id name email",
+        })
+        .lean(),
+    ]);
+
+    if (!clientExists) {
+      throw ApiError.notFound("Client not found");
+    }
 
     if (!payment) {
       throw ApiError.notFound("Payment record not found for this client");
@@ -132,15 +106,17 @@ export const GET = withErrorHandler(
 
     const dto = formatClientPaymentItem(
       payment,
-      payment.caseId as unknown as { internalReference?: string; caseNumber?: string; title?: string },
-      payment.receiptAssetreferenceId as unknown as (IAssetReferenceDocument & { assetId?: IAsset }),
-      payment.receivedBy as unknown as { _id: mongoose.Types.ObjectId; name: string; email: string }
+      payment.caseId as unknown as PopulatedCaseInfo,
+      payment.receiptAssetreferenceId as unknown as PopulatedReceiptAssetRef,
+      payment.receivedBy as unknown as PopulatedReceivedByUser
     );
 
-    return NextResponse.json({
+    const response: SingleClientPaymentApiResponse = {
       success: true,
       data: dto,
-    });
+    };
+
+    return NextResponse.json(response);
   }
 );
 
@@ -161,6 +137,11 @@ export const PATCH = withErrorHandler(
     const clientObjectId = new mongoose.Types.ObjectId(id);
     const paymentObjectId = new mongoose.Types.ObjectId(paymentId);
 
+    const clientExists = await Client.exists({ _id: clientObjectId, deletedAt: null });
+    if (!clientExists) {
+      throw ApiError.notFound("Client not found");
+    }
+
     const body = await req.json();
     const validated = updateClientPaymentSchema.parse(body);
 
@@ -174,7 +155,9 @@ export const PATCH = withErrorHandler(
           _id: caseObjectId,
           clientId: clientObjectId,
           deletedAt: null,
-        });
+        })
+          .select("_id")
+          .lean();
 
         if (!linkedCase) {
           throw ApiError.badRequest(
@@ -237,7 +220,7 @@ export const PATCH = withErrorHandler(
             await AssetReference.findByIdAndUpdate(
               payment.receiptAssetreferenceId,
               { deletedAt: new Date() },
-              { session: dbSession }
+              { session: dbSession, select: "_id" }
             );
           }
 
@@ -253,7 +236,7 @@ export const PATCH = withErrorHandler(
             await AssetReference.findByIdAndUpdate(
               payment.receiptAssetreferenceId,
               { deletedAt: new Date() },
-              { session: dbSession }
+              { session: dbSession, select: "_id" }
             );
           }
           payment.receiptAssetreferenceId = null;
@@ -296,25 +279,53 @@ export const PATCH = withErrorHandler(
     });
 
     const populated = await ClientPayment.findById(paymentObjectId)
+      .select(
+        "_id clientId caseId paymentDate amount currency paymentMethod paymentType referenceNumber moneyReceiptNumber receiptAssetreferenceId notes receivedBy createdAt updatedAt"
+      )
       .populate<{
-        caseId: { internalReference: string; caseNumber: string; title: string };
-      }>("caseId", "internalReference caseNumber title")
+        caseId: { _id: mongoose.Types.ObjectId; internalReference?: string; caseNumber?: string; title?: string };
+      }>({
+        path: "caseId",
+        select: "_id internalReference caseNumber title",
+      })
       .populate<{
-        receiptAssetreferenceId: IAssetReferenceDocument & { assetId: IAsset };
+        receiptAssetreferenceId: {
+          _id: mongoose.Types.ObjectId;
+          originalFileName?: string | null;
+          assetId?: {
+            _id: mongoose.Types.ObjectId;
+            secureUrl: string;
+            originalFilename?: string | null;
+            assetType?: AssetType | null;
+            mimeType?: string | null;
+            bytes?: number | null;
+          } | null;
+        };
       }>({
         path: "receiptAssetreferenceId",
-        populate: { path: "assetId" },
+        select: "_id originalFileName assetId",
+        populate: {
+          path: "assetId",
+          select: "_id secureUrl originalFilename assetType mimeType bytes",
+        },
       })
       .populate<{
         receivedBy: { _id: mongoose.Types.ObjectId; name: string; email: string };
-      }>("receivedBy", "name email")
+      }>({
+        path: "receivedBy",
+        select: "_id name email",
+      })
       .lean();
 
+    if (!populated) {
+      throw ApiError.notFound("Payment record not found for this client");
+    }
+
     const dto = formatClientPaymentItem(
-      populated!,
-      populated!.caseId as unknown as { internalReference?: string; caseNumber?: string; title?: string },
-      populated!.receiptAssetreferenceId as unknown as (IAssetReferenceDocument & { assetId?: IAsset }),
-      populated!.receivedBy as unknown as { _id: mongoose.Types.ObjectId; name: string; email: string }
+      populated,
+      populated.caseId as unknown as PopulatedCaseInfo,
+      populated.receiptAssetreferenceId as unknown as PopulatedReceiptAssetRef,
+      populated.receivedBy as unknown as PopulatedReceivedByUser
     );
 
     const response: ClientPaymentActionResponse = {
@@ -352,10 +363,17 @@ export const DELETE = withErrorHandler(
     const clientObjectId = new mongoose.Types.ObjectId(id);
     const paymentObjectId = new mongoose.Types.ObjectId(paymentId);
 
-    const payment = await ClientPayment.findOne({
-      _id: paymentObjectId,
-      clientId: clientObjectId,
-    });
+    const [clientExists, payment] = await Promise.all([
+      Client.exists({ _id: clientObjectId, deletedAt: null }),
+      ClientPayment.findOne({
+        _id: paymentObjectId,
+        clientId: clientObjectId,
+      }),
+    ]);
+
+    if (!clientExists) {
+      throw ApiError.notFound("Client not found");
+    }
 
     if (!payment) {
       throw ApiError.notFound("Payment record not found for this client");
@@ -369,7 +387,7 @@ export const DELETE = withErrorHandler(
         await AssetReference.findByIdAndUpdate(
           payment.receiptAssetreferenceId,
           { deletedAt: new Date() },
-          { session: dbSession }
+          { session: dbSession, select: "_id" }
         );
       }
 
@@ -398,3 +416,4 @@ export const DELETE = withErrorHandler(
     return NextResponse.json(response);
   }
 );
+

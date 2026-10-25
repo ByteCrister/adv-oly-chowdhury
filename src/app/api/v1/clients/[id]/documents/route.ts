@@ -17,7 +17,9 @@ import { AssetReference } from "@/db/models/AssetReference.model";
 import { ASSET_OWNER_TYPES } from "@/const/asset-reference.const";
 import {
   CLIENT_DOCUMENT_DEFAULT_PAGE_LIMIT,
+  CLIENT_DOCUMENT_PAGE_LIMITS,
   CLIENT_DOCUMENT_SORT_OPTIONS,
+  CLIENT_DOCUMENT_TYPES,
   CLIENT_DOCUMENT_TYPE_LABELS,
   ClientDocumentPageLimit,
   ClientDocumentSortOption,
@@ -40,39 +42,75 @@ interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
+export interface RawClientDocumentInput {
+  _id?: unknown;
+  id?: string;
+  clientId?: unknown;
+  assetReferenceId?: unknown;
+  documentType?: ClientDocumentType | string | null;
+  title?: string | null;
+  documentDate?: Date | string | null;
+  expiryDate?: Date | string | null;
+  notes?: string | null;
+  createdAt?: Date | string | null;
+  updatedAt?: Date | string | null;
+  deletedAt?: Date | string | null;
+}
+
 /**
- * Format a ClientDocument record into ClientDocumentItemDto.
+ * Format a lean ClientDocument record into a type-safe ClientDocumentItemDto.
  */
-function formatClientDocumentItem(
-  doc: Record<string, unknown>,
+export function formatClientDocumentItem(
+  doc: RawClientDocumentInput,
   assetRef?: (IAssetReferenceDocument & { assetId?: IAsset }) | null
 ): ClientDocumentItemDto {
-  const asset = assetRef?.assetId;
-  const docType = doc.documentType as ClientDocumentType;
+  const resolvedAssetRef =
+    assetRef !== undefined
+      ? assetRef
+      : doc.assetReferenceId && typeof doc.assetReferenceId === "object"
+      ? (doc.assetReferenceId as unknown as IAssetReferenceDocument & { assetId?: IAsset })
+      : null;
+
+  const asset =
+    resolvedAssetRef?.assetId && typeof resolvedAssetRef.assetId === "object"
+      ? resolvedAssetRef.assetId
+      : null;
+
+  const docType = (doc.documentType as ClientDocumentType) || CLIENT_DOCUMENT_TYPES.OTHER;
+
+  const idStr = doc._id ? String(doc._id) : doc.id || "";
+  const clientIdStr = doc.clientId ? String(doc.clientId) : "";
+  const assetRefIdStr = resolvedAssetRef?._id
+    ? String(resolvedAssetRef._id)
+    : doc.assetReferenceId && typeof doc.assetReferenceId !== "object"
+    ? String(doc.assetReferenceId)
+    : "";
+  const assetIdStr = asset?._id ? String(asset._id) : "";
 
   return {
-    id: (doc._id as mongoose.Types.ObjectId).toString(),
-    clientId: (doc.clientId as mongoose.Types.ObjectId).toString(),
-    assetReferenceId: assetRef?._id
-      ? assetRef._id.toString()
-      : (doc.assetReferenceId as mongoose.Types.ObjectId).toString(),
-    assetId: asset?._id ? asset._id.toString() : "",
+    id: idStr,
+    clientId: clientIdStr,
+    assetReferenceId: assetRefIdStr,
+    assetId: assetIdStr,
     documentType: docType,
-    documentTypeLabel: CLIENT_DOCUMENT_TYPE_LABELS[docType] || String(doc.documentType),
-    title: doc.title as string,
+    documentTypeLabel: CLIENT_DOCUMENT_TYPE_LABELS[docType] || String(docType),
+    title: (doc.title as string) || "",
     documentDate: formatSafeIsoDate(doc.documentDate),
     expiryDate: formatSafeIsoDate(doc.expiryDate),
     notes: (doc.notes as string) || null,
     originalFileName:
-      assetRef?.originalFileName || asset?.originalFilename || (doc.title as string),
+      resolvedAssetRef?.originalFileName ||
+      asset?.originalFilename ||
+      (doc.title as string) ||
+      "",
     fileUrl: asset?.secureUrl || "",
     publicId: asset?.publicId || "",
     mimeType: asset?.mimeType || "application/octet-stream",
-    sizeBytes: asset?.bytes || 0,
+    sizeBytes: typeof asset?.bytes === "number" ? asset.bytes : 0,
     format: asset?.format || null,
-    width: asset?.width || null,
-    height: asset?.height || null,
-    pages: asset?.pages || null,
+    width: typeof asset?.width === "number" ? asset.width : null,
+    height: typeof asset?.height === "number" ? asset.height : null,
+    pages: typeof asset?.pages === "number" ? asset.pages : null,
     createdAt: formatSafeIsoDate(doc.createdAt) || new Date().toISOString(),
     updatedAt: formatSafeIsoDate(doc.updatedAt) || new Date().toISOString(),
   };
@@ -81,7 +119,7 @@ function formatClientDocumentItem(
 /**
  * GET /api/v1/clients/[id]/documents
  *
- * List all active documents associated with the given client.
+ * List all active documents associated with the given client with explicit projections.
  */
 export const GET = withErrorHandler(
   async (req: NextRequest, { params }: RouteParams) => {
@@ -100,6 +138,17 @@ export const GET = withErrorHandler(
 
     const { searchParams } = new URL(req.url);
 
+    // Validate limit parameter if provided
+    const rawLimit = searchParams.get("limit");
+    if (rawLimit !== null) {
+      const parsedLimit = parseInt(rawLimit, 10);
+      if (!CLIENT_DOCUMENT_PAGE_LIMITS.includes(parsedLimit as ClientDocumentPageLimit)) {
+        throw ApiError.badRequest(
+          `Invalid page limit "${rawLimit}". Allowed page limits are: ${CLIENT_DOCUMENT_PAGE_LIMITS.join(", ")}`
+        );
+      }
+    }
+
     const rawParams = {
       search: sanitizeSearchParam(searchParams.get("search")),
       documentType: searchParams.get("documentType") || undefined,
@@ -107,7 +156,7 @@ export const GET = withErrorHandler(
       endDate: searchParams.get("endDate") || undefined,
       sort: searchParams.get("sort") || CLIENT_DOCUMENT_SORT_OPTIONS.NEWEST,
       page: searchParams.get("page") || 1,
-      limit: searchParams.get("limit") || CLIENT_DOCUMENT_DEFAULT_PAGE_LIMIT,
+      limit: rawLimit ? parseInt(rawLimit, 10) : CLIENT_DOCUMENT_DEFAULT_PAGE_LIMIT,
     };
 
     const parsed = clientDocumentQueryFilterSchema.safeParse(rawParams);
@@ -162,6 +211,9 @@ export const GET = withErrorHandler(
     const [total, documents] = await Promise.all([
       ClientDocument.countDocuments(filter),
       ClientDocument.find(filter)
+        .select(
+          "_id clientId assetReferenceId documentType title documentDate expiryDate notes createdAt updatedAt"
+        )
         .sort(sortOption)
         .skip(skip)
         .limit(limit)
@@ -169,7 +221,12 @@ export const GET = withErrorHandler(
           assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
         }>({
           path: "assetReferenceId",
-          populate: { path: "assetId" },
+          select: "_id originalFileName assetId",
+          match: { deletedAt: null },
+          populate: {
+            path: "assetId",
+            select: "_id secureUrl publicId originalFilename format mimeType bytes width height pages",
+          },
         })
         .lean(),
     ]);
@@ -210,7 +267,10 @@ export const POST = withErrorHandler(
     }
 
     const objectId = new mongoose.Types.ObjectId(id);
-    const client = await Client.findOne({ _id: objectId, deletedAt: null });
+    const client = await Client.findOne({ _id: objectId, deletedAt: null })
+      .select("_id name")
+      .lean();
+
     if (!client) {
       throw ApiError.notFound("Client not found");
     }
@@ -220,24 +280,23 @@ export const POST = withErrorHandler(
 
     const assetRefId = new mongoose.Types.ObjectId(validated.assetReferenceId);
 
-    // Verify asset reference exists and is not soft-deleted
-    const existingRef = await AssetReference.findOne({
-      _id: assetRefId,
-      deletedAt: null,
-    });
-
-    if (!existingRef) {
-      throw ApiError.badRequest(
-        "Referenced media file does not exist or has already been deleted."
-      );
-    }
-
     // Create client document record inside a transaction
     const createdDoc = await withTransaction(async (dbSession) => {
-      // 1. Ensure the AssetReference is owned by this client
-      existingRef.ownerType = ASSET_OWNER_TYPES.CLIENT;
-      existingRef.ownerId = objectId;
-      await existingRef.save({ session: dbSession });
+      // 1. Verify AssetReference exists and is active inside session, assigning it to this Client
+      const existingRef = await AssetReference.findOneAndUpdate(
+        { _id: assetRefId, deletedAt: null },
+        {
+          ownerType: ASSET_OWNER_TYPES.CLIENT,
+          ownerId: objectId,
+        },
+        { session: dbSession, select: "_id" }
+      );
+
+      if (!existingRef) {
+        throw ApiError.badRequest(
+          "Referenced media file does not exist or has already been deleted."
+        );
+      }
 
       // 2. Create the ClientDocument
       const [doc] = await ClientDocument.create(
@@ -256,37 +315,49 @@ export const POST = withErrorHandler(
         { session: dbSession }
       );
 
+      // 3. Record audit log for document creation
+      await recordAuditLog({
+        req,
+        userId,
+        action: AUDIT_ACTIONS.CREATE,
+        entityType: AUDIT_ENTITY_TYPES.CLIENT_DOCUMENT,
+        entityId: doc._id,
+        oldValues: null,
+        newValues: doc.toObject(),
+        description: `Added document "${doc.title}" to client "${client.name}"`,
+        session: dbSession,
+      });
+
       return doc;
     });
 
     // Populate for response
     const populatedDoc = await ClientDocument.findById(createdDoc._id)
+      .select(
+        "_id clientId assetReferenceId documentType title documentDate expiryDate notes createdAt updatedAt"
+      )
       .populate<{
         assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
       }>({
         path: "assetReferenceId",
-        populate: { path: "assetId" },
+        select: "_id originalFileName assetId",
+        populate: {
+          path: "assetId",
+          select: "_id secureUrl publicId originalFilename format mimeType bytes width height pages",
+        },
       })
       .lean();
 
+    if (!populatedDoc) {
+      throw ApiError.internal("Failed to retrieve created client document.");
+    }
+
     const itemDto = formatClientDocumentItem(
-      populatedDoc!,
-      populatedDoc!.assetReferenceId as unknown as (IAssetReferenceDocument & {
+      populatedDoc,
+      populatedDoc.assetReferenceId as unknown as (IAssetReferenceDocument & {
         assetId: IAsset;
       })
     );
-
-    // Record audit log for document creation
-    await recordAuditLog({
-      req,
-      userId,
-      action: AUDIT_ACTIONS.CREATE,
-      entityType: AUDIT_ENTITY_TYPES.CLIENT_DOCUMENT,
-      entityId: createdDoc._id,
-      oldValues: null,
-      newValues: createdDoc.toObject(),
-      description: `Added document "${itemDto.title}" to client "${client.name}"`,
-    });
 
     const response: ClientDocumentActionResponse = {
       success: true,

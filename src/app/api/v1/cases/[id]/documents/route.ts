@@ -19,6 +19,7 @@ import {
   CASE_DOCUMENT_DEFAULT_PAGE_LIMIT,
   CASE_DOCUMENT_PAGE_LIMITS,
   CASE_DOCUMENT_SORT_OPTIONS,
+  CASE_DOCUMENT_TYPES,
   CASE_DOCUMENT_TYPE_LABELS,
   CaseDocumentPageLimit,
   CaseDocumentSortOption,
@@ -41,51 +42,96 @@ interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
+export interface RawCaseDocumentInput {
+  _id?: unknown;
+  id?: string;
+  caseId?: unknown;
+  assetReferenceId?: unknown;
+  documentType?: CaseDocumentType | string | null;
+  title?: string | null;
+  documentDate?: Date | string | null;
+  description?: string | null;
+  exhibitNumber?: string | null;
+  isConfidential?: boolean | null;
+  createdAt?: Date | string | null;
+  updatedAt?: Date | string | null;
+  deletedAt?: Date | string | null;
+}
+
+export interface RawCaseInfoInput {
+  _id?: unknown;
+  id?: string;
+  title?: string | null;
+  caseNumber?: string | null;
+  internalReference?: string | null;
+  caseStatus?: string | null;
+}
+
 /**
  * Format a lean CaseDocument record into a type-safe CaseDocumentItemDto.
  */
 export function formatCaseDocumentItem(
-  doc: Record<string, unknown>,
+  doc: RawCaseDocumentInput,
   assetRef?: (IAssetReferenceDocument & { assetId?: IAsset }) | null,
-  caseInfo?: Record<string, unknown> | null
+  caseInfo?: RawCaseInfoInput | null
 ): CaseDocumentItemDto {
-  const asset = assetRef?.assetId;
-  const docType = doc.documentType as CaseDocumentType;
+  const resolvedAssetRef =
+    assetRef !== undefined
+      ? assetRef
+      : doc.assetReferenceId && typeof doc.assetReferenceId === "object"
+      ? (doc.assetReferenceId as unknown as IAssetReferenceDocument & { assetId?: IAsset })
+      : null;
+
+  const asset =
+    resolvedAssetRef?.assetId && typeof resolvedAssetRef.assetId === "object"
+      ? resolvedAssetRef.assetId
+      : null;
+
+  const docType = (doc.documentType as CaseDocumentType) || CASE_DOCUMENT_TYPES.OTHER;
+
+  const idStr = doc._id ? String(doc._id) : "";
+  const caseIdStr = doc.caseId ? String(doc.caseId) : "";
+  const assetRefIdStr = resolvedAssetRef?._id
+    ? String(resolvedAssetRef._id)
+    : doc.assetReferenceId && typeof doc.assetReferenceId !== "object"
+    ? String(doc.assetReferenceId)
+    : "";
+  const assetIdStr = asset?._id ? String(asset._id) : "";
 
   return {
-    id: (doc._id as mongoose.Types.ObjectId).toString(),
-    caseId: (doc.caseId as mongoose.Types.ObjectId).toString(),
+    id: idStr,
+    caseId: caseIdStr,
     caseDetails: caseInfo
       ? {
-          id: (caseInfo._id as mongoose.Types.ObjectId).toString(),
+          id: caseInfo._id ? String(caseInfo._id) : "",
           title: (caseInfo.title as string) || "Untitled Case",
           caseNumber: (caseInfo.caseNumber as string) || "",
           internalReference: (caseInfo.internalReference as string) || "",
           caseStatus: (caseInfo.caseStatus as string) || undefined,
         }
       : null,
-    assetReferenceId: assetRef?._id
-      ? assetRef._id.toString()
-      : doc.assetReferenceId
-      ? String(doc.assetReferenceId)
-      : "",
-    assetId: asset?._id ? asset._id.toString() : "",
+    assetReferenceId: assetRefIdStr,
+    assetId: assetIdStr,
     documentType: docType,
-    documentTypeLabel: CASE_DOCUMENT_TYPE_LABELS[docType] || String(doc.documentType),
-    title: doc.title as string,
+    documentTypeLabel: CASE_DOCUMENT_TYPE_LABELS[docType] || String(docType),
+    title: (doc.title as string) || "",
     documentDate: formatSafeIsoDate(doc.documentDate),
     description: (doc.description as string) || null,
     exhibitNumber: (doc.exhibitNumber as string) || null,
     isConfidential: Boolean(doc.isConfidential),
-    originalFileName: assetRef?.originalFileName || asset?.originalFilename || (doc.title as string),
+    originalFileName:
+      resolvedAssetRef?.originalFileName ||
+      asset?.originalFilename ||
+      (doc.title as string) ||
+      "",
     fileUrl: asset?.secureUrl || "",
     publicId: asset?.publicId || "",
     mimeType: asset?.mimeType || "application/octet-stream",
-    sizeBytes: asset?.bytes || 0,
+    sizeBytes: typeof asset?.bytes === "number" ? asset.bytes : 0,
     format: asset?.format || null,
-    width: asset?.width || null,
-    height: asset?.height || null,
-    pages: asset?.pages || null,
+    width: typeof asset?.width === "number" ? asset.width : null,
+    height: typeof asset?.height === "number" ? asset.height : null,
+    pages: typeof asset?.pages === "number" ? asset.pages : null,
     createdAt: formatSafeIsoDate(doc.createdAt) || new Date().toISOString(),
     updatedAt: formatSafeIsoDate(doc.updatedAt) || new Date().toISOString(),
   };
@@ -106,10 +152,9 @@ export const GET = withErrorHandler(
     }
 
     const caseObjectId = new mongoose.Types.ObjectId(id);
-    const parentCase = await Case.findOne(
-      { _id: caseObjectId, deletedAt: null },
-      { _id: 1, title: 1, caseNumber: 1, internalReference: 1, caseStatus: 1 }
-    ).lean();
+    const parentCase = await Case.findOne({ _id: caseObjectId, deletedAt: null })
+      .select("_id title caseNumber internalReference caseStatus")
+      .lean();
 
     if (!parentCase) {
       throw ApiError.notFound("Case not found or has been archived.");
@@ -201,6 +246,9 @@ export const GET = withErrorHandler(
     const [total, documents] = await Promise.all([
       CaseDocument.countDocuments(filter),
       CaseDocument.find(filter)
+        .select(
+          "_id caseId assetReferenceId documentType title documentDate description exhibitNumber isConfidential createdAt updatedAt"
+        )
         .sort(sortOption)
         .skip(skip)
         .limit(limit)
@@ -208,7 +256,12 @@ export const GET = withErrorHandler(
           assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
         }>({
           path: "assetReferenceId",
-          populate: { path: "assetId" },
+          select: "_id originalFileName assetId",
+          match: { deletedAt: null },
+          populate: {
+            path: "assetId",
+            select: "_id secureUrl publicId originalFilename format mimeType bytes width height pages",
+          },
         })
         .lean(),
     ]);
@@ -248,10 +301,9 @@ export const POST = withErrorHandler(
     }
 
     const caseObjectId = new mongoose.Types.ObjectId(id);
-    const parentCase = await Case.findOne(
-      { _id: caseObjectId, deletedAt: null },
-      { _id: 1, title: 1, caseNumber: 1, internalReference: 1, caseStatus: 1 }
-    ).lean();
+    const parentCase = await Case.findOne({ _id: caseObjectId, deletedAt: null })
+      .select("_id title caseNumber internalReference caseStatus")
+      .lean();
 
     if (!parentCase) {
       throw ApiError.notFound("Case not found or has been archived.");
@@ -268,11 +320,15 @@ export const POST = withErrorHandler(
 
     // Create case document record inside transaction
     const createdDoc = await withTransaction(async (dbSession) => {
-      // 1. Verify AssetReference exists and is active inside session
-      const existingRef = await AssetReference.findOne({
-        _id: assetRefId,
-        deletedAt: null,
-      }).session(dbSession);
+      // 1. Verify AssetReference exists and is active inside session, assigning it to this Case
+      const existingRef = await AssetReference.findOneAndUpdate(
+        { _id: assetRefId, deletedAt: null },
+        {
+          ownerType: ASSET_OWNER_TYPES.CASE,
+          ownerId: caseObjectId,
+        },
+        { session: dbSession, select: "_id" }
+      );
 
       if (!existingRef) {
         throw ApiError.badRequest(
@@ -280,12 +336,7 @@ export const POST = withErrorHandler(
         );
       }
 
-      // 2. Ensure AssetReference is owned by this Case
-      existingRef.ownerType = ASSET_OWNER_TYPES.CASE;
-      existingRef.ownerId = caseObjectId;
-      await existingRef.save({ session: dbSession });
-
-      // 3. Create CaseDocument
+      // 2. Create CaseDocument
       const [doc] = await CaseDocument.create(
         [
           {
@@ -302,7 +353,7 @@ export const POST = withErrorHandler(
         { session: dbSession }
       );
 
-      // 4. Record audit log for case document creation
+      // 3. Record audit log for case document creation
       await recordAuditLog({
         req,
         userId,
@@ -320,17 +371,28 @@ export const POST = withErrorHandler(
 
     // Populate for response
     const populatedDoc = await CaseDocument.findById(createdDoc._id)
+      .select(
+        "_id caseId assetReferenceId documentType title documentDate description exhibitNumber isConfidential createdAt updatedAt"
+      )
       .populate<{
         assetReferenceId: IAssetReferenceDocument & { assetId: IAsset };
       }>({
         path: "assetReferenceId",
-        populate: { path: "assetId" },
+        select: "_id originalFileName assetId",
+        populate: {
+          path: "assetId",
+          select: "_id secureUrl publicId originalFilename format mimeType bytes width height pages",
+        },
       })
       .lean();
 
+    if (!populatedDoc) {
+      throw ApiError.internal("Failed to retrieve created case document.");
+    }
+
     const itemDto = formatCaseDocumentItem(
-      populatedDoc!,
-      populatedDoc!.assetReferenceId as unknown as (IAssetReferenceDocument & {
+      populatedDoc,
+      populatedDoc.assetReferenceId as unknown as (IAssetReferenceDocument & {
         assetId: IAsset;
       }),
       parentCase

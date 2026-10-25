@@ -12,6 +12,16 @@ import type { DropdownItem, DropdownApiResponse } from "@/types/dropdown.types";
 import { sanitizeSearchParam, buildSearchFilter } from "@/lib/helpers/search.helper";
 
 /**
+ * Safely converts any date representation into an ISO string or null.
+ * Protects against RangeError: Invalid time value exceptions.
+ */
+function toIsoDateOrNull(value: unknown): string | null {
+  if (!value) return null;
+  const d = new Date(value as string | number | Date);
+  return !isNaN(d.getTime()) ? d.toISOString() : null;
+}
+
+/**
  * GET /api/v1/dropdowns
  *
  * Single, unified polymorphic endpoint to fetch optimized, lightweight dropdown
@@ -42,7 +52,12 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     case DROPDOWN_TYPES.CLIENT: {
       const filter: Record<string, unknown> = { deletedAt: null };
 
-      const clientSearchFilter = buildSearchFilter(search, ["name", "clientNumber", "organizationName", "phone"]);
+      const clientSearchFilter = buildSearchFilter(search, [
+        "name",
+        "clientNumber",
+        "organizationName",
+        "phone",
+      ]);
       if (clientSearchFilter) {
         filter.$or = clientSearchFilter;
       }
@@ -53,50 +68,71 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
         .limit(limit)
         .lean();
 
-      items = docs.map((doc) => ({
-        id: (doc._id as mongoose.Types.ObjectId).toString(),
-        name: doc.name as string,
-        subText: doc.clientNumber
-          ? `${doc.clientNumber}${doc.organizationName ? ` • ${doc.organizationName}` : ""}`
-          : (doc.organizationName as string) || (doc.phone as string) || null,
-        date: doc.createdAt ? new Date(doc.createdAt as Date).toISOString() : null,
-        metadata: {
-          clientNumber: doc.clientNumber,
-          clientType: doc.clientType,
-          status: doc.status,
-          phone: doc.phone,
-          organizationName: doc.organizationName,
-        },
-      }));
+      items = docs.map((doc) => {
+        let subText: string | null = null;
+        if (doc.clientNumber) {
+          subText = doc.organizationName
+            ? `${doc.clientNumber} • ${doc.organizationName}`
+            : String(doc.clientNumber);
+        } else if (doc.organizationName) {
+          subText = String(doc.organizationName);
+        } else if (doc.phone) {
+          subText = String(doc.phone);
+        }
+
+        return {
+          id: String(doc._id),
+          name: String(doc.name || ""),
+          subText,
+          date: toIsoDateOrNull(doc.createdAt),
+          metadata: {
+            clientNumber: doc.clientNumber ? String(doc.clientNumber) : null,
+            clientType: doc.clientType ? String(doc.clientType) : null,
+            status: doc.status ? String(doc.status) : null,
+            phone: doc.phone ? String(doc.phone) : null,
+            organizationName: doc.organizationName ? String(doc.organizationName) : null,
+          },
+        };
+      });
       break;
     }
 
     case DROPDOWN_TYPES.COURT: {
       const filter: Record<string, unknown> = { isActive: true, deletedAt: null };
 
-      const courtSearchFilter = buildSearchFilter(search, ["name", "district", "courtType", "presidingJudgeTitle"]);
+      const courtSearchFilter = buildSearchFilter(search, [
+        "name",
+        "district",
+        "courtType",
+        "presidingJudgeTitle",
+      ]);
       if (courtSearchFilter) {
         filter.$or = courtSearchFilter;
       }
 
       const docs = await Court.find(filter)
-        .select("_id name courtType district division roomOrHall presidingJudgeTitle createdAt")
+        .select("_id name courtType district division roomOrHall createdAt")
         .sort({ name: 1 })
         .limit(limit)
         .lean();
 
-      items = docs.map((doc) => ({
-        id: (doc._id as mongoose.Types.ObjectId).toString(),
-        name: doc.name as string,
-        subText: `${doc.district || ""}${doc.courtType ? ` • ${doc.courtType}` : ""}`,
-        date: doc.createdAt ? new Date(doc.createdAt as Date).toISOString() : null,
-        metadata: {
-          courtType: doc.courtType,
-          district: doc.district,
-          division: doc.division,
-          roomOrHall: doc.roomOrHall,
-        },
-      }));
+      items = docs.map((doc) => {
+        const parts = [doc.district, doc.courtType].filter(Boolean);
+        const subText = parts.length > 0 ? parts.join(" • ") : null;
+
+        return {
+          id: String(doc._id),
+          name: String(doc.name || ""),
+          subText,
+          date: toIsoDateOrNull(doc.createdAt),
+          metadata: {
+            courtType: doc.courtType ? String(doc.courtType) : null,
+            district: doc.district ? String(doc.district) : null,
+            division: doc.division ? String(doc.division) : null,
+            roomOrHall: doc.roomOrHall ? String(doc.roomOrHall) : null,
+          },
+        };
+      });
       break;
     }
 
@@ -111,39 +147,46 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
         filter.courtId = new mongoose.Types.ObjectId(courtId);
       }
 
-      const caseSearchFilter = buildSearchFilter(search, ["title", "caseNumber", "internalReference"]);
+      const caseSearchFilter = buildSearchFilter(search, [
+        "title",
+        "caseNumber",
+        "internalReference",
+      ]);
       if (caseSearchFilter) {
         filter.$or = caseSearchFilter;
       }
 
       const docs = await Case.find(filter)
         .select("_id title caseNumber internalReference filingDate nextHearingDate caseStatus courtId clientId createdAt")
-        .sort({ updatedAt: -1 })
+        .sort({ createdAt: -1 })
         .limit(limit)
         .lean();
 
-      items = docs.map((doc) => ({
-        id: (doc._id as mongoose.Types.ObjectId).toString(),
-        name: doc.title as string,
-        subText: doc.caseNumber
-          ? `${doc.caseNumber} (${doc.internalReference})`
-          : (doc.internalReference as string),
-        date: doc.filingDate
-          ? new Date(doc.filingDate as Date).toISOString()
-          : doc.createdAt
-          ? new Date(doc.createdAt as Date).toISOString()
-          : null,
-        metadata: {
-          caseNumber: doc.caseNumber,
-          internalReference: doc.internalReference,
-          caseStatus: doc.caseStatus,
-          clientId: doc.clientId ? (doc.clientId as mongoose.Types.ObjectId).toString() : null,
-          courtId: doc.courtId ? (doc.courtId as mongoose.Types.ObjectId).toString() : null,
-          nextHearingDate: doc.nextHearingDate
-            ? new Date(doc.nextHearingDate as Date).toISOString()
-            : null,
-        },
-      }));
+      items = docs.map((doc) => {
+        let subText: string | null = null;
+        if (doc.caseNumber && doc.internalReference) {
+          subText = `${doc.caseNumber} (${doc.internalReference})`;
+        } else if (doc.caseNumber) {
+          subText = String(doc.caseNumber);
+        } else if (doc.internalReference) {
+          subText = String(doc.internalReference);
+        }
+
+        return {
+          id: String(doc._id),
+          name: String(doc.title || ""),
+          subText,
+          date: toIsoDateOrNull(doc.filingDate) ?? toIsoDateOrNull(doc.createdAt),
+          metadata: {
+            caseNumber: doc.caseNumber ? String(doc.caseNumber) : null,
+            internalReference: doc.internalReference ? String(doc.internalReference) : null,
+            caseStatus: doc.caseStatus ? String(doc.caseStatus) : null,
+            clientId: doc.clientId ? String(doc.clientId) : null,
+            courtId: doc.courtId ? String(doc.courtId) : null,
+            nextHearingDate: toIsoDateOrNull(doc.nextHearingDate),
+          },
+        };
+      });
       break;
     }
 
@@ -161,18 +204,30 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
         .limit(limit)
         .lean();
 
-      items = docs.map((doc) => ({
-        id: (doc._id as mongoose.Types.ObjectId).toString(),
-        name: doc.name as string,
-        subText: doc.email
-          ? `${doc.email}${doc.title ? ` (${doc.title})` : ""}`
-          : (doc.title as string | undefined),
-        date: doc.createdAt ? new Date(doc.createdAt as Date).toISOString() : null,
-        metadata: {
-          email: doc.email,
-          title: doc.title,
-        },
-      }));
+      items = docs.map((doc) => {
+        let subText: string | null = null;
+        if (doc.email) {
+          subText = doc.title ? `${doc.email} (${doc.title})` : String(doc.email);
+        } else if (doc.title) {
+          subText = String(doc.title);
+        }
+
+        return {
+          id: String(doc._id),
+          name: String(doc.name || ""),
+          subText,
+          date: toIsoDateOrNull(doc.createdAt),
+          metadata: {
+            email: doc.email ? String(doc.email) : null,
+            title: doc.title ? String(doc.title) : null,
+          },
+        };
+      });
+      break;
+    }
+
+    default: {
+      items = [];
       break;
     }
   }

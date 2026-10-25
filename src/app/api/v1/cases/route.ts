@@ -41,6 +41,7 @@ import {
   CaseStatus,
   CaseType,
   CasePriority,
+  CASE_TYPES,
 } from "@/const/case.const";
 import { COURT_TYPE_LABELS, COURT_TYPES, CourtType } from "@/const/court.const";
 import { createCaseSchema, caseQueryFilterSchema } from "@/utils/zod/case.validation";
@@ -53,7 +54,38 @@ import type {
   CaseClientDto,
   CaseCourtDto,
 } from "@/types/case.types";
-import type { ICase, ICaseDocument } from "@/types/db/case.type";
+import type {
+  ICase,
+  ICaseDocument,
+  IPopulatedCaseDoc,
+} from "@/types/db/case.type";
+import { CLIENT_TYPES } from "@/const";
+
+/**
+ * Explicit projection fields for Case queries.
+ * Eliminates leaked internal MongoDB fields (__v, deletedAt, etc.) and avoids memory bloat.
+ */
+export const CASE_SELECT_FIELDS =
+  "_id internalReference caseNumber filingYear title caseType caseCategory courtId clientId filingDate caseStatus priority description legalIssues opposingCounsel opposingParties nextHearingDate closedAt closureReason createdAt updatedAt";
+
+/**
+ * Strict population options for linked Client reference.
+ * Restricts client data to display-safe non-sensitive summary fields.
+ */
+export const CASE_CLIENT_POPULATE = {
+  path: "clientId",
+  select: "_id name clientNumber organizationName clientType phone email",
+} as const;
+
+/**
+ * Strict population options for linked Court reference.
+ * Restricts court data to display-safe non-sensitive summary fields.
+ */
+export const CASE_COURT_POPULATE = {
+  path: "courtId",
+  select: "_id name courtType district roomOrHall presidingJudgeTitle",
+} as const;
+
 
 /**
  * Safely extracts a string ID from an ObjectId, populated object, or string.
@@ -116,6 +148,7 @@ export async function generateCaseReference(
 export type CaseDocInput =
   | ICaseDocument
   | ICase
+  | IPopulatedCaseDoc
   | mongoose.FlattenMaps<ICaseDocument>
   | (Record<string, unknown> & { _id?: unknown });
 
@@ -137,7 +170,7 @@ export function formatCaseListItem(
   const rawClient = rawDoc.clientId as Record<string, unknown> | null;
   const rawCourt = rawDoc.courtId as Record<string, unknown> | null;
 
-  const caseType = (rawDoc.caseType as CaseType) || "CIVIL";
+  const caseType = (rawDoc.caseType as CaseType) || CASE_TYPES.CIVIL;
   const caseStatus = (rawDoc.caseStatus as CaseStatus) || CASE_STATUSES.ACTIVE;
   const priority = (rawDoc.priority as CasePriority) || CASE_PRIORITIES.NORMAL;
   const courtType = (rawCourt?.courtType as CourtType) || COURT_TYPES.DISTRICT_JUDGE_COURT;
@@ -148,7 +181,7 @@ export function formatCaseListItem(
       clientNumber: (rawClient.clientNumber as string) || "",
       name: (rawClient.name as string) || "Unknown Client",
       organizationName: (rawClient.organizationName as string) || null,
-      clientType: (rawClient.clientType as string) || "INDIVIDUAL",
+      clientType: (rawClient.clientType as string) || CLIENT_TYPES.INDIVIDUAL,
       phone: (rawClient.phone as string) || null,
       email: (rawClient.email as string) || null,
     }
@@ -205,6 +238,27 @@ export function formatCaseListItem(
     updatedAt: formatSafeIsoDate(rawDoc.updatedAt) || new Date().toISOString(),
   };
 }
+
+/**
+ * Format a lean Case document into a type-safe CaseDetailDto.
+ * Extracts clean DTO fields, eliminates database internals, and prevents payload bloat.
+ */
+export function formatCaseDetail(
+  doc: CaseDocInput,
+  counts: {
+    hearings: number;
+    documents: number;
+    events: number;
+    parties: number;
+  }
+): CaseDetailDto {
+  const listItem = formatCaseListItem(doc, counts);
+  return {
+    ...listItem,
+    counts,
+  };
+}
+
 
 
 /**
@@ -531,8 +585,40 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
               preserveNullAndEmptyArrays: true,
             },
           },
+          {
+            $project: {
+              _id: 1,
+              internalReference: 1,
+              caseNumber: 1,
+              filingYear: 1,
+              title: 1,
+              caseType: 1,
+              caseCategory: 1,
+              courtId: 1,
+              clientId: 1,
+              filingDate: 1,
+              caseStatus: 1,
+              priority: 1,
+              description: 1,
+              legalIssues: 1,
+              opposingCounsel: 1,
+              opposingParties: 1,
+              nextHearingDate: 1,
+              closedAt: 1,
+              closureReason: 1,
+              createdAt: 1,
+              updatedAt: 1,
+            },
+          },
         ],
         stats: [
+          {
+            $project: {
+              _id: 0,
+              caseStatus: 1,
+              priority: 1,
+            },
+          },
           {
             $group: {
               _id: null,
@@ -586,6 +672,13 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       Case.aggregate<RawStatsType>([
         { $match: filter },
         {
+          $project: {
+            _id: 0,
+            caseStatus: 1,
+            priority: 1,
+          },
+        },
+        {
           $group: {
             _id: null,
             total: { $sum: 1 },
@@ -623,11 +716,12 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
         },
       ]),
       Case.find(filter)
+        .select(CASE_SELECT_FIELDS)
         .sort(sortOption)
         .skip(skip)
         .limit(limit)
-        .populate("clientId", "name clientNumber organizationName clientType phone email")
-        .populate("courtId", "name courtType district roomOrHall presidingJudgeTitle")
+        .populate(CASE_CLIENT_POPULATE)
+        .populate(CASE_COURT_POPULATE)
         .lean(),
     ]);
 
@@ -830,26 +924,21 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
 
   // Populate for response
   const populated = await Case.findById(createdCase._id)
-    .populate("clientId", "name clientNumber organizationName clientType phone email")
-    .populate("courtId", "name courtType district roomOrHall presidingJudgeTitle")
+    .select(CASE_SELECT_FIELDS)
+    .populate(CASE_CLIENT_POPULATE)
+    .populate(CASE_COURT_POPULATE)
     .lean();
 
-  const itemDto = formatCaseListItem(populated!, {
+  if (!populated) {
+    throw ApiError.notFound("Case record could not be retrieved after creation.");
+  }
+
+  const detailDto = formatCaseDetail(populated, {
     hearings: 0,
     documents: 0,
     events: 0,
     parties: 0,
   });
-
-  const detailDto: CaseDetailDto = {
-    ...itemDto,
-    counts: {
-      hearings: 0,
-      documents: 0,
-      events: 0,
-      parties: 0,
-    },
-  };
 
   // Record audit log for case creation
   await recordAuditLog({
@@ -860,12 +949,12 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     entityId: createdCase._id,
     oldValues: null,
     newValues: createdCase.toObject(),
-    description: `Created case "${itemDto.title}" (${itemDto.internalReference})`,
+    description: `Created case "${detailDto.title}" (${detailDto.internalReference})`,
   });
 
   const response: CaseActionResponse = {
     success: true,
-    message: `Case "${itemDto.title}" (${itemDto.internalReference}) created successfully.`,
+    message: `Case "${detailDto.title}" (${detailDto.internalReference}) created successfully.`,
     data: detailDto,
   };
 

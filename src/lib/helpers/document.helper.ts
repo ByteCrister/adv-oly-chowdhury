@@ -2,10 +2,12 @@ import mongoose from "mongoose";
 import { DOCUMENT_ENTITY_TYPES } from "@/const/document.const";
 import {
   CASE_DOCUMENT_TYPE_LABELS,
+  CASE_DOCUMENT_TYPES,
   CaseDocumentType,
 } from "@/const/case-document.const";
 import {
   CLIENT_DOCUMENT_TYPE_LABELS,
+  CLIENT_DOCUMENT_TYPES,
   ClientDocumentType,
 } from "@/const/client-document.const";
 import type { UnifiedDocumentItemDto } from "@/types/document.types";
@@ -13,24 +15,37 @@ import type { IAsset } from "@/types/db/asset.type";
 import type { IAssetReferenceDocument } from "@/types/db/asset-reference.type";
 
 /**
+ * Standard projection fields for CaseDocument queries
+ */
+export const CASE_DOCUMENT_SELECT =
+  "_id caseId assetReferenceId documentType title documentDate description exhibitNumber isConfidential createdAt updatedAt";
+
+/**
+ * Standard projection fields for ClientDocument queries
+ */
+export const CLIENT_DOCUMENT_SELECT =
+  "_id clientId assetReferenceId documentType title documentDate expiryDate notes createdAt updatedAt";
+
+/**
  * Standard projection fields for Case population
  */
-export const CASE_POPULATE_SELECT = "title caseNumber internalReference caseStatus";
+export const CASE_POPULATE_SELECT = "_id title caseNumber internalReference caseStatus";
 
 /**
  * Standard projection fields for Client population
  */
-export const CLIENT_POPULATE_SELECT = "name clientNumber organizationName phone";
+export const CLIENT_POPULATE_SELECT = "_id name clientNumber organizationName phone";
 
 /**
  * Standard projection fields for AssetReference population
  */
-export const ASSET_REF_POPULATE_SELECT = "_id assetId originalFileName description caption";
+export const ASSET_REF_POPULATE_SELECT = "_id originalFileName assetId";
 
 /**
  * Standard projection fields for Asset population
  */
-export const ASSET_POPULATE_SELECT = "_id secureUrl publicId mimeType bytes format width height pages originalFilename";
+export const ASSET_POPULATE_SELECT =
+  "_id secureUrl publicId mimeType bytes format width height pages originalFilename";
 
 /**
  * Safely extracts a string ID from an ObjectId, populated object, or string.
@@ -66,13 +81,34 @@ export function formatCaseDocumentItem(
   assetRef?: (IAssetReferenceDocument & { assetId?: IAsset }) | null,
   caseInfo?: Record<string, unknown> | null
 ): UnifiedDocumentItemDto {
-  const asset = assetRef?.assetId && typeof assetRef.assetId === "object" ? assetRef.assetId : null;
+  const resolvedAssetRef =
+    assetRef !== undefined
+      ? assetRef
+      : doc.assetReferenceId && typeof doc.assetReferenceId === "object"
+      ? (doc.assetReferenceId as unknown as IAssetReferenceDocument & { assetId?: IAsset })
+      : null;
+
+  const asset =
+    resolvedAssetRef?.assetId && typeof resolvedAssetRef.assetId === "object"
+      ? resolvedAssetRef.assetId
+      : null;
+
+  const resolvedCaseInfo =
+    caseInfo !== undefined
+      ? caseInfo
+      : doc.caseId && typeof doc.caseId === "object"
+      ? (doc.caseId as unknown as Record<string, unknown>)
+      : null;
+
   const rawDocType = doc.documentType as string;
-  const docType = rawDocType as CaseDocumentType;
+  const docType = (rawDocType as CaseDocumentType) || CASE_DOCUMENT_TYPES.OTHER;
 
   const rawDocId = extractObjectIdString(doc._id);
-  const rawAssetRefId = extractObjectIdString(assetRef?._id || doc.assetReferenceId);
+  const rawAssetRefId = extractObjectIdString(resolvedAssetRef?._id || doc.assetReferenceId);
   const rawAssetId = extractObjectIdString(asset?._id);
+
+  const createdAtIso = safeToIsoString(doc.createdAt) || new Date().toISOString();
+  const updatedAtIso = safeToIsoString(doc.updatedAt) || createdAtIso;
 
   return {
     id: rawDocId,
@@ -83,10 +119,10 @@ export function formatCaseDocumentItem(
     documentTypeLabel: CASE_DOCUMENT_TYPE_LABELS[docType] || rawDocType || "Document",
     title: (doc.title as string) || "Untitled Document",
     documentDate: safeToIsoString(doc.documentDate),
-    createdAt: safeToIsoString(doc.createdAt) || "",
-    updatedAt: safeToIsoString(doc.updatedAt) || "",
+    createdAt: createdAtIso,
+    updatedAt: updatedAtIso,
     originalFileName:
-      assetRef?.originalFileName ||
+      resolvedAssetRef?.originalFileName ||
       asset?.originalFilename ||
       (doc.title as string) ||
       "document",
@@ -99,18 +135,18 @@ export function formatCaseDocumentItem(
     height: typeof asset?.height === "number" ? asset.height : null,
     pages: typeof asset?.pages === "number" ? asset.pages : null,
     // Case-specific fields
-    caseId: caseInfo?._id
-      ? extractObjectIdString(caseInfo._id)
+    caseId: resolvedCaseInfo?._id
+      ? extractObjectIdString(resolvedCaseInfo._id)
       : doc.caseId
       ? extractObjectIdString(doc.caseId)
       : null,
-    caseDetails: caseInfo
+    caseDetails: resolvedCaseInfo
       ? {
-          id: extractObjectIdString(caseInfo._id),
-          title: (caseInfo.title as string) || "Untitled Case",
-          caseNumber: (caseInfo.caseNumber as string) || "",
-          internalReference: (caseInfo.internalReference as string) || "",
-          caseStatus: (caseInfo.caseStatus as string) || undefined,
+          id: extractObjectIdString(resolvedCaseInfo._id),
+          title: (resolvedCaseInfo.title as string) || "Untitled Case",
+          caseNumber: (resolvedCaseInfo.caseNumber as string) || "",
+          internalReference: (resolvedCaseInfo.internalReference as string) || "",
+          caseStatus: (resolvedCaseInfo.caseStatus as string) || undefined,
         }
       : null,
     description: (doc.description as string) || null,
@@ -128,13 +164,34 @@ export function formatClientDocumentItem(
   assetRef?: (IAssetReferenceDocument & { assetId?: IAsset }) | null,
   clientInfo?: Record<string, unknown> | null
 ): UnifiedDocumentItemDto {
-  const asset = assetRef?.assetId && typeof assetRef.assetId === "object" ? assetRef.assetId : null;
+  const resolvedAssetRef =
+    assetRef !== undefined
+      ? assetRef
+      : doc.assetReferenceId && typeof doc.assetReferenceId === "object"
+      ? (doc.assetReferenceId as unknown as IAssetReferenceDocument & { assetId?: IAsset })
+      : null;
+
+  const asset =
+    resolvedAssetRef?.assetId && typeof resolvedAssetRef.assetId === "object"
+      ? resolvedAssetRef.assetId
+      : null;
+
+  const resolvedClientInfo =
+    clientInfo !== undefined
+      ? clientInfo
+      : doc.clientId && typeof doc.clientId === "object"
+      ? (doc.clientId as unknown as Record<string, unknown>)
+      : null;
+
   const rawDocType = doc.documentType as string;
-  const docType = rawDocType as ClientDocumentType;
+  const docType = (rawDocType as ClientDocumentType) || CLIENT_DOCUMENT_TYPES.OTHER;
 
   const rawDocId = extractObjectIdString(doc._id);
-  const rawAssetRefId = extractObjectIdString(assetRef?._id || doc.assetReferenceId);
+  const rawAssetRefId = extractObjectIdString(resolvedAssetRef?._id || doc.assetReferenceId);
   const rawAssetId = extractObjectIdString(asset?._id);
+
+  const createdAtIso = safeToIsoString(doc.createdAt) || new Date().toISOString();
+  const updatedAtIso = safeToIsoString(doc.updatedAt) || createdAtIso;
 
   return {
     id: rawDocId,
@@ -145,10 +202,10 @@ export function formatClientDocumentItem(
     documentTypeLabel: CLIENT_DOCUMENT_TYPE_LABELS[docType] || rawDocType || "Document",
     title: (doc.title as string) || "Untitled Document",
     documentDate: safeToIsoString(doc.documentDate),
-    createdAt: safeToIsoString(doc.createdAt) || "",
-    updatedAt: safeToIsoString(doc.updatedAt) || "",
+    createdAt: createdAtIso,
+    updatedAt: updatedAtIso,
     originalFileName:
-      assetRef?.originalFileName ||
+      resolvedAssetRef?.originalFileName ||
       asset?.originalFilename ||
       (doc.title as string) ||
       "document",
@@ -161,18 +218,18 @@ export function formatClientDocumentItem(
     height: typeof asset?.height === "number" ? asset.height : null,
     pages: typeof asset?.pages === "number" ? asset.pages : null,
     // Client-specific fields
-    clientId: clientInfo?._id
-      ? extractObjectIdString(clientInfo._id)
+    clientId: resolvedClientInfo?._id
+      ? extractObjectIdString(resolvedClientInfo._id)
       : doc.clientId
       ? extractObjectIdString(doc.clientId)
       : null,
-    clientDetails: clientInfo
+    clientDetails: resolvedClientInfo
       ? {
-          id: extractObjectIdString(clientInfo._id),
-          name: (clientInfo.name as string) || "Unnamed Client",
-          clientNumber: (clientInfo.clientNumber as string) || "",
-          organizationName: (clientInfo.organizationName as string) || null,
-          phone: (clientInfo.phone as string) || null,
+          id: extractObjectIdString(resolvedClientInfo._id),
+          name: (resolvedClientInfo.name as string) || "Unnamed Client",
+          clientNumber: (resolvedClientInfo.clientNumber as string) || "",
+          organizationName: (resolvedClientInfo.organizationName as string) || null,
+          phone: (resolvedClientInfo.phone as string) || null,
         }
       : null,
     expiryDate: safeToIsoString(doc.expiryDate),

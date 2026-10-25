@@ -12,6 +12,8 @@ import { sanitizeSearchParam, buildSearchRegex } from "@/lib/helpers/search.help
 import { Case } from "@/db/models/Case.model";
 import { Hearing } from "@/db/models/Hearing.model";
 import { Court } from "@/db/models/Court.model";
+import { AssetReference } from "@/db/models/AssetReference.model";
+import { ASSET_OWNER_TYPES } from "@/const/asset-reference.const";
 import {
   HEARING_DEFAULT_PAGE_LIMIT,
   HEARING_PAGE_LIMITS,
@@ -53,12 +55,15 @@ export const GET = withErrorHandler(
     }
 
     const caseObjectId = new mongoose.Types.ObjectId(id);
-    const parentCase = await Case.findOne(
-      { _id: caseObjectId, deletedAt: null },
-      { _id: 1, internalReference: 1, caseNumber: 1, title: 1, caseType: 1, caseStatus: 1, priority: 1, filingDate: 1, nextHearingDate: 1, courtId: 1, clientId: 1 }
-    )
+    const parentCase = await Case.findOne({
+      _id: caseObjectId,
+      deletedAt: null,
+    })
+      .select(
+        "_id internalReference caseNumber title caseType caseStatus priority filingDate nextHearingDate courtId clientId"
+      )
       .populate("clientId", "name clientNumber organizationName clientType phone email")
-      .populate("courtId", "name courtType district roomOrHall presidingJudgeTitle")
+      .populate("courtId", "name courtType district roomOrHall address presidingJudgeTitle")
       .lean();
 
     if (!parentCase) {
@@ -242,12 +247,29 @@ export const GET = withErrorHandler(
         .sort(sortOption)
         .skip(skip)
         .limit(limit)
-        .populate("courtId", "name courtType district roomOrHall presidingJudgeTitle")
+        .select(
+          "_id caseId courtId hearingDate startTime hearingType purpose outcome nextDate status adjournmentReason notes createdAt updatedAt"
+        )
+        .populate("courtId", "name courtType district roomOrHall address presidingJudgeTitle")
         .lean(),
     ]);
 
     const rawStats = statsAggResult[0];
     const total = rawStats?.total ?? 0;
+
+    // Check attached document counts to accurately determine deletability
+    const hearingIds: mongoose.Types.ObjectId[] = hearings.map(
+      (h) => h._id as mongoose.Types.ObjectId
+    );
+    const attachedOwnerIds =
+      hearingIds.length > 0
+        ? await AssetReference.distinct("ownerId", {
+            ownerType: ASSET_OWNER_TYPES.HEARING,
+            ownerId: { $in: hearingIds },
+            deletedAt: null,
+          })
+        : [];
+    const hearingsWithDocsSet = new Set(attachedOwnerIds.map(String));
 
     const stats: HearingStatsDto = {
       total,
@@ -262,12 +284,16 @@ export const GET = withErrorHandler(
     };
 
     const items: HearingListItemDto[] = hearings.map((h) => {
-      // Attach the known parentCase to the hearing doc for consistent formatting
+      // Attach the known parentCase and accurate deletability to the hearing doc for consistent formatting
       const docWithCase = {
         ...h,
         caseId: parentCase,
       };
-      return formatHearingListItem(docWithCase);
+      return formatHearingListItem(
+        docWithCase,
+        undefined,
+        !hearingsWithDocsSet.has(String(h._id))
+      );
     });
 
     const response: HearingPaginationResponse = {
@@ -299,10 +325,12 @@ export const POST = withErrorHandler(
     }
 
     const caseObjectId = new mongoose.Types.ObjectId(id);
-    const parentCase = await Case.findOne(
-      { _id: caseObjectId, deletedAt: null },
-      { _id: 1, courtId: 1, clientId: 1, title: 1 }
-    );
+    const parentCase = await Case.findOne({
+      _id: caseObjectId,
+      deletedAt: null,
+    })
+      .select("_id courtId clientId title")
+      .lean();
 
     if (!parentCase) {
       throw ApiError.notFound("Case not found or has been archived.");
@@ -352,7 +380,7 @@ export const POST = withErrorHandler(
       // Synchronize Case nextHearingDate inside transaction session
       await syncCaseNextHearingDate(caseObjectId, dbSession);
 
-      // Record audit log for hearing creation
+      // Record audit log for hearing creation with clean sanitized payload
       await recordAuditLog({
         req,
         userId,
@@ -360,7 +388,19 @@ export const POST = withErrorHandler(
         entityType: AUDIT_ENTITY_TYPES.HEARING,
         entityId: hearingDoc._id,
         oldValues: null,
-        newValues: hearingDoc.toObject(),
+        newValues: {
+          caseId: caseObjectId,
+          courtId: courtObjectId,
+          hearingDate: hearingDoc.hearingDate,
+          startTime: validated.startTime?.trim() || null,
+          hearingType: validated.hearingType?.trim() || null,
+          purpose: validated.purpose?.trim() || null,
+          outcome: validated.outcome?.trim() || null,
+          nextDate: hearingDoc.nextDate,
+          status: validated.status || HEARING_STATUSES.SCHEDULED,
+          adjournmentReason: validated.adjournmentReason?.trim() || null,
+          notes: validated.notes?.trim() || null,
+        },
         description: `Scheduled hearing for case "${parentCase.title}" on ${hearingDoc.hearingDate.toISOString()}`,
         session: dbSession,
       });
@@ -369,27 +409,48 @@ export const POST = withErrorHandler(
     });
 
     const populated = await Hearing.findById(createdHearing._id)
+      .select(
+        "_id caseId courtId hearingDate startTime hearingType purpose outcome nextDate status adjournmentReason notes createdAt updatedAt"
+      )
       .populate({
         path: "caseId",
+        select:
+          "_id internalReference caseNumber title caseType caseStatus priority courtId clientId filingDate nextHearingDate",
         populate: [
-          { path: "clientId", select: "name clientNumber organizationName clientType phone email" },
-          { path: "courtId", select: "name courtType district roomOrHall presidingJudgeTitle" },
+          {
+            path: "clientId",
+            select: "_id name clientNumber organizationName clientType phone email",
+          },
+          {
+            path: "courtId",
+            select: "_id name courtType district roomOrHall address presidingJudgeTitle",
+          },
         ],
       })
-      .populate("courtId", "name courtType district roomOrHall presidingJudgeTitle")
+      .populate({
+        path: "courtId",
+        select: "_id name courtType district roomOrHall address presidingJudgeTitle",
+      })
       .lean();
 
     const itemDto = formatHearingListItem(
-      populated! as unknown as Record<string, unknown>
+      populated! as unknown as Record<string, unknown>,
+      undefined,
+      true
     );
     const detailDto: HearingDetailDto = {
       ...itemDto,
       documentsCount: 0,
+      isDeletable: true,
     };
 
     const response: HearingActionResponse = {
       success: true,
-      message: `Hearing on ${new Date(createdHearing.hearingDate).toLocaleDateString()} added successfully.`,
+      message: `Hearing scheduled successfully for ${new Date(createdHearing.hearingDate).toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })}.`,
       data: detailDto,
     };
 

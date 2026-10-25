@@ -190,3 +190,15 @@ export const passwordUpdateSchema = z
     message: "New passwords do not match",
     path: ["confirmPassword"],
   });
+
+/**
+ * Zod validation schema for requesting OTP to change account password
+ */
+export const passwordChangeRequestOtpSchema = z.object({
+  currentPassword: z.string().min(1, "Current password is required"),
+});
+
+export type PasswordChangeRequestOtpDto = z.infer<
+  typeof passwordChangeRequestOtpSchema
+>;
+
