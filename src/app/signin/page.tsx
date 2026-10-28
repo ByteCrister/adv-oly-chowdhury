@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import SignInCard from "@/components/singin/SignInCard";
+import SignInCard from "@/components/signin/SignInCard";
 
 export const metadata: Metadata = {
   title: "Advocate Portal Sign In | Advocate Aminul Islam Chowdhury Oly",

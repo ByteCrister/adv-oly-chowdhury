@@ -1,4 +1,4 @@
-import crypto from "crypto";
+
 import bcrypt from "bcryptjs";
 import mongoose from "mongoose";
 import type { NextRequest } from "next/server";
@@ -55,7 +55,8 @@ export interface ConfirmResetParams {
 
 /**
  * Initiates an OTP-based password reset request.
- * Enforces strict account-enumeration prevention with identical timing behavior.
+ * Rejects immediately if no active chamber account matches the supplied email.
+ * This is a single-user system — account enumeration prevention is not applicable.
  */
 export async function requestPasswordReset({
   email,
@@ -74,25 +75,16 @@ export async function requestPasswordReset({
     isActive: true,
   }).lean();
 
-  const genericSuccessMessage =
-    "If an active chamber account matches this email address, a 6-digit verification code has been dispatched. Please check your inbox.";
+  const successMessage =
+    "A 6-digit verification code has been dispatched to your registered chamber email. Please check your inbox.";
 
-  // If user does not exist or is inactive, simulate cryptographic operations
-  // to maintain timing parity and prevent account enumeration attacks.
+  // Single-user system: reject unknown or inactive accounts immediately with a clear error.
+  // Account enumeration prevention is not applicable here — there is only one valid account.
   if (!user) {
-    const dummyOtp = generateOtp();
-    const dummySalt = generateSalt();
-    hashOtp(dummyOtp, dummySalt);
-    encryptPayload(dummyOtp);
-
-    // Return a synthetic request ID so the frontend can display the OTP input screen
-    // without leaking that the user doesn't exist
-    const syntheticId = `req_${crypto.randomBytes(16).toString("hex")}`;
-    return {
-      success: true,
-      message: genericSuccessMessage,
-      requestId: syntheticId,
-    };
+    throw new ApiError(
+      "No active chamber account was found for that email address. Please verify the email and try again.",
+      404
+    );
   }
 
   // Supersede previous pending or active reset requests for this user
@@ -153,7 +145,7 @@ export async function requestPasswordReset({
 
   return {
     success: true,
-    message: genericSuccessMessage,
+    message: successMessage,
     requestId: resetDoc._id.toString(),
   };
 }
@@ -172,13 +164,6 @@ export async function verifyPasswordResetOtp({
   requestId: string;
 }> {
   await ConnectDB();
-
-  // Synthetic ID check (for non-existent accounts)
-  if (requestId.startsWith("req_")) {
-    // Artificial small delay to simulate DB and crypto operations
-    await new Promise((r) => setTimeout(r, 150));
-    throw ApiError.badRequest("Invalid verification code or code has expired.");
-  }
 
   if (!mongoose.Types.ObjectId.isValid(requestId)) {
     throw ApiError.badRequest("Invalid verification code or code has expired.");
@@ -303,12 +288,6 @@ export async function confirmPasswordReset({
   message: string;
 }> {
   await ConnectDB();
-
-  if (requestId.startsWith("req_")) {
-    throw ApiError.badRequest(
-      "Invalid or expired password reset authorization."
-    );
-  }
 
   if (!mongoose.Types.ObjectId.isValid(requestId)) {
     throw ApiError.badRequest(
